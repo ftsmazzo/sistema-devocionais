@@ -204,9 +204,7 @@ class DevocionalService:
         
         payload = {
             "number": self._format_phone(phone),
-            "text": {
-                "text": personalized_message
-            }
+            "text": personalized_message
         }
         
         return payload
