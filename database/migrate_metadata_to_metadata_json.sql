@@ -84,8 +84,21 @@ WHERE d.date = CURRENT_DATE
 ORDER BY d.created_at DESC
 LIMIT 1;
 
--- Recriar view devocional_stats (se necessário)
--- Esta view não usa metadata diretamente, mas pode ter dependências
+-- Recriar view devocional_stats
+CREATE OR REPLACE VIEW devocional_stats AS
+SELECT 
+    COUNT(DISTINCT d.id) as total_devocionais,
+    COUNT(DISTINCT CASE WHEN d.sent THEN d.id END) as devocionais_enviados,
+    COUNT(DISTINCT c.id) as total_contatos,
+    COUNT(DISTINCT CASE WHEN c.active THEN c.id END) as contatos_ativos,
+    COUNT(DISTINCT e.id) as total_envios,
+    COUNT(DISTINCT CASE WHEN e.status = 'sent' THEN e.id END) as envios_sucesso,
+    COUNT(DISTINCT CASE WHEN e.status = 'failed' THEN e.id END) as envios_falha,
+    SUM(e.retry_count) as total_tentativas,
+    AVG(CASE WHEN e.status = 'sent' THEN 1.0 ELSE 0.0 END) * 100 as taxa_sucesso
+FROM devocionais d
+LEFT JOIN devocional_envios e ON e.devocional_id = d.id
+CROSS JOIN devocional_contatos c;
 
 -- =====================================================
 -- PASSO 5: Atualizar comentários
