@@ -1,7 +1,7 @@
 """
 Endpoints para envio de devocionais
 """
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Header
 from sqlalchemy.orm import Session
 from typing import List, Dict, Optional
 from pydantic import BaseModel, Field
@@ -419,7 +419,7 @@ class WebhookDevocional(BaseModel):
 async def receive_devocional_webhook(
     data: WebhookDevocional,
     db: Session = Depends(get_db),
-    x_webhook_secret: Optional[str] = None
+    x_webhook_secret: Optional[str] = Header(None, alias="X-Webhook-Secret")
 ):
     """
     Webhook para receber devocionais da automação (n8n, etc)
