@@ -127,7 +127,7 @@ class DevocionalIntegration:
                     existing.title = title
                 existing.source = source
                 if metadata:
-                    existing.metadata = json.dumps(metadata)
+                    existing.metadata_json = json.dumps(metadata)
                 db.commit()
                 db.refresh(existing)
                 logger.info(f"Devocional atualizado (ID: {existing.id})")
@@ -139,7 +139,7 @@ class DevocionalIntegration:
                     title=title,
                     date=datetime.now(),
                     source=source,
-                    metadata=json.dumps(metadata) if metadata else None
+                    metadata_json=json.dumps(metadata) if metadata else None
                 )
                 db.add(devocional)
                 db.commit()

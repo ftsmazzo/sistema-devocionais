@@ -465,7 +465,7 @@ async def receive_devocional_webhook(
             autor=data.metadata.get("autor", "Alex e Daniela Mantovani") if data.metadata else "Alex e Daniela Mantovani",
             tema=data.metadata.get("tema") if data.metadata else None,
             palavras_chave=json.dumps(data.metadata.get("palavras_chave", [])) if data.metadata and data.metadata.get("palavras_chave") else None,
-            metadata=json.dumps(data.metadata) if data.metadata else None
+            metadata_json=json.dumps(data.metadata) if data.metadata else None
         )
         
         # Verificar se já existe devocional para esta data
@@ -485,7 +485,7 @@ async def receive_devocional_webhook(
             existing.autor = db_devocional.autor
             existing.tema = db_devocional.tema
             existing.palavras_chave = db_devocional.palavras_chave
-            existing.metadata = db_devocional.metadata
+            existing.metadata_json = db_devocional.metadata_json
             existing.source = "webhook"
             db.commit()
             db.refresh(existing)
@@ -540,7 +540,7 @@ async def get_today_devocional(db: Session = Depends(get_db)):
                     "date": db_devocional.date.isoformat() if db_devocional.date else None,
                     "source": db_devocional.source,
                     "sent": db_devocional.sent,
-                    "metadata": json.loads(db_devocional.metadata) if db_devocional.metadata else None
+                    "metadata": json.loads(db_devocional.metadata_json) if db_devocional.metadata_json else None
                 }
         
         return {"message": "Nenhum devocional encontrado para hoje"}
@@ -608,7 +608,7 @@ async def list_devocionais(
                 "sent": d.sent,
                 "sent_at": d.sent_at.isoformat() if d.sent_at else None,
                 "created_at": d.created_at.isoformat() if d.created_at else None,
-                "metadata": json.loads(d.metadata) if d.metadata else None
+                "metadata": json.loads(d.metadata_json) if d.metadata_json else None
             }
             for d in devocionais
         ]

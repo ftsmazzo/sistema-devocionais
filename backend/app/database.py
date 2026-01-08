@@ -126,7 +126,7 @@ class Devocional(Base):
     total_sent = Column(Integer, default=0)  # Quantas vezes foi enviado
     
     # Metadados adicionais (JSON)
-    metadata = Column(Text)  # JSON com metadados extras
+    metadata_json = Column(Text)  # JSON com metadados extras (renomeado de 'metadata' pois é palavra reservada)
     
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow, index=True)

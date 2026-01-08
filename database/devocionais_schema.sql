@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS devocionais (
     total_sent INTEGER DEFAULT 0,          -- Quantas vezes foi enviado
     
     -- Metadados adicionais (JSON)
-    metadata JSONB,                        -- Metadados extras em JSON
+    metadata_json TEXT,                        -- Metadados extras em JSON
     
     -- Timestamps
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
