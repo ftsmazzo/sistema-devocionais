@@ -595,6 +595,39 @@ async def fetch_devocional_from_api():
         raise HTTPException(status_code=500, detail=f"Erro: {str(e)}")
 
 
+@router.get("/horario")
+async def get_current_time():
+    """
+    Retorna o horário atual em São Paulo e UTC para verificação
+    """
+    from zoneinfo import ZoneInfo
+    
+    sao_paulo_tz = ZoneInfo("America/Sao_Paulo")
+    utc_tz = ZoneInfo("UTC")
+    
+    now_sp = datetime.now(sao_paulo_tz)
+    now_utc = datetime.now(utc_tz)
+    
+    # Determinar saudação
+    hour = now_sp.hour
+    if 5 <= hour < 12:
+        greeting = "Bom dia"
+    elif 12 <= hour < 18:
+        greeting = "Boa tarde"
+    else:
+        greeting = "Boa noite"
+    
+    return {
+        "horario_sao_paulo": now_sp.strftime("%Y-%m-%d %H:%M:%S %Z"),
+        "horario_utc": now_utc.strftime("%Y-%m-%d %H:%M:%S %Z"),
+        "saudacao_atual": greeting,
+        "hora_sao_paulo": now_sp.hour,
+        "hora_utc": now_utc.hour,
+        "diferenca_horas": (now_utc.hour - now_sp.hour) % 24,
+        "send_time_configurado": settings.DEVOCIONAL_SEND_TIME
+    }
+
+
 @router.get("/devocionais")
 async def list_devocionais(
     skip: int = 0,

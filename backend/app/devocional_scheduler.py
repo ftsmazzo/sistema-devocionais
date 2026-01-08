@@ -5,7 +5,7 @@ import logging
 import schedule
 import time
 import threading
-from datetime import datetime, time as dt_time
+from datetime import datetime, time as dt_time, timedelta
 from zoneinfo import ZoneInfo
 from typing import Optional
 from app.config import settings
