@@ -501,34 +501,12 @@ async def receive_devocional_webhook(
             metadata_json=json.dumps(data.metadata) if data.metadata else None
         )
         
-        # Verificar se já existe devocional para esta data
-        existing = db.query(Devocional).filter(
-            Devocional.date >= dt.combine(devocional_date.date(), dt.min.time()),
-            Devocional.date < dt.combine(devocional_date.date(), dt.max.time())
-        ).first()
-        
-        if existing:
-            # Atualizar existente
-            existing.content = db_devocional.content
-            existing.title = db_devocional.title
-            existing.versiculo_principal_texto = db_devocional.versiculo_principal_texto
-            existing.versiculo_principal_referencia = db_devocional.versiculo_principal_referencia
-            existing.versiculo_apoio_texto = db_devocional.versiculo_apoio_texto
-            existing.versiculo_apoio_referencia = db_devocional.versiculo_apoio_referencia
-            existing.autor = db_devocional.autor
-            existing.tema = db_devocional.tema
-            existing.palavras_chave = db_devocional.palavras_chave
-            existing.metadata_json = db_devocional.metadata_json
-            existing.source = "webhook"
-            db.commit()
-            db.refresh(existing)
-            devocional = existing
-        else:
-            # Criar novo
-            db.add(db_devocional)
-            db.commit()
-            db.refresh(db_devocional)
-            devocional = db_devocional
+        # Sempre criar um novo devocional (permite múltiplos devocionais por dia)
+        # Se quiser atualizar um existente, use o endpoint específico de atualização
+        db.add(db_devocional)
+        db.commit()
+        db.refresh(db_devocional)
+        devocional = db_devocional
         
         if devocional:
             logger.info(f"Devocional recebido via webhook e salvo (ID: {devocional.id})")
