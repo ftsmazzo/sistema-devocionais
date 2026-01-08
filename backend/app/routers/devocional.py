@@ -103,10 +103,41 @@ async def send_devocional(
                 for c in db_contacts
             ]
         
+        # Obter mensagem do devocional se devocional_id fornecido
+        message = request.message
+        if request.devocional_id and not message:
+            # Buscar devocional do banco
+            devocional = db.query(Devocional).filter(
+                Devocional.id == request.devocional_id
+            ).first()
+            
+            if not devocional:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Devocional com ID {request.devocional_id} não encontrado"
+                )
+            
+            message = devocional.content
+        
+        if not message:
+            raise HTTPException(
+                status_code=400,
+                detail="É necessário fornecer 'message' ou 'devocional_id'"
+            )
+        
+        # Filtrar contatos se phone específico fornecido
+        if request.phone:
+            contacts = [c for c in contacts if c.get("phone") == request.phone]
+            if not contacts:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Contato com telefone {request.phone} não encontrado"
+                )
+        
         # Enviar mensagens
         results = devocional_service.send_bulk_devocionais(
             contacts=contacts,
-            message=request.message,
+            message=message,
             delay=request.delay
         )
         
@@ -120,7 +151,7 @@ async def send_devocional(
             envio = DevocionalEnvio(
                 recipient_phone=contact.get('phone', ''),
                 recipient_name=contact.get('name'),
-                message_text=request.message,
+                message_text=message,
                 sent_at=result.timestamp,
                 status=result.status.value,
                 message_id=result.message_id,
