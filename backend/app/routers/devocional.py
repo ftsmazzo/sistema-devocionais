@@ -42,7 +42,9 @@ class ContatoResponse(BaseModel):
 
 
 class EnvioRequest(BaseModel):
-    message: str = Field(..., description="Texto do devocional")
+    message: Optional[str] = Field(None, description="Texto do devocional (opcional se devocional_id for fornecido)")
+    devocional_id: Optional[int] = Field(None, description="ID do devocional salvo no banco (opcional se message for fornecido)")
+    phone: Optional[str] = Field(None, description="Telefone específico para enviar (opcional)")
     contacts: Optional[List[Dict[str, str]]] = Field(
         None,
         description="Lista de contatos específicos. Se não fornecido, usa lista padrão"
@@ -51,6 +53,12 @@ class EnvioRequest(BaseModel):
         None,
         description="Delay entre mensagens em segundos (usa padrão se não fornecido)"
     )
+    
+    def model_validate(cls, values):
+        """Valida que pelo menos message ou devocional_id seja fornecido"""
+        if not values.get('message') and not values.get('devocional_id'):
+            raise ValueError("É necessário fornecer 'message' ou 'devocional_id'")
+        return values
 
 
 class EnvioResponse(BaseModel):
