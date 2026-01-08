@@ -464,7 +464,7 @@ async def receive_devocional_webhook(
             versiculo_apoio_referencia=data.versiculo_apoio.referencia if data.versiculo_apoio else None,
             autor=data.metadata.get("autor", "Alex e Daniela Mantovani") if data.metadata else "Alex e Daniela Mantovani",
             tema=data.metadata.get("tema") if data.metadata else None,
-            palavras_chave=json.dumps(data.metadata.get("palavras_chave", [])) if data.metadata and data.metadata.get("palavras_chave") else None,
+            palavras_chave=", ".join(data.metadata.get("palavras_chave", [])) if data.metadata and data.metadata.get("palavras_chave") else None,
             metadata_json=json.dumps(data.metadata) if data.metadata else None
         )
         
