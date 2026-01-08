@@ -53,12 +53,6 @@ class EnvioRequest(BaseModel):
         None,
         description="Delay entre mensagens em segundos (usa padrão se não fornecido)"
     )
-    
-    def model_validate(cls, values):
-        """Valida que pelo menos message ou devocional_id seja fornecido"""
-        if not values.get('message') and not values.get('devocional_id'):
-            raise ValueError("É necessário fornecer 'message' ou 'devocional_id'")
-        return values
 
 
 class EnvioResponse(BaseModel):
