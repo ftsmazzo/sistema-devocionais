@@ -6,6 +6,7 @@ import schedule
 import time
 import threading
 from datetime import datetime, time as dt_time
+from zoneinfo import ZoneInfo
 from typing import Optional
 from app.config import settings
 from app.devocional_service import DevocionalService
@@ -102,12 +103,13 @@ def send_daily_devocional():
 def run_scheduler():
     """
     Executa o scheduler em thread separada
+    Usa horário de São Paulo (Brasil) para agendamento
     """
     global scheduler_running
     
     scheduler_running = True
     
-    # Parse do horário de envio
+    # Parse do horário de envio (horário de São Paulo)
     try:
         send_time_str = settings.DEVOCIONAL_SEND_TIME
         hour, minute = map(int, send_time_str.split(':'))
@@ -116,10 +118,26 @@ def run_scheduler():
         logger.error(f"Erro ao parsear horário de envio: {e}. Usando 06:00 como padrão.")
         send_time = dt_time(6, 0)
     
-    # Agendar envio diário
-    schedule.every().day.at(send_time.strftime("%H:%M")).do(send_daily_devocional)
+    # Agendar envio diário (o schedule usa horário local do servidor)
+    # Mas vamos converter para UTC para agendar corretamente
+    sao_paulo_tz = ZoneInfo("America/Sao_Paulo")
     
-    logger.info(f"Scheduler de devocionais iniciado. Envio agendado para {send_time.strftime('%H:%M')}")
+    # Criar datetime de hoje em São Paulo com o horário desejado
+    now_sp = datetime.now(sao_paulo_tz)
+    target_time_sp = now_sp.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    
+    # Se o horário já passou hoje, agendar para amanhã
+    if target_time_sp <= now_sp:
+        target_time_sp += timedelta(days=1)
+    
+    # Converter para UTC (horário do servidor)
+    target_time_utc = target_time_sp.astimezone(ZoneInfo("UTC"))
+    
+    # Agendar usando horário UTC
+    schedule.every().day.at(target_time_utc.strftime("%H:%M")).do(send_daily_devocional)
+    
+    logger.info(f"Scheduler de devocionais iniciado. Envio agendado para {send_time.strftime('%H:%M')} (horário de São Paulo)")
+    logger.info(f"Horário UTC equivalente: {target_time_utc.strftime('%H:%M')}")
     
     # Loop do scheduler
     while scheduler_running:

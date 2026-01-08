@@ -9,6 +9,7 @@ from typing import Dict, List, Optional, Tuple
 from datetime import datetime, timedelta
 from dataclasses import dataclass
 from enum import Enum
+from zoneinfo import ZoneInfo
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -54,12 +55,14 @@ class DevocionalService:
         self.max_messages_per_hour = settings.MAX_MESSAGES_PER_HOUR
         self.max_messages_per_day = settings.MAX_MESSAGES_PER_DAY
         
-        # Controle de envios
+        # Controle de envios (usa horário de São Paulo)
+        sao_paulo_tz = ZoneInfo("America/Sao_Paulo")
+        now_sp = datetime.now(sao_paulo_tz)
         self.messages_sent_today = 0
         self.messages_sent_this_hour = 0
         self.last_message_time = None
-        self.last_reset_hour = datetime.now().hour
-        self.last_reset_day = datetime.now().date()
+        self.last_reset_hour = now_sp.hour
+        self.last_reset_day = now_sp.date()
         
         # Retry configuration
         self.max_retries = settings.MAX_RETRIES
@@ -150,12 +153,14 @@ class DevocionalService:
     
     def _get_greeting_by_time(self) -> str:
         """
-        Retorna saudação baseada no horário do dia
+        Retorna saudação baseada no horário do dia em São Paulo (Brasil)
         
         Returns:
             Saudação apropriada (Bom dia, Boa tarde, Boa noite)
         """
-        now = datetime.now()
+        # Usar timezone de São Paulo
+        sao_paulo_tz = ZoneInfo("America/Sao_Paulo")
+        now = datetime.now(sao_paulo_tz)
         hour = now.hour
         
         if 5 <= hour < 12:
@@ -286,10 +291,11 @@ class DevocionalService:
                     # Sucesso
                     message_id = response_data.get('key', {}).get('id') if 'key' in response_data else None
                     
-                    # Atualizar contadores
+                    # Atualizar contadores (usa horário de São Paulo)
+                    sao_paulo_tz = ZoneInfo("America/Sao_Paulo")
                     self.messages_sent_today += 1
                     self.messages_sent_this_hour += 1
-                    self.last_message_time = datetime.now()
+                    self.last_message_time = datetime.now(sao_paulo_tz)
                     self.stats['total_sent'] += 1
                     
                     logger.info(f"Mensagem enviada com sucesso para {phone} (ID: {message_id})")
