@@ -34,10 +34,9 @@ CREATE TABLE IF NOT EXISTS devocionais (
     
     -- Timestamps
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     
-    -- Índices para performance
-    CONSTRAINT devocionais_date_idx UNIQUE (date)  -- Um devocional por dia
+    -- Nota: Removida constraint UNIQUE(date) para permitir múltiplos devocionais por dia
 );
 
 -- Índices adicionais
