@@ -55,10 +55,16 @@ async def get_historico_context(
                 versiculos.append(d.versiculo_apoio_referencia)
             if d.palavras_chave:
                 try:
-                    palavras = json.loads(d.palavras_chave) if isinstance(d.palavras_chave, str) else d.palavras_chave
-                    if isinstance(palavras, list):
-                        palavras_chave.extend(palavras)
-                except:
+                    # Se for array PostgreSQL, já vem como lista
+                    if isinstance(d.palavras_chave, list):
+                        palavras_chave.extend(d.palavras_chave)
+                    # Se for string JSON, fazer parse
+                    elif isinstance(d.palavras_chave, str):
+                        palavras = json.loads(d.palavras_chave)
+                        if isinstance(palavras, list):
+                            palavras_chave.extend(palavras)
+                except Exception as e:
+                    logger.debug(f"Erro ao processar palavras_chave: {e}")
                     pass
             if d.title:
                 titulos.append(d.title)
