@@ -94,17 +94,72 @@ class VCardService:
                 "apikey": instance.api_key
             }
             
-            # URL da API
-            url = f"{instance.api_url}/message/sendMedia/{instance.name}"
+            # Tentar diferentes endpoints para vCard (Evolution API pode variar)
+            endpoints_to_try = [
+                (f"{instance.api_url}/message/sendMedia/{instance.name}", {
+                    "number": recipient_clean,
+                    "mediatype": "vcard",
+                    "media": vcard_content
+                }),
+                (f"{instance.api_url}/message/sendVCard/{instance.name}", {
+                    "number": recipient_clean,
+                    "vcard": vcard_content
+                }),
+                (f"{instance.api_url}/message/sendContact/{instance.name}", {
+                    "number": recipient_clean,
+                    "contacts": [{
+                        "displayName": contact_name,
+                        "contacts": [{
+                            "displayName": contact_name,
+                            "vcard": vcard_content
+                        }]
+                    }]
+                }),
+                # Formato alternativo para sendMedia
+                (f"{instance.api_url}/message/sendMedia/{instance.name}", {
+                    "number": recipient_clean,
+                    "media": vcard_content,
+                    "mimetype": "text/vcard"
+                }),
+            ]
             
-            # Payload para vCard
-            payload = {
-                "number": recipient_clean,
-                "mediatype": "vcard",
-                "media": vcard_content
+            last_error = None
+            for url, payload in endpoints_to_try:
+                try:
+                    logger.info(f"Tentando enviar vCard via {url}")
+                    logger.debug(f"Payload: {payload}")
+                    response = requests.post(url, json=payload, headers=headers, timeout=30)
+                    
+                    if response.status_code in [200, 201]:
+                        response_data = response.json()
+                        logger.info(f"✅ vCard enviado com sucesso para {recipient_phone} via {url}")
+                        return {
+                            "success": True,
+                            "message_id": response_data.get('key', {}).get('id') if 'key' in response_data else None,
+                            "vcard_content": vcard_content,
+                            "endpoint_used": url
+                        }
+                    elif response.status_code == 404:
+                        # Endpoint não existe, tentar próximo
+                        logger.debug(f"Endpoint {url} retornou 404: {response.text}")
+                        last_error = f"HTTP {response.status_code}: {response.text}"
+                        continue
+                    else:
+                        last_error = f"HTTP {response.status_code}: {response.text}"
+                        logger.debug(f"Endpoint {url} retornou {response.status_code}: {response.text}")
+                        continue
+                except requests.exceptions.RequestException as e:
+                    last_error = str(e)
+                    logger.debug(f"Erro ao tentar {url}: {e}")
+                    continue
+            
+            # Se nenhum funcionou, retornar erro
+            error_msg = f"Nenhum endpoint funcionou. Último erro: {last_error}"
+            logger.error(f"❌ Erro ao enviar vCard: {error_msg}")
+            return {
+                "success": False,
+                "error": error_msg
             }
-            
-            response = requests.post(url, json=payload, headers=headers, timeout=30)
             
             if response.status_code in [200, 201]:
                 response_data = response.json()

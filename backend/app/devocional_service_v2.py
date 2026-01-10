@@ -451,14 +451,10 @@ class DevocionalServiceV2:
                 results.append(result)
                 break
             
-            # Enviar mensagem
-            result = self.send_devocional(phone, message, name, retry=True)
-            results.append(result)
-            
-            # Se enviou com sucesso e é novo contato, enviar vCard
-            if result.success and self.send_vcard_to_new:
+            # Verificar se é contato novo ANTES de enviar (para enviar vCard se necessário)
+            is_new_contact = False
+            if self.send_vcard_to_new:
                 try:
-                    # Verificar se é contato novo (primeiro envio)
                     from app.database import SessionLocal, DevocionalContato
                     db = SessionLocal()
                     try:
@@ -466,38 +462,52 @@ class DevocionalServiceV2:
                             DevocionalContato.phone == phone
                         ).first()
                         
-                        # Se é primeiro envio (total_sent == 0 ou None), enviar vCard
+                        # Se é primeiro envio (total_sent == 0 ou None), marcar como novo
                         if db_contact and (not db_contact.total_sent or db_contact.total_sent == 0):
-                            logger.info(f"Enviando vCard para novo contato: {name or phone}")
-                            instance = self.instance_manager.get_instance_by_name(result.instance_name)
-                            if instance:
-                                # Tentar obter número da instância
-                                contact_phone = instance.phone_number
-                                if not contact_phone:
-                                    # Tentar obter via health check
-                                    logger.info(f"Obtendo número da instância {instance.name}...")
-                                    self.instance_manager.check_instance_health(instance)
-                                    contact_phone = instance.phone_number
-                                
-                                # Se ainda não tiver, pular (será enviado na próxima vez)
-                                if not contact_phone:
-                                    logger.warning(f"Número da instância {instance.name} não disponível ainda. vCard será enviado depois.")
-                                else:
-                                    vcard_result = VCardService.send_vcard(
-                                        instance=instance,
-                                        recipient_phone=phone,
-                                        contact_name=instance.display_name,
-                                        contact_phone=contact_phone,
-                                        organization="Devocional Diário"
-                                    )
-                                    if vcard_result.get("success"):
-                                        logger.info(f"vCard enviado com sucesso para {phone}")
-                                    else:
-                                        logger.warning(f"Falha ao enviar vCard: {vcard_result.get('error')}")
+                            is_new_contact = True
+                            logger.info(f"Contato identificado como novo: {name or phone} (total_sent: {db_contact.total_sent})")
                     finally:
                         db.close()
                 except Exception as e:
-                    logger.warning(f"Erro ao enviar vCard (não crítico): {e}")
+                    logger.warning(f"Erro ao verificar se é novo contato: {e}")
+            
+            # Enviar mensagem
+            result = self.send_devocional(phone, message, name, retry=True)
+            results.append(result)
+            
+            # Se enviou com sucesso e é novo contato, enviar vCard
+            if result.success and is_new_contact and self.send_vcard_to_new:
+                try:
+                    logger.info(f"Enviando vCard para novo contato: {name or phone}")
+                    instance = self.instance_manager.get_instance_by_name(result.instance_name)
+                    if instance:
+                        # Tentar obter número da instância
+                        contact_phone = instance.phone_number
+                        if not contact_phone:
+                            # Tentar obter via health check
+                            logger.info(f"Obtendo número da instância {instance.name}...")
+                            self.instance_manager.check_instance_health(instance)
+                            contact_phone = instance.phone_number
+                        
+                        # Se ainda não tiver, usar o número formatado do destinatário como fallback
+                        if not contact_phone:
+                            logger.warning(f"Número da instância {instance.name} não disponível. Usando número formatado como fallback.")
+                            contact_phone = self._format_phone(phone)
+                        
+                        # Enviar vCard
+                        vcard_result = VCardService.send_vcard(
+                            instance=instance,
+                            recipient_phone=phone,
+                            contact_name=instance.display_name,
+                            contact_phone=contact_phone,
+                            organization="Devocional Diário"
+                        )
+                        if vcard_result.get("success"):
+                            logger.info(f"✅ vCard enviado com sucesso para {phone} (ID: {vcard_result.get('message_id')})")
+                        else:
+                            logger.error(f"❌ Falha ao enviar vCard para {phone}: {vcard_result.get('error')}")
+                except Exception as e:
+                    logger.error(f"Erro ao enviar vCard para {phone}: {e}", exc_info=True)
             
             # Aguardar antes da próxima mensagem
             if i < len(contacts) and delay_time > 0:
