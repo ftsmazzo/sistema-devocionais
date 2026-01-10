@@ -84,8 +84,8 @@ class Settings(BaseSettings):
     # Opções: "round_robin", "least_used", "priority", "random"
     EVOLUTION_INSTANCE_STRATEGY: str = os.getenv("EVOLUTION_INSTANCE_STRATEGY", "round_robin")
     
-    # Enviar vCard automaticamente para novos contatos
-    SEND_VCARD_TO_NEW_CONTACTS: bool = os.getenv("SEND_VCARD_TO_NEW_CONTACTS", "false").lower() == "true"
+    # Enviar vCard automaticamente para novos contatos (ATIVAR PARA SALVAR CONTATO AUTOMATICAMENTE)
+    SEND_VCARD_TO_NEW_CONTACTS: bool = os.getenv("SEND_VCARD_TO_NEW_CONTACTS", "true").lower() == "true"
     
     # Enviar mensagem pedindo para salvar contato
     SEND_CONTACT_REQUEST: bool = os.getenv("SEND_CONTACT_REQUEST", "false").lower() == "true"

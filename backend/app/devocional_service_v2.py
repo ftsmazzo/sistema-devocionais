@@ -228,6 +228,9 @@ class DevocionalServiceV2:
                 instance_name=instance.name
             )
         
+        # Garantir que o perfil está configurado antes de enviar
+        self._ensure_profile_configured(instance)
+        
         # Construir payload
         payload = self._build_payload(phone, message, name)
         
@@ -523,13 +526,51 @@ class DevocionalServiceV2:
         """Verifica saúde de todas as instâncias"""
         self.instance_manager.check_all_instances()
     
+    def _ensure_profile_configured(self, instance: EvolutionInstance):
+        """
+        Garante que o perfil da instância está configurado.
+        Tenta configurar se ainda não foi configurado ou se a última tentativa foi há mais de 1 hora.
+        """
+        # Se já foi configurado recentemente (última hora), não tenta novamente
+        if instance.profile_configured:
+            if instance.last_profile_config_attempt:
+                time_since_last = datetime.now() - instance.last_profile_config_attempt
+                if time_since_last < timedelta(hours=1):
+                    return  # Já configurado recentemente
+        
+        # Tentar configurar o perfil
+        try:
+            success = self.instance_manager.set_instance_profile(
+                instance,
+                instance.display_name,
+                "Devocional Diário - Mensagens de fé e esperança"
+            )
+            instance.last_profile_config_attempt = datetime.now()
+            if success:
+                instance.profile_configured = True
+                logger.info(f"Perfil da instância {instance.name} configurado automaticamente antes do envio")
+            else:
+                logger.warning(f"Não foi possível configurar perfil da instância {instance.name} (tentará novamente depois)")
+        except Exception as e:
+            logger.warning(f"Erro ao configurar perfil da instância {instance.name}: {e}")
+            instance.last_profile_config_attempt = datetime.now()
+    
     def setup_instance_profiles(self):
         """Configura o perfil (nome) de todas as instâncias"""
         for instance in self.instance_manager.instances:
             if instance.enabled:
-                self.instance_manager.set_instance_profile(
-                    instance,
-                    instance.display_name,
-                    "Devocional Diário - Mensagens de fé e esperança"
-                )
+                try:
+                    success = self.instance_manager.set_instance_profile(
+                        instance,
+                        instance.display_name,
+                        "Devocional Diário - Mensagens de fé e esperança"
+                    )
+                    instance.last_profile_config_attempt = datetime.now()
+                    if success:
+                        instance.profile_configured = True
+                        logger.info(f"Perfil da instância {instance.name} configurado na inicialização")
+                    else:
+                        logger.warning(f"Perfil da instância {instance.name} não configurado na inicialização (tentará antes do primeiro envio)")
+                except Exception as e:
+                    logger.warning(f"Erro ao configurar perfil da instância {instance.name} na inicialização: {e}")
 

@@ -41,6 +41,8 @@ class EvolutionInstance:
     max_messages_per_hour: int = 20
     max_messages_per_day: int = 200
     priority: int = 1  # 1 = alta, 2 = média, 3 = baixa
+    profile_configured: bool = False  # Se o perfil já foi configurado
+    last_profile_config_attempt: Optional[datetime] = None  # Última tentativa de configurar perfil
     enabled: bool = True
 
 
@@ -365,10 +367,13 @@ class InstanceManager:
             
             if response.status_code in [200, 201]:
                 instance.display_name = name
+                instance.profile_configured = True
+                instance.last_profile_config_attempt = datetime.now()
                 logger.info(f"Perfil da instância {instance.name} atualizado para: {name}")
                 return True
             else:
-                logger.error(f"Erro ao atualizar perfil: {response.status_code} - {response.text}")
+                logger.warning(f"Erro ao atualizar perfil: {response.status_code} - {response.text}")
+                instance.profile_configured = False
                 return False
         
         except Exception as e:
