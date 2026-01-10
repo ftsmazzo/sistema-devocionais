@@ -2,7 +2,9 @@
 
 ## ⚠️ REALIDADE IMPORTANTE
 
-**O nome que aparece no WhatsApp para quem NÃO tem seu contato salvo é o nome da conta WhatsApp Business conectada à instância.**
+**O nome que aparece no WhatsApp para quem NÃO tem seu contato salvo é o nome da conta WhatsApp (Normal ou Business) conectada à instância.**
+
+**Se nem o nome "Frederico" aparece, há um problema de sincronização ou conexão da instância!**
 
 ### Como Funciona:
 
