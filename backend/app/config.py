@@ -67,10 +67,28 @@ class Settings(BaseSettings):
     MONITORING_INTERVAL_MINUTES: int = 30  # Intervalo entre verificações
     MAX_ARTICLES_PER_CHECK: int = 50
     
-    # Configurações Evolution API para Devocionais
+    # Configurações Evolution API para Devocionais (LEGADO - usar EVOLUTION_INSTANCES)
     EVOLUTION_API_URL: str = os.getenv("EVOLUTION_API_URL", "http://localhost:8080")
     EVOLUTION_API_KEY: str = os.getenv("EVOLUTION_API_KEY", "")
     EVOLUTION_INSTANCE_NAME: str = os.getenv("EVOLUTION_INSTANCE_NAME", "Devocional")
+    
+    # Configurações Multi-Instância Evolution API
+    # Formato: JSON string com lista de instâncias
+    # Exemplo: [{"name": "Devocional-1", "api_url": "http://localhost:8080", "api_key": "key1", "display_name": "Devocional Diário", "max_messages_per_hour": 20, "max_messages_per_day": 200, "priority": 1}]
+    EVOLUTION_INSTANCES: str = os.getenv("EVOLUTION_INSTANCES", "[]")
+    
+    # Nome padrão para exibição no WhatsApp
+    EVOLUTION_DISPLAY_NAME: str = os.getenv("EVOLUTION_DISPLAY_NAME", "Devocional Diário")
+    
+    # Estratégia de distribuição entre instâncias
+    # Opções: "round_robin", "least_used", "priority", "random"
+    EVOLUTION_INSTANCE_STRATEGY: str = os.getenv("EVOLUTION_INSTANCE_STRATEGY", "round_robin")
+    
+    # Enviar vCard automaticamente para novos contatos
+    SEND_VCARD_TO_NEW_CONTACTS: bool = os.getenv("SEND_VCARD_TO_NEW_CONTACTS", "false").lower() == "true"
+    
+    # Enviar mensagem pedindo para salvar contato
+    SEND_CONTACT_REQUEST: bool = os.getenv("SEND_CONTACT_REQUEST", "false").lower() == "true"
     
     # Rate Limiting para Devocionais (proteção contra bloqueio)
     DELAY_BETWEEN_MESSAGES: float = float(os.getenv("DELAY_BETWEEN_MESSAGES", "3.0"))  # segundos

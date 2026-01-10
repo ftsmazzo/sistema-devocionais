@@ -1,0 +1,44 @@
+# =====================================================
+# CONFIGURAÇÃO .env - EXEMPLO CORRETO
+# Copie este conteúdo para seu arquivo .env
+# =====================================================
+
+DATABASE_URL=postgresql://devocional:ce0e9d2271eed9b95a2b@imobmiq_postgres:5432/devocional?sslmode=disable
+
+# Configurações Evolution API (LEGADO - mantido para compatibilidade)
+EVOLUTION_API_URL=https://imobmiq-evolution-api.90qhxz.easypanel.host
+EVOLUTION_API_KEY=429683C4C977415CAAFCCE10F7D57E11
+EVOLUTION_INSTANCE_NAME=Devocional
+
+# Rate Limiting
+DELAY_BETWEEN_MESSAGES=3.0
+MAX_MESSAGES_PER_HOUR=20
+MAX_MESSAGES_PER_DAY=200
+
+# Retry Configuration
+MAX_RETRIES=3
+RETRY_DELAY=5.0
+
+# Horário de envio automático
+DEVOCIONAL_SEND_TIME=06:00
+
+# Integração com n8n
+DEVOCIONAL_WEBHOOK_SECRET=Fs142779
+DEVOCIONAL_FETCH_MODE=webhook
+
+# =====================================================
+# MULTI-INSTÂNCIA EVOLUTION API
+# =====================================================
+# ⚠️ IMPORTANTE: O JSON deve estar em UMA ÚNICA LINHA!
+# Substitua os valores pelos seus dados reais:
+# - name: Nome exato da instância no Evolution API
+# - api_key: API Key de cada instância (cada uma tem sua própria)
+# - api_url: URL do Evolution API (geralmente a mesma para todas)
+
+EVOLUTION_INSTANCES=[{"name":"Devocional-1","api_url":"https://imobmiq-evolution-api.90qhxz.easypanel.host","api_key":"SUA_API_KEY_INSTANCIA_1_AQUI","display_name":"Devocional Diário","max_messages_per_hour":20,"max_messages_per_day":200,"priority":1,"enabled":true},{"name":"Devocional-2","api_url":"https://imobmiq-evolution-api.90qhxz.easypanel.host","api_key":"SUA_API_KEY_INSTANCIA_2_AQUI","display_name":"Devocional Diário","max_messages_per_hour":20,"max_messages_per_day":200,"priority":1,"enabled":true},{"name":"Devocional-3","api_url":"https://imobmiq-evolution-api.90qhxz.easypanel.host","api_key":"SUA_API_KEY_INSTANCIA_3_AQUI","display_name":"Devocional Diário","max_messages_per_hour":20,"max_messages_per_day":200,"priority":1,"enabled":true},{"name":"Devocional-4","api_url":"https://imobmiq-evolution-api.90qhxz.easypanel.host","api_key":"SUA_API_KEY_INSTANCIA_4_AQUI","display_name":"Devocional Diário","max_messages_per_hour":20,"max_messages_per_day":200,"priority":1,"enabled":true}]
+
+EVOLUTION_DISPLAY_NAME=Devocional Diário
+EVOLUTION_INSTANCE_STRATEGY=round_robin
+SEND_VCARD_TO_NEW_CONTACTS=false
+SEND_CONTACT_REQUEST=false
+

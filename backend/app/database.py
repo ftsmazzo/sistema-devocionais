@@ -72,6 +72,9 @@ class DevocionalEnvio(Base):
     error_message = Column(Text)  # Mensagem de erro (se houver)
     retry_count = Column(Integer, default=0)  # Número de tentativas
     
+    # Instância que enviou (para multi-instância)
+    instance_name = Column(String(100))  # Nome da instância Evolution API que enviou
+    
     # Timestamps
     sent_at = Column(DateTime, default=datetime.utcnow, index=True)
     scheduled_for = Column(DateTime, index=True)  # Para envios agendados

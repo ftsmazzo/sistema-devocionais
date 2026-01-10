@@ -9,7 +9,8 @@ import uvicorn
 
 from app.database import init_db
 from app.routers import news, monitoring, notifications, devocional
-from app.routers import devocional_context, devocional_test, devocional_context
+from app.routers import devocional_context, devocional_test
+from app.routers.notifications import router as notifications_router
 # Sistema de monitoramento de notícias desabilitado (não necessário para devocionais)
 # from app.scheduler import start_scheduler, stop_scheduler
 from app.devocional_scheduler import start_scheduler as start_devocional_scheduler, stop_scheduler as stop_devocional_scheduler
@@ -53,6 +54,7 @@ app.add_middleware(
 app.include_router(news.router, prefix="/api/news", tags=["Notícias"])
 app.include_router(monitoring.router, prefix="/api/monitoring", tags=["Monitoramento"])
 app.include_router(notifications.router, prefix="/api/notifications", tags=["Notificações"])
+app.include_router(notifications_router, prefix="/api", tags=["Notificações n8n"])
 app.include_router(devocional.router, prefix="/api", tags=["Devocional"])
 app.include_router(devocional_context.router, prefix="/api", tags=["Devocional Context"])
 app.include_router(devocional_test.router, prefix="/api", tags=["Devocional Test"])
