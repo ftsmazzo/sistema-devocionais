@@ -13,59 +13,7 @@ class Settings(BaseSettings):
     """Configurações da aplicação"""
     
     # Database
-    DATABASE_URL: str = "sqlite:///./noticias.db"
-    
-    # Portais de notícias a serem monitorados
-    NEWS_PORTALS: List[Dict[str, Any]] = [
-        {
-            "name": "Portal Exemplo 1",
-            "url": "https://exemplo1.com.br/noticias",
-            "selectors": {
-                "article": ".noticia",
-                "title": "h2",
-                "link": "a",
-                "date": ".data",
-                "content": ".conteudo"
-            }
-        },
-        # Adicione mais portais aqui
-    ]
-    
-    # Palavras-chave para identificar notícias relevantes
-    KEYWORDS: List[str] = [
-        "assistência social",
-        "assistencia social",
-        "secretaria de assistência social",
-        "secretaria de assistencia social",
-        "SAS",
-        "CRAS",
-        "CREAS",
-        "benefícios sociais",
-        "cadastro único",
-        "bolsa família",
-        "auxílio",
-        "vulnerabilidade social"
-    ]
-    
-    # Configurações WhatsApp
-    WHATSAPP_ENABLED: bool = False
-    WHATSAPP_API_URL: str = os.getenv("WHATSAPP_API_URL", "")
-    WHATSAPP_API_KEY: str = os.getenv("WHATSAPP_API_KEY", "")
-    WHATSAPP_PHONE_ID: str = os.getenv("WHATSAPP_PHONE_ID", "")
-    
-    # Responsáveis para notificação
-    RESPONSIBLES: List[Dict[str, str]] = [
-        {
-            "name": "Responsável 1",
-            "phone": "+5511999999999",
-            "area": "CRAS"
-        },
-        # Adicione mais responsáveis aqui
-    ]
-    
-    # Configurações de monitoramento
-    MONITORING_INTERVAL_MINUTES: int = 30  # Intervalo entre verificações
-    MAX_ARTICLES_PER_CHECK: int = 50
+    DATABASE_URL: str = os.getenv("DATABASE_URL", "postgresql://user:password@localhost/devocional")
     
     # Configurações Evolution API para Devocionais (LEGADO - usar EVOLUTION_INSTANCES)
     EVOLUTION_API_URL: str = os.getenv("EVOLUTION_API_URL", "http://localhost:8080")

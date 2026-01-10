@@ -20,38 +20,6 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 
-class NewsArticle(Base):
-    """Modelo para artigos de notícias"""
-    __tablename__ = "news_articles"
-    
-    id = Column(Integer, primary_key=True, index=True)
-    title = Column(String, nullable=False, index=True)
-    content = Column(Text)
-    url = Column(String, unique=True, nullable=False, index=True)
-    source = Column(String, nullable=False)
-    published_date = Column(DateTime)
-    scraped_date = Column(DateTime, default=datetime.utcnow)
-    is_relevant = Column(Boolean, default=False, index=True)
-    relevance_score = Column(Integer, default=0)
-    processed = Column(Boolean, default=False)
-    notified = Column(Boolean, default=False)
-    scope = Column(String)  # Escopo de atuação identificado
-    responsible_area = Column(String)  # Área responsável
-
-
-class Notification(Base):
-    """Modelo para notificações enviadas"""
-    __tablename__ = "notifications"
-    
-    id = Column(Integer, primary_key=True, index=True)
-    article_id = Column(Integer, nullable=False, index=True)
-    recipient_phone = Column(String, nullable=False)
-    recipient_name = Column(String)
-    sent_at = Column(DateTime, default=datetime.utcnow)
-    status = Column(String, default="pending")  # pending, sent, failed
-    message = Column(Text)
-
-
 class DevocionalEnvio(Base):
     """Modelo para registro de envios de devocionais"""
     __tablename__ = "devocional_envios"

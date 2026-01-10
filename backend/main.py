@@ -8,11 +8,9 @@ from contextlib import asynccontextmanager
 import uvicorn
 
 from app.database import init_db
-from app.routers import news, monitoring, notifications, devocional
+from app.routers import notifications, devocional
 from app.routers import devocional_context, devocional_test
 from app.routers.notifications import router as notifications_router
-# Sistema de monitoramento de notícias desabilitado (não necessário para devocionais)
-# from app.scheduler import start_scheduler, stop_scheduler
 from app.devocional_scheduler import start_scheduler as start_devocional_scheduler, stop_scheduler as stop_devocional_scheduler
 from app.logging_config import setup_logging
 
@@ -25,12 +23,9 @@ async def lifespan(app: FastAPI):
     """Gerencia o ciclo de vida da aplicação"""
     # Inicialização
     init_db()
-    # Sistema de monitoramento de notícias desabilitado
-    # start_scheduler()
     start_devocional_scheduler()  # Iniciar scheduler de devocionais
     yield
     # Encerramento
-    # stop_scheduler()
     stop_devocional_scheduler()  # Parar scheduler de devocionais
 
 
@@ -51,8 +46,6 @@ app.add_middleware(
 )
 
 # Incluir routers
-app.include_router(news.router, prefix="/api/news", tags=["Notícias"])
-app.include_router(monitoring.router, prefix="/api/monitoring", tags=["Monitoramento"])
 app.include_router(notifications.router, prefix="/api/notifications", tags=["Notificações"])
 app.include_router(notifications_router, prefix="/api", tags=["Notificações n8n"])
 app.include_router(devocional.router, prefix="/api", tags=["Devocional"])

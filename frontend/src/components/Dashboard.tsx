@@ -1,53 +1,13 @@
-import { useState, useEffect } from 'react'
-import { newsApi, monitoringApi, notificationsApi } from '../services/api'
 import './Dashboard.css'
 
-interface Stats {
-  relevantCount: number
-  monitoringStatus: { running: boolean; message: string }
-  notificationStats: {
-    total: number
-    sent: number
-    failed: number
-    success_rate: number
-  }
-}
-
 function Dashboard() {
-  const [stats, setStats] = useState<Stats | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    loadStats()
-    const interval = setInterval(loadStats, 30000) // Atualizar a cada 30s
-    return () => clearInterval(interval)
-  }, [])
-
-  const loadStats = async () => {
-    try {
-      setLoading(true)
-      const [relevantCount, monitoringStatus, notificationStats] = await Promise.all([
-        newsApi.getRelevantCount(),
-        monitoringApi.getStatus(),
-        notificationsApi.getStats(),
-      ])
-
-      setStats({
-        relevantCount: relevantCount.count,
-        monitoringStatus,
-        notificationStats,
-      })
-      setError(null)
-    } catch (err: any) {
-      setError(err.message || 'Erro ao carregar estatísticas')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const handleStartMonitoring = async () => {
-    try {
+  return (
+    <div className="dashboard">
+      <h1>Sistema de Devocionais</h1>
+      <p>Frontend será reconstruído em breve.</p>
+      <p>Use a API diretamente ou o Postman collection para testar.</p>
+    </div>
+  )
       await monitoringApi.start()
       await loadStats()
     } catch (err: any) {
