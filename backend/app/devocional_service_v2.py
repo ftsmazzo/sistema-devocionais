@@ -82,11 +82,9 @@ class DevocionalServiceV2:
         except Exception as e:
             logger.warning(f"Erro no health check inicial (não crítico): {e}. Instâncias serão verificadas no primeiro uso.")
         
-        # Configurar perfil de todas as instâncias na inicialização
-        try:
-            self.setup_instance_profiles()
-        except Exception as e:
-            logger.warning(f"Erro ao configurar perfis (não crítico): {e}")
+        # NOTA: Configuração de perfil via API não é suportada pela Evolution API
+        # O nome que aparece é o nome da conta WhatsApp conectada à instância
+        # A solução é usar vCard para que destinatários salvem o contato
         
         # Configurações de rate limiting (agora por instância)
         self.delay_between_messages = settings.DELAY_BETWEEN_MESSAGES
@@ -228,11 +226,9 @@ class DevocionalServiceV2:
                 instance_name=instance.name
             )
         
-        # Tentar garantir que o perfil está configurado antes de enviar (não bloqueia envio se falhar)
-        try:
-            self._ensure_profile_configured(instance)
-        except Exception as e:
-            logger.debug(f"Erro ao configurar perfil (não crítico, continuando envio): {e}")
+        # NOTA: O nome do perfil não pode ser alterado via API da Evolution
+        # O nome que aparece é o nome da conta WhatsApp conectada à instância
+        # A única forma de fazer o nome aparecer é através do vCard (já implementado)
         
         # Construir payload
         payload = self._build_payload(phone, message, name)
@@ -529,51 +525,8 @@ class DevocionalServiceV2:
         """Verifica saúde de todas as instâncias"""
         self.instance_manager.check_all_instances()
     
-    def _ensure_profile_configured(self, instance: EvolutionInstance):
-        """
-        Garante que o perfil da instância está configurado.
-        Tenta configurar se ainda não foi configurado ou se a última tentativa foi há mais de 1 hora.
-        """
-        # Se já foi configurado recentemente (última hora), não tenta novamente
-        if instance.profile_configured:
-            if instance.last_profile_config_attempt:
-                time_since_last = datetime.now() - instance.last_profile_config_attempt
-                if time_since_last < timedelta(hours=1):
-                    return  # Já configurado recentemente
-        
-        # Tentar configurar o perfil
-        try:
-            success = self.instance_manager.set_instance_profile(
-                instance,
-                instance.display_name,
-                "Devocional Diário - Mensagens de fé e esperança"
-            )
-            instance.last_profile_config_attempt = datetime.now()
-            if success:
-                instance.profile_configured = True
-                logger.info(f"Perfil da instância {instance.name} configurado automaticamente antes do envio")
-            else:
-                logger.warning(f"Não foi possível configurar perfil da instância {instance.name} (tentará novamente depois)")
-        except Exception as e:
-            logger.warning(f"Erro ao configurar perfil da instância {instance.name}: {e}")
-            instance.last_profile_config_attempt = datetime.now()
-    
-    def setup_instance_profiles(self):
-        """Configura o perfil (nome) de todas as instâncias"""
-        for instance in self.instance_manager.instances:
-            if instance.enabled:
-                try:
-                    success = self.instance_manager.set_instance_profile(
-                        instance,
-                        instance.display_name,
-                        "Devocional Diário - Mensagens de fé e esperança"
-                    )
-                    instance.last_profile_config_attempt = datetime.now()
-                    if success:
-                        instance.profile_configured = True
-                        logger.info(f"Perfil da instância {instance.name} configurado na inicialização")
-                    else:
-                        logger.warning(f"Perfil da instância {instance.name} não configurado na inicialização (tentará antes do primeiro envio)")
-                except Exception as e:
-                    logger.warning(f"Erro ao configurar perfil da instância {instance.name} na inicialização: {e}")
+    # NOTA: Métodos de configuração de perfil removidos
+    # A Evolution API não suporta atualização de perfil via API
+    # O nome que aparece é o nome da conta WhatsApp conectada à instância
+    # A solução é usar vCard (já implementado) para que destinatários salvem o contato
 

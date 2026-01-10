@@ -84,7 +84,9 @@ class Settings(BaseSettings):
     # Opções: "round_robin", "least_used", "priority", "random"
     EVOLUTION_INSTANCE_STRATEGY: str = os.getenv("EVOLUTION_INSTANCE_STRATEGY", "round_robin")
     
-    # Enviar vCard automaticamente para novos contatos (ATIVAR PARA SALVAR CONTATO AUTOMATICAMENTE)
+    # Enviar vCard automaticamente para novos contatos
+    # IMPORTANTE: Esta é a ÚNICA forma de fazer o nome aparecer no WhatsApp
+    # O nome do perfil não pode ser alterado via API - vem da conta WhatsApp conectada
     SEND_VCARD_TO_NEW_CONTACTS: bool = os.getenv("SEND_VCARD_TO_NEW_CONTACTS", "true").lower() == "true"
     
     # Enviar mensagem pedindo para salvar contato
