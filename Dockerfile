@@ -1,18 +1,21 @@
 # Stage 1: Build do Frontend
 FROM node:18-alpine AS frontend-builder
 
-WORKDIR /app/frontend
+WORKDIR /app
 
-# Copiar package files
-COPY frontend/package*.json ./
+# Copiar package files do frontend
+COPY frontend/package*.json ./frontend/
 
 # Instalar dependências
+WORKDIR /app/frontend
 RUN npm install
 
 # Copiar código fonte do frontend
-COPY frontend/ ./
+WORKDIR /app
+COPY frontend/ ./frontend/
 
 # Build do frontend
+WORKDIR /app/frontend
 RUN npm run build
 
 # Stage 2: Backend Python
