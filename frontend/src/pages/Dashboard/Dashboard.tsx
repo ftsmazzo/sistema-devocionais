@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { statsApi } from '../../services/api'
 import type { Stats } from '../../types'
-import { Users, Send, CheckCircle, XCircle, Activity } from 'lucide-react'
+import { Users, Send, CheckCircle, XCircle } from 'lucide-react'
 import './Dashboard.css'
 
 export default function Dashboard() {
