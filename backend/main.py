@@ -13,7 +13,7 @@ from app.routers import devocional_context, devocional_test
 from app.routers.notifications import router as notifications_router
 from app.devocional_scheduler import start_scheduler as start_devocional_scheduler, stop_scheduler as stop_devocional_scheduler
 from app.logging_config import setup_logging
-from app.static import setup_static_files
+from app.static import FRONTEND_BUILD_PATH
 
 # Configurar logging
 setup_logging()
@@ -54,17 +54,37 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Configurar arquivos estáticos do frontend (se buildado)
-# IMPORTANTE: Deve ser chamado ANTES dos routers para não interceptar rotas /api
-setup_static_files(app)
+# Configurar mounts de arquivos estáticos (sem catch-all ainda)
+if FRONTEND_BUILD_PATH:
+    from fastapi.staticfiles import StaticFiles
+    assets_path = FRONTEND_BUILD_PATH / "assets"
+    if assets_path.exists():
+        app.mount("/assets", StaticFiles(directory=str(assets_path)), name="assets")
+    app.mount("/static", StaticFiles(directory=str(FRONTEND_BUILD_PATH)), name="static")
 
-# Incluir routers (DEPOIS do setup_static_files para garantir que rotas /api não sejam interceptadas)
+# Incluir routers PRIMEIRO (antes da rota catch-all do frontend)
 app.include_router(auth.router, prefix="/api", tags=["Autenticação"])
 app.include_router(notifications.router, prefix="/api/notifications", tags=["Notificações"])
 app.include_router(notifications_router, prefix="/api", tags=["Notificações n8n"])
 app.include_router(devocional.router, prefix="/api", tags=["Devocional"])
 app.include_router(devocional_context.router, prefix="/api", tags=["Devocional Context"])
 app.include_router(devocional_test.router, prefix="/api", tags=["Devocional Test"])
+
+# Registrar rota catch-all do frontend DEPOIS de todas as rotas da API
+if FRONTEND_BUILD_PATH:
+    from fastapi.responses import FileResponse
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def serve_frontend(full_path: str):
+        # Se começar com api/ ou health, não servir frontend
+        if full_path.startswith("api/") or full_path == "api" or full_path.startswith("health"):
+            raise HTTPException(status_code=404, detail="Not found")
+        
+        # Servir index.html para todas as outras rotas
+        index_path = FRONTEND_BUILD_PATH / "index.html"
+        if index_path.exists():
+            return FileResponse(str(index_path), media_type="text/html")
+        
+        raise HTTPException(status_code=404, detail="Frontend index not found")
 
 
 @app.get("/api/status")
