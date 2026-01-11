@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 from typing import Optional
 from app.config import settings
 from app.devocional_service_v2 import DevocionalServiceV2
-from app.database import SessionLocal, DevocionalContato, Devocional
+from app.database import SessionLocal, DevocionalContato, Devocional, DevocionalEnvio
 from app.devocional_service_v2 import MessageResult
 from app.devocional_integration import devocional_integration
 
@@ -83,10 +83,26 @@ def send_daily_devocional():
             
             logger.info(f"Envio automático concluído: {sent} enviadas, {failed} falharam")
             
-            # Atualizar contatos no banco
+            # Registrar envios no banco e atualizar contatos
             for i, result in enumerate(results):
                 if i < len(contacts):
                     contact = contacts[i]
+                    
+                    # Registrar envio no banco
+                    envio = DevocionalEnvio(
+                        recipient_phone=contact.phone,
+                        recipient_name=contact.name,
+                        message_text=message,
+                        sent_at=result.timestamp,
+                        status=result.status.value,
+                        message_id=result.message_id,
+                        error_message=result.error,
+                        retry_count=result.retry_count,
+                        instance_name=result.instance_name
+                    )
+                    db.add(envio)
+                    
+                    # Atualizar contato
                     if result.success:
                         contact.last_sent = result.timestamp
                         contact.total_sent += 1

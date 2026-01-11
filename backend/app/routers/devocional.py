@@ -415,9 +415,9 @@ async def list_envios(
                 "devocional_id": e.devocional_id,
                 "recipient_phone": e.recipient_phone,
                 "recipient_name": e.recipient_name,
-                "message": e.message,
+                "message": e.message_text,  # Campo correto do modelo
                 "sent_at": e.sent_at.isoformat() if e.sent_at else None,
-                "created_at": e.created_at.isoformat() if e.created_at else None,
+                "created_at": e.sent_at.isoformat() if e.sent_at else None,  # Usar sent_at como created_at se não houver created_at
                 "status": e.status,
                 "instance_name": e.instance_name,
                 "message_id": e.message_id,
