@@ -180,32 +180,60 @@ export const envioApi = {
 
 export const statsApi = {
   get: async (): Promise<Stats> => {
-    const response = await api.get<{stats: any, instance_status: any}>('/devocional/stats')
-    // O backend retorna {stats: {...}, instance_status: {...}}
-    // Precisamos adaptar para o formato esperado pelo frontend
-    const data = response.data
-    
-    // Se já está no formato correto, retornar direto
-    if ('total_sent' in data && 'instances' in data) {
-      return data as Stats
+    try {
+      // Tentar primeiro o endpoint de notificações que tem formato mais completo
+      const response = await api.get<any>('/notifications/instances')
+      const data = response.data
+      
+      // Verificar se já está no formato correto
+      if (data && 'total_sent' in data && 'instances' in data) {
+        return data as Stats
+      }
+      
+      // Se retornou objeto com 'instances' dentro
+      if (data && data.instances && Array.isArray(data.instances)) {
+        return {
+          total_sent: data.total_sent || 0,
+          total_failed: data.total_failed || 0,
+          total_blocked: data.total_blocked || 0,
+          total_retries: data.total_retries || 0,
+          instances: data.instances,
+          distribution_strategy: data.distribution_strategy || 'round_robin',
+          shield: data.shield
+        } as Stats
+      }
+    } catch (err) {
+      console.warn('Erro ao buscar stats de /notifications/instances:', err)
     }
     
-    // Se está no formato antigo {stats: {...}, instance_status: {...}}
-    if (data.stats) {
-      const stats = data.stats
-      // Adaptar formato
-      return {
-        total_sent: stats.total_sent || 0,
-        total_failed: stats.total_failed || 0,
-        total_blocked: stats.total_blocked || 0,
-        total_retries: stats.total_retries || 0,
-        instances: stats.instances || [],
-        distribution_strategy: stats.distribution_strategy || 'round_robin',
-        shield: stats.shield
-      } as Stats
+    // Fallback para endpoint antigo
+    try {
+      const response = await api.get<{stats: any, instance_status: any}>('/devocional/stats')
+      const data = response.data
+      
+      // Se já está no formato correto, retornar direto
+      if ('total_sent' in data && 'instances' in data) {
+        return data as Stats
+      }
+      
+      // Se está no formato antigo {stats: {...}, instance_status: {...}}
+      if (data.stats) {
+        const stats = data.stats
+        return {
+          total_sent: stats.total_sent || 0,
+          total_failed: stats.total_failed || 0,
+          total_blocked: stats.total_blocked || 0,
+          total_retries: stats.total_retries || 0,
+          instances: stats.instances || [],
+          distribution_strategy: stats.distribution_strategy || 'round_robin',
+          shield: stats.shield
+        } as Stats
+      }
+    } catch (err2) {
+      console.warn('Erro ao buscar stats de /devocional/stats:', err2)
     }
     
-    // Fallback: retornar estrutura vazia
+    // Se ambos falharem, retornar estrutura vazia
     return {
       total_sent: 0,
       total_failed: 0,
