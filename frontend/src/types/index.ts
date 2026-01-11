@@ -60,6 +60,7 @@ export interface Instancia {
   max_messages_per_hour: number
   max_messages_per_day: number
   last_check: string | null
+  last_error: string | null
   enabled: boolean
 }
 
@@ -70,6 +71,10 @@ export interface Stats {
   total_retries: number
   instances: Instancia[]
   distribution_strategy: string
+  total_instances?: number
+  active_instances?: number
+  inactive_instances?: number
+  error_instances?: number
   shield?: {
     status: string
     total_messages_sent: number
@@ -80,6 +85,8 @@ export interface Stats {
     messages_since_break: number
     last_break_time: string | null
     engagement_tracked: number
+    breaks_taken?: number
+    blocks_detected?: number
   }
 }
 

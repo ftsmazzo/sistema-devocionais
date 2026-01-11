@@ -162,6 +162,18 @@ class DevocionalIntegration:
         Returns:
             Texto do devocional ou None
         """
+        devocional = self.get_today_devocional_obj()
+        if devocional:
+            return devocional.content
+        return None
+    
+    def get_today_devocional_obj(self) -> Optional[Devocional]:
+        """
+        Obtém o objeto devocional de hoje do banco de dados
+        
+        Returns:
+            Objeto Devocional ou None
+        """
         db = SessionLocal()
         try:
             today = datetime.now().date()
@@ -170,9 +182,7 @@ class DevocionalIntegration:
                 Devocional.date < datetime.combine(today, datetime.max.time())
             ).order_by(Devocional.created_at.desc()).first()
             
-            if devocional:
-                return devocional.content
-            return None
+            return devocional
         
         except Exception as e:
             logger.error(f"Erro ao buscar devocional do banco: {e}", exc_info=True)

@@ -44,16 +44,19 @@ def send_daily_devocional():
     logger.info("Iniciando envio automático de devocional diário...")
     
     try:
-        # Obter mensagem do devocional
+        # Obter mensagem e objeto do devocional
         message = get_devocional_message()
         
         if not message:
             logger.warning("Nenhuma mensagem de devocional disponível. Pulando envio.")
             return
         
-        # Obter contatos ativos do banco
+        # Obter objeto devocional para pegar o ID
         db = SessionLocal()
         try:
+            devocional_obj = devocional_integration.get_today_devocional_obj()
+            devocional_id = devocional_obj.id if devocional_obj else None
+            
             contacts = db.query(DevocionalContato).filter(
                 DevocionalContato.active == True
             ).all()
@@ -90,6 +93,7 @@ def send_daily_devocional():
                     
                     # Registrar envio no banco
                     envio = DevocionalEnvio(
+                        devocional_id=devocional_id,  # Adicionar ID do devocional
                         recipient_phone=contact.phone,
                         recipient_name=contact.name,
                         message_text=message,

@@ -35,10 +35,9 @@ export const useAuthStore = create<AuthState>((set) => {
       try {
         const response = await authApi.login({ email, password, remember })
         
+        // Sempre salvar token e usuário no localStorage para persistência
         localStorage.setItem('token', response.token)
-        if (remember) {
-          localStorage.setItem('user', JSON.stringify(response.user))
-        }
+        localStorage.setItem('user', JSON.stringify(response.user))
 
         set({
           user: response.user,
