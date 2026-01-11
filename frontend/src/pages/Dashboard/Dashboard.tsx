@@ -19,21 +19,11 @@ export default function Dashboard() {
     try {
       setLoading(true)
       const data = await statsApi.get()
-      console.log('Stats recebidas:', data) // Debug
       setStats(data)
       setError(null)
     } catch (err: any) {
-      console.error('Erro ao carregar stats:', err) // Debug
+      console.error('Erro ao carregar stats:', err)
       setError(err.message || 'Erro ao carregar estatísticas')
-      // Mesmo com erro, definir stats vazias para não quebrar a página
-      setStats({
-        total_sent: 0,
-        total_failed: 0,
-        total_blocked: 0,
-        total_retries: 0,
-        instances: [],
-        distribution_strategy: 'round_robin'
-      })
     } finally {
       setLoading(false)
     }
@@ -48,28 +38,42 @@ export default function Dashboard() {
     )
   }
 
-  // Sempre renderizar, mesmo com erro ou sem stats
-  if (!stats) {
-    setStats({
-      total_sent: 0,
-      total_failed: 0,
-      total_blocked: 0,
-      total_retries: 0,
-      instances: [],
-      distribution_strategy: 'round_robin'
-    })
+  if (error && !stats) {
+    return (
+      <div className="dashboard-error">
+        <p>{error}</p>
+        <button onClick={loadStats}>Tentar novamente</button>
+      </div>
+    )
+  }
+
+  // Garantir que stats sempre tenha valores padrão
+  const safeStats: Stats = stats || {
+    total_sent: 0,
+    total_failed: 0,
+    total_blocked: 0,
+    total_retries: 0,
+    instances: [],
+    distribution_strategy: 'round_robin'
   }
 
   const successRate =
-    stats && stats.total_sent + stats.total_failed > 0
-      ? ((stats.total_sent / (stats.total_sent + stats.total_failed)) * 100).toFixed(1)
+    safeStats.total_sent + safeStats.total_failed > 0
+      ? ((safeStats.total_sent / (safeStats.total_sent + safeStats.total_failed)) * 100).toFixed(1)
       : '0'
 
-  const activeInstances = stats?.instances.filter((i) => i.status === 'active').length || 0
-  const totalInstances = stats?.instances.length || 0
+  const activeInstances = safeStats.instances?.filter((i) => i.status === 'active').length || 0
+  const totalInstances = safeStats.instances?.length || 0
 
   return (
     <div className="dashboard">
+      {error && (
+        <div className="dashboard-error">
+          <p>{error}</p>
+          <button onClick={loadStats}>Tentar novamente</button>
+        </div>
+      )}
+
       <div className="stats-grid">
         <div className="stat-card">
           <div className="stat-icon" style={{ background: '#3b82f6' }}>
@@ -77,7 +81,7 @@ export default function Dashboard() {
           </div>
           <div className="stat-content">
             <h3>Mensagens Enviadas</h3>
-            <p className="stat-value">{stats?.total_sent || 0}</p>
+            <p className="stat-value">{safeStats.total_sent || 0}</p>
             <p className="stat-label">Total de envios</p>
           </div>
         </div>
@@ -90,8 +94,8 @@ export default function Dashboard() {
             <h3>Taxa de Sucesso</h3>
             <p className="stat-value">{successRate}%</p>
             <p className="stat-label">
-              {stats?.total_sent || 0} de{' '}
-              {(stats?.total_sent || 0) + (stats?.total_failed || 0)} envios
+              {safeStats.total_sent || 0} de{' '}
+              {(safeStats.total_sent || 0) + (safeStats.total_failed || 0)} envios
             </p>
           </div>
         </div>
@@ -115,13 +119,13 @@ export default function Dashboard() {
           </div>
           <div className="stat-content">
             <h3>Falhas</h3>
-            <p className="stat-value">{stats?.total_failed || 0}</p>
-            <p className="stat-label">Tentativas: {stats?.total_retries || 0}</p>
+            <p className="stat-value">{safeStats.total_failed || 0}</p>
+            <p className="stat-label">Tentativas: {safeStats.total_retries || 0}</p>
           </div>
         </div>
       </div>
 
-      {stats?.shield && (
+      {safeStats.shield && (
         <div className="shield-section">
           <h2>🛡️ Sistema de Blindagem</h2>
           <div className="shield-grid">
@@ -129,27 +133,27 @@ export default function Dashboard() {
               <span className="shield-label">Status:</span>
               <span
                 className={`shield-value ${
-                  stats.shield.status === 'active' ? 'active' : 'warning'
+                  safeStats.shield.status === 'active' ? 'active' : 'warning'
                 }`}
               >
-                {stats.shield.status === 'active' ? 'Ativo' : 'Atenção'}
+                {safeStats.shield.status === 'active' ? 'Ativo' : 'Atenção'}
               </span>
             </div>
             <div className="shield-item">
               <span className="shield-label">Taxa de Sucesso:</span>
               <span className="shield-value">
-                {(stats.shield.success_rate * 100).toFixed(1)}%
+                {(safeStats.shield.success_rate * 100).toFixed(1)}%
               </span>
             </div>
             <div className="shield-item">
               <span className="shield-label">Limite Atual (Hora/Dia):</span>
               <span className="shield-value">
-                {stats.shield.current_hourly_limit}/{stats.shield.current_daily_limit}
+                {safeStats.shield.current_hourly_limit}/{safeStats.shield.current_daily_limit}
               </span>
             </div>
             <div className="shield-item">
               <span className="shield-label">Mensagens desde pausa:</span>
-              <span className="shield-value">{stats.shield.messages_since_break}</span>
+              <span className="shield-value">{safeStats.shield.messages_since_break}</span>
             </div>
           </div>
         </div>
@@ -158,38 +162,42 @@ export default function Dashboard() {
       <div className="instances-section">
         <h2>Instâncias Evolution API</h2>
         <div className="instances-list">
-          {stats?.instances.map((instance) => (
-            <div key={instance.name} className="instance-card">
-              <div className="instance-header">
-                <h3>{instance.name}</h3>
-                <span
-                  className={`instance-status ${instance.status} ${
-                    instance.enabled ? '' : 'disabled'
-                  }`}
-                >
-                  {instance.status === 'active' && instance.enabled
-                    ? 'Ativa'
-                    : instance.enabled
-                    ? 'Inativa'
-                    : 'Desabilitada'}
-                </span>
-              </div>
-              <div className="instance-stats">
-                <div className="instance-stat">
-                  <span className="stat-label">Hoje:</span>
-                  <span className="stat-value">
-                    {instance.messages_sent_today}/{instance.max_messages_per_day}
+          {safeStats.instances && safeStats.instances.length > 0 ? (
+            safeStats.instances.map((instance) => (
+              <div key={instance.name} className="instance-card">
+                <div className="instance-header">
+                  <h3>{instance.name}</h3>
+                  <span
+                    className={`instance-status ${instance.status} ${
+                      instance.enabled ? '' : 'disabled'
+                    }`}
+                  >
+                    {instance.status === 'active' && instance.enabled
+                      ? 'Ativa'
+                      : instance.enabled
+                      ? 'Inativa'
+                      : 'Desabilitada'}
                   </span>
                 </div>
-                <div className="instance-stat">
-                  <span className="stat-label">Esta hora:</span>
-                  <span className="stat-value">
-                    {instance.messages_sent_this_hour}/{instance.max_messages_per_hour}
-                  </span>
+                <div className="instance-stats">
+                  <div className="instance-stat">
+                    <span className="stat-label">Hoje:</span>
+                    <span className="stat-value">
+                      {instance.messages_sent_today}/{instance.max_messages_per_day}
+                    </span>
+                  </div>
+                  <div className="instance-stat">
+                    <span className="stat-label">Esta hora:</span>
+                    <span className="stat-value">
+                      {instance.messages_sent_this_hour}/{instance.max_messages_per_hour}
+                    </span>
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
+            ))
+          ) : (
+            <p className="no-instances">Nenhuma instância configurada</p>
+          )}
         </div>
       </div>
     </div>
