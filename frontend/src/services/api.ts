@@ -192,7 +192,7 @@ export const statsApi = {
     try {
       // Tentar primeiro o endpoint de notificações que tem formato mais completo
       const response = await api.get<any>('/notifications/instances')
-      const data = response.data
+      const data: any = response.data
       
       // Verificar se já está no formato correto
       if (data && 'total_sent' in data && 'instances' in data) {
@@ -201,7 +201,7 @@ export const statsApi = {
           total_failed: (data.total_failed ?? 0) as number,
           total_blocked: (data.total_blocked ?? 0) as number,
           total_retries: (data.total_retries ?? 0) as number,
-          instances: (data.instances ?? []) as any[],
+          instances: (data.instances ?? []) as Instancia[],
           distribution_strategy: (data.distribution_strategy ?? 'round_robin') as string,
           shield: data.shield
         }
@@ -214,7 +214,7 @@ export const statsApi = {
           total_failed: (data.total_failed ?? 0) as number,
           total_blocked: (data.total_blocked ?? 0) as number,
           total_retries: (data.total_retries ?? 0) as number,
-          instances: data.instances as any[],
+          instances: data.instances as Instancia[],
           distribution_strategy: (data.distribution_strategy ?? 'round_robin') as string,
           shield: data.shield
         }
@@ -235,7 +235,7 @@ export const statsApi = {
           total_failed: (data.total_failed ?? 0) as number,
           total_blocked: (data.total_blocked ?? 0) as number,
           total_retries: (data.total_retries ?? 0) as number,
-          instances: (data.instances ?? []) as any[],
+          instances: (data.instances ?? []) as Instancia[],
           distribution_strategy: (data.distribution_strategy ?? 'round_robin') as string,
           shield: data.shield
         }
