@@ -6,7 +6,28 @@ Fazer o build do frontend e servir junto com o backend no EasyPanel.
 
 ---
 
-## 📝 Passo a Passo
+## 🚀 Método Rápido (Script Automatizado)
+
+### **Windows (PowerShell):**
+```powershell
+.\build-frontend.ps1
+```
+
+### **Linux/Mac:**
+```bash
+chmod +x build-frontend.sh
+./build-frontend.sh
+```
+
+O script faz tudo automaticamente:
+1. ✅ Verifica se npm está instalado
+2. ✅ Instala dependências
+3. ✅ Faz o build
+4. ✅ Copia para `backend/dist`
+
+---
+
+## 📝 Método Manual
 
 ### **1. Build Local do Frontend**
 
