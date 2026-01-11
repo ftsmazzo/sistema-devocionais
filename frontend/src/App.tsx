@@ -1,29 +1,38 @@
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom'
-import Dashboard from './components/Dashboard'
+import { useEffect } from 'react'
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { useAuthStore } from './store/authStore'
+import ProtectedRoute from './components/ProtectedRoute'
+import Layout from './components/Layout/Layout'
+import Login from './pages/Login/Login'
+import Dashboard from './pages/Dashboard/Dashboard'
 import './App.css'
 
 function App() {
-  return (
-    <Router>
-      <div className="app">
-        <nav className="navbar">
-          <div className="nav-container">
-            <h1 className="nav-title">📖 Sistema de Devocionais</h1>
-            <div className="nav-links">
-              <a href="/">Dashboard</a>
-            </div>
-          </div>
-        </nav>
+  const { checkAuth } = useAuthStore()
 
-        <main className="main-content">
-          <Routes>
-            <Route path="/" element={<Dashboard />} />
-          </Routes>
-        </main>
-      </div>
-    </Router>
+  useEffect(() => {
+    checkAuth()
+  }, [checkAuth])
+
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route path="/login" element={<Login />} />
+        <Route
+          path="/dashboard"
+          element={
+            <ProtectedRoute>
+              <Layout>
+                <Dashboard />
+              </Layout>
+            </ProtectedRoute>
+          }
+        />
+        <Route path="/" element={<Navigate to="/dashboard" replace />} />
+        <Route path="*" element={<Navigate to="/dashboard" replace />} />
+      </Routes>
+    </BrowserRouter>
   )
 }
 
 export default App
-
