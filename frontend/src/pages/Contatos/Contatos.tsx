@@ -50,7 +50,16 @@ export default function Contatos() {
       }
 
       if (editingContato) {
-        await contatoApi.update(editingContato.id, formData)
+        // Para editar, precisamos deletar e criar novo (backend não tem update)
+        // Ou apenas criar novo se o telefone mudou
+        if (formData.phone !== editingContato.phone) {
+          await contatoApi.delete(editingContato.id)
+          await contatoApi.create(formData)
+        } else {
+          // Se só o nome mudou, não podemos atualizar (backend não tem endpoint)
+          alert('Para alterar apenas o nome, exclua e crie novamente')
+          return
+        }
       } else {
         await contatoApi.create(formData)
       }

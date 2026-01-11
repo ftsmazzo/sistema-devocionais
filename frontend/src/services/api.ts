@@ -121,9 +121,11 @@ export const contatoApi = {
     return response.data
   },
 
+  // Nota: Backend não tem endpoint de update, apenas create/delete/toggle
+  // Para atualizar, é necessário deletar e criar novamente
   update: async (id: number, data: Partial<Contato>): Promise<Contato> => {
-    const response = await api.put<Contato>(`/devocional/contatos/${id}`, data)
-    return response.data
+    // Não implementado - backend não suporta update direto
+    throw new Error('Update não suportado. Use delete + create')
   },
 
   toggle: async (id: number): Promise<Contato> => {
