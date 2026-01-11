@@ -16,4 +16,5 @@ psycopg2-binary==2.9.9  # PostgreSQL driver
 python-jose[cryptography]==3.3.0  # JWT tokens
 passlib[bcrypt]==1.7.4  # Hash de senhas
 python-multipart==0.0.6  # Para forms
+email-validator==2.1.0  # Validação de email para Pydantic
 
