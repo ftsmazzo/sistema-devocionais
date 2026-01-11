@@ -68,14 +68,14 @@ export const authApi = {
 
 export const devocionalApi = {
   list: async (skip = 0, limit = 50): Promise<Devocional[]> => {
-    const response = await api.get<Devocional[]>('/devocionais', {
+    const response = await api.get<Devocional[]>('/devocional/devocionais', {
       params: { skip, limit },
     })
     return response.data
   },
 
   getById: async (id: number): Promise<Devocional> => {
-    const response = await api.get<Devocional>(`/devocionais/${id}`)
+    const response = await api.get<Devocional>(`/devocional/devocionais/${id}`)
     return response.data
   },
 
@@ -90,12 +90,12 @@ export const devocionalApi = {
   },
 
   update: async (id: number, data: Partial<Devocional>): Promise<Devocional> => {
-    const response = await api.put<Devocional>(`/devocionais/${id}`, data)
+    const response = await api.put<Devocional>(`/devocional/devocionais/${id}`, data)
     return response.data
   },
 
   delete: async (id: number): Promise<void> => {
-    await api.delete(`/devocionais/${id}`)
+    await api.delete(`/devocional/devocionais/${id}`)
   },
 }
 
@@ -105,34 +105,34 @@ export const devocionalApi = {
 
 export const contatoApi = {
   list: async (skip = 0, limit = 50, active?: boolean): Promise<Contato[]> => {
-    const response = await api.get<Contato[]>('/contatos', {
+    const response = await api.get<Contato[]>('/devocional/contatos', {
       params: { skip, limit, active },
     })
     return response.data
   },
 
   getById: async (id: number): Promise<Contato> => {
-    const response = await api.get<Contato>(`/contatos/${id}`)
+    const response = await api.get<Contato>(`/devocional/contatos/${id}`)
     return response.data
   },
 
   create: async (data: Partial<Contato>): Promise<Contato> => {
-    const response = await api.post<Contato>('/contatos', data)
+    const response = await api.post<Contato>('/devocional/contatos', data)
     return response.data
   },
 
   update: async (id: number, data: Partial<Contato>): Promise<Contato> => {
-    const response = await api.put<Contato>(`/contatos/${id}`, data)
+    const response = await api.put<Contato>(`/devocional/contatos/${id}`, data)
     return response.data
   },
 
   toggle: async (id: number): Promise<Contato> => {
-    const response = await api.patch<Contato>(`/contatos/${id}/toggle`)
+    const response = await api.put<Contato>(`/devocional/contatos/${id}/toggle`)
     return response.data
   },
 
   delete: async (id: number): Promise<void> => {
-    await api.delete(`/contatos/${id}`)
+    await api.delete(`/devocional/contatos/${id}`)
   },
 }
 
@@ -142,7 +142,7 @@ export const contatoApi = {
 
 export const envioApi = {
   list: async (skip = 0, limit = 50): Promise<Envio[]> => {
-    const response = await api.get<Envio[]>('/envios', {
+    const response = await api.get<Envio[]>('/devocional/envios', {
       params: { skip, limit },
     })
     return response.data
@@ -154,7 +154,7 @@ export const envioApi = {
     devocional_id?: number
     delay?: number
   }): Promise<any> => {
-    const response = await api.post('/send-devocional', data)
+    const response = await api.post('/devocional/send', data)
     return response.data
   },
 
@@ -163,7 +163,7 @@ export const envioApi = {
     message: string
     name?: string
   }): Promise<any> => {
-    const response = await api.post('/send-single-devocional', data)
+    const response = await api.post('/devocional/send-single', data)
     return response.data
   },
 }
@@ -174,7 +174,7 @@ export const envioApi = {
 
 export const statsApi = {
   get: async (): Promise<Stats> => {
-    const response = await api.get<Stats>('/stats')
+    const response = await api.get<Stats>('/devocional/stats')
     return response.data
   },
 }
