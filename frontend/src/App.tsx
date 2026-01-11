@@ -8,6 +8,7 @@ import Dashboard from './pages/Dashboard/Dashboard'
 import Contatos from './pages/Contatos/Contatos'
 import Devocionais from './pages/Devocionais/Devocionais'
 import Envios from './pages/Envios/Envios'
+import Configuracoes from './pages/Configuracoes/Configuracoes'
 import './App.css'
 
 function App() {
