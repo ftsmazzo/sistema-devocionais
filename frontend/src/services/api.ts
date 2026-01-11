@@ -104,9 +104,9 @@ export const devocionalApi = {
 // ============================================
 
 export const contatoApi = {
-  list: async (skip = 0, limit = 50, active?: boolean): Promise<Contato[]> => {
+  list: async (skip = 0, limit = 50, active_only?: boolean): Promise<Contato[]> => {
     const response = await api.get<Contato[]>('/devocional/contatos', {
-      params: { skip, limit, active },
+      params: { skip, limit, active_only: active_only !== undefined ? active_only : undefined },
     })
     return response.data
   },
@@ -127,8 +127,12 @@ export const contatoApi = {
   },
 
   toggle: async (id: number): Promise<Contato> => {
-    const response = await api.put<Contato>(`/devocional/contatos/${id}/toggle`)
-    return response.data
+    await api.put(`/devocional/contatos/${id}/toggle`)
+    // Recarregar lista completa após toggle
+    const list = await contatoApi.list(0, 1000, false)
+    const updated = list.find(c => c.id === id)
+    if (!updated) throw new Error('Contato não encontrado após toggle')
+    return updated
   },
 
   delete: async (id: number): Promise<void> => {
