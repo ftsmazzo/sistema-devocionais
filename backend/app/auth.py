@@ -15,7 +15,8 @@ from app.config import settings
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # OAuth2 scheme
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
+# Nota: tokenUrl é apenas para documentação Swagger, não afeta o funcionamento
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/auth/login")
 
 # Configurações JWT
 SECRET_KEY = settings.JWT_SECRET_KEY
