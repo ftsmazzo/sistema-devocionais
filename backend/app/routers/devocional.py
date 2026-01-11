@@ -412,12 +412,17 @@ async def list_envios(
         return [
             {
                 "id": e.id,
+                "devocional_id": e.devocional_id,
                 "recipient_phone": e.recipient_phone,
                 "recipient_name": e.recipient_name,
+                "message": e.message,
                 "sent_at": e.sent_at.isoformat() if e.sent_at else None,
+                "created_at": e.created_at.isoformat() if e.created_at else None,
                 "status": e.status,
+                "instance_name": e.instance_name,
                 "message_id": e.message_id,
                 "error_message": e.error_message,
+                "error": e.error_message,  # Alias para compatibilidade
                 "retry_count": e.retry_count
             }
             for e in envios
