@@ -13,6 +13,7 @@ from app.routers import devocional_context, devocional_test
 from app.routers.notifications import router as notifications_router
 from app.devocional_scheduler import start_scheduler as start_devocional_scheduler, stop_scheduler as stop_devocional_scheduler
 from app.logging_config import setup_logging
+from app.static import setup_static_files
 
 # Configurar logging
 setup_logging()
@@ -61,13 +62,17 @@ app.include_router(devocional.router, prefix="/api", tags=["Devocional"])
 app.include_router(devocional_context.router, prefix="/api", tags=["Devocional Context"])
 app.include_router(devocional_test.router, prefix="/api", tags=["Devocional Test"])
 
+# Configurar arquivos estáticos do frontend (se buildado)
+setup_static_files(app)
 
-@app.get("/")
-async def root():
-    """Endpoint raiz"""
+
+@app.get("/api/status")
+async def api_status():
+    """Endpoint de status da API"""
     return {
         "message": "Sistema de Envio de Devocionais",
-        "status": "online"
+        "status": "online",
+        "version": "1.0.0"
     }
 
 
