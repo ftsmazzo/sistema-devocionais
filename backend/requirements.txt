@@ -13,4 +13,7 @@ aiohttp==3.9.1
 selenium==4.15.2
 webdriver-manager==4.0.1
 psycopg2-binary==2.9.9  # PostgreSQL driver
+python-jose[cryptography]==3.3.0  # JWT tokens
+passlib[bcrypt]==1.7.4  # Hash de senhas
+python-multipart==0.0.6  # Para forms
 

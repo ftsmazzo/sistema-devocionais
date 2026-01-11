@@ -75,6 +75,11 @@ class Settings(BaseSettings):
     DEVOCIONAL_API_KEY: str = os.getenv("DEVOCIONAL_API_KEY", "")  # API Key para autenticação
     DEVOCIONAL_FETCH_MODE: str = os.getenv("DEVOCIONAL_FETCH_MODE", "webhook")  # "webhook" ou "api"
     
+    # Autenticação JWT
+    JWT_SECRET_KEY: str = os.getenv("JWT_SECRET_KEY", "change-this-secret-key-in-production")
+    JWT_ALGORITHM: str = os.getenv("JWT_ALGORITHM", "HS256")
+    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", "10080"))  # 7 dias
+    
     class Config:
         env_file = ".env"
         case_sensitive = True

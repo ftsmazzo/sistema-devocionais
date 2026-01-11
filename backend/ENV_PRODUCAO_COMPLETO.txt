@@ -121,6 +121,15 @@ DEVOCIONAL_WEBHOOK_SECRET=Fs142779
 DEVOCIONAL_FETCH_MODE=webhook
 
 # ============================================
+# AUTENTICAÇÃO JWT
+# ============================================
+# Secret key para JWT (MUDE EM PRODUÇÃO!)
+# Gere uma chave segura: openssl rand -hex 32
+JWT_SECRET_KEY=sua-chave-secreta-super-segura-mude-em-producao
+JWT_ALGORITHM=HS256
+JWT_ACCESS_TOKEN_EXPIRE_MINUTES=10080
+
+# ============================================
 # NOTAS IMPORTANTES
 # ============================================
 # 1. EVOLUTION_INSTANCES deve estar em UMA LINHA

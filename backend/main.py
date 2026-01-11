@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 import uvicorn
 
 from app.database import init_db
-from app.routers import notifications, devocional
+from app.routers import notifications, devocional, auth
 from app.routers import devocional_context, devocional_test
 from app.routers.notifications import router as notifications_router
 from app.devocional_scheduler import start_scheduler as start_devocional_scheduler, stop_scheduler as stop_devocional_scheduler
@@ -37,15 +37,24 @@ app = FastAPI(
 )
 
 # Configurar CORS
+# Adicione o domínio do seu frontend em produção
+cors_origins = [
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "https://imobmiq-devocional.90qhxz.easypanel.host",  # Backend (se servir frontend)
+    # Adicione aqui o domínio do frontend quando deployar
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:5173"],
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # Incluir routers
+app.include_router(auth.router, prefix="/api", tags=["Autenticação"])
 app.include_router(notifications.router, prefix="/api/notifications", tags=["Notificações"])
 app.include_router(notifications_router, prefix="/api", tags=["Notificações n8n"])
 app.include_router(devocional.router, prefix="/api", tags=["Devocional"])
