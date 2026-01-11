@@ -10,10 +10,10 @@ import os
 # Caminho para o frontend buildado
 # Tenta vários caminhos possíveis
 POSSIBLE_PATHS = [
-    Path(__file__).parent.parent.parent / "frontend" / "dist",  # Raiz do projeto
-    Path(__file__).parent.parent / "dist",  # Dentro do backend
-    Path("/app/frontend/dist"),  # Docker
-    Path("/app/dist"),  # Docker (backend)
+    Path("/app/dist"),  # Docker (backend) - PRIMEIRO (produção)
+    Path(__file__).parent.parent / "dist",  # Dentro do backend (local)
+    Path(__file__).parent.parent.parent / "frontend" / "dist",  # Raiz do projeto (dev)
+    Path("/app/frontend/dist"),  # Docker alternativo
 ]
 
 FRONTEND_BUILD_PATH = None
