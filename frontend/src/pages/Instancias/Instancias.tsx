@@ -26,6 +26,7 @@ export default function Instancias() {
   const [error, setError] = useState<string | null>(null)
   const [qrCode, setQrCode] = useState<{ instance: string; qr: string } | null>(null)
   const [refreshing, setRefreshing] = useState<string | null>(null)
+  const [success, setSuccess] = useState<string | null>(null)
 
   useEffect(() => {
     loadInstances()
@@ -84,8 +85,6 @@ export default function Instancias() {
       setRefreshing(null)
     }
   }
-
-  const [success, setSuccess] = useState<string | null>(null)
 
   const getStatusIcon = (status: string) => {
     switch (status) {
