@@ -9,14 +9,14 @@ from datetime import datetime, time as dt_time, timedelta
 from zoneinfo import ZoneInfo
 from typing import Optional
 from app.config import settings
-from app.devocional_service import DevocionalService
+from app.devocional_service_v2 import DevocionalServiceV2
 from app.database import SessionLocal, DevocionalContato, Devocional
-from app.devocional_service import MessageResult
+from app.devocional_service_v2 import MessageResult
 from app.devocional_integration import devocional_integration
 
 logger = logging.getLogger(__name__)
 
-devocional_service = DevocionalService()
+devocional_service = DevocionalServiceV2()
 scheduler_thread = None
 scheduler_running = False
 
