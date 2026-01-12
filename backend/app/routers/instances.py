@@ -53,10 +53,18 @@ async def list_instances(
 ):
     """Lista todas as instâncias configuradas"""
     try:
-        # Carregar instâncias do config
+        # Carregar instâncias do config com tratamento de erros
         instances_config = []
-        if settings.EVOLUTION_INSTANCES and settings.EVOLUTION_INSTANCES != "[]":
-            instances_config = json.loads(settings.EVOLUTION_INSTANCES)
+        if settings.EVOLUTION_INSTANCES and settings.EVOLUTION_INSTANCES.strip() and settings.EVOLUTION_INSTANCES != "[]":
+            try:
+                instances_config = json.loads(settings.EVOLUTION_INSTANCES)
+                if not isinstance(instances_config, list):
+                    logger.error(f"EVOLUTION_INSTANCES não é uma lista: {type(instances_config)}")
+                    instances_config = []
+            except json.JSONDecodeError as e:
+                logger.error(f"Erro ao fazer parse de EVOLUTION_INSTANCES: {e}")
+                logger.error(f"Conteúdo: {settings.EVOLUTION_INSTANCES[:200]}")
+                instances_config = []
         
         # Criar InstanceManager temporário para obter status
         manager = InstanceManager(instances_config)
@@ -94,15 +102,23 @@ async def generate_qr_code(
 ):
     """
     Gera QR code para conectar instância
+    Primeiro verifica se a instância já existe, se não existir, cria
     """
     if not current_user.is_admin:
         raise HTTPException(status_code=403, detail="Apenas administradores podem gerar QR codes")
     
     try:
-        # Carregar instâncias
+        # Carregar instâncias com tratamento de erros
         instances_config = []
-        if settings.EVOLUTION_INSTANCES and settings.EVOLUTION_INSTANCES != "[]":
-            instances_config = json.loads(settings.EVOLUTION_INSTANCES)
+        if settings.EVOLUTION_INSTANCES and settings.EVOLUTION_INSTANCES.strip() and settings.EVOLUTION_INSTANCES != "[]":
+            try:
+                instances_config = json.loads(settings.EVOLUTION_INSTANCES)
+                if not isinstance(instances_config, list):
+                    logger.error(f"EVOLUTION_INSTANCES não é uma lista: {type(instances_config)}")
+                    instances_config = []
+            except json.JSONDecodeError as e:
+                logger.error(f"Erro ao fazer parse de EVOLUTION_INSTANCES: {e}")
+                raise HTTPException(status_code=500, detail=f"Erro na configuração EVOLUTION_INSTANCES: JSON inválido. Verifique o formato no .env")
         
         # Encontrar instância
         instance_config = None
@@ -112,46 +128,135 @@ async def generate_qr_code(
                 break
         
         if not instance_config:
-            raise HTTPException(status_code=404, detail=f"Instância {instance_name} não encontrada")
+            raise HTTPException(status_code=404, detail=f"Instância {instance_name} não encontrada na configuração")
         
         api_url = instance_config["api_url"]
         api_key = instance_config["api_key"]
-        
-        # Chamar Evolution API para gerar QR
-        url = f"{api_url}/instance/create"
         headers = {"apikey": api_key}
-        payload = {
-            "instanceName": instance_name,
-            "qrcode": True,
-            "integration": "WHATSAPP-BAILEYS"
-        }
         
-        response = requests.post(url, json=payload, headers=headers, timeout=30)
+        # Primeiro, verificar se a instância já existe
+        check_url = f"{api_url}/instance/fetchInstances"
+        check_response = requests.get(check_url, headers=headers, timeout=10)
         
-        if response.status_code == 200:
-            data = response.json()
-            qr_code = data.get("qrcode", {}).get("base64") or data.get("qrcode")
-            
+        instance_exists = False
+        if check_response.status_code == 200:
+            instances_data = check_response.json()
+            if isinstance(instances_data, list):
+                for inst_data in instances_data:
+                    if (inst_data.get('instanceName') or inst_data.get('name')) == instance_name:
+                        instance_exists = True
+                        state = inst_data.get('state', 'unknown')
+                        # Se já está conectada, retornar erro informativo
+                        if state in ['open', 'connected', 'ready']:
+                            raise HTTPException(
+                                status_code=400,
+                                detail=f"Instância {instance_name} já está conectada (estado: {state}). Não é necessário gerar QR code."
+                            )
+                        break
+        
+        # Se a instância não existe ou está desconectada, tentar obter QR code
+        # Tentar diferentes endpoints da Evolution API
+        qr_endpoints = [
+            f"{api_url}/instance/connect/{instance_name}",
+            f"{api_url}/instance/{instance_name}/connect",
+            f"{api_url}/instance/create",
+        ]
+        
+        qr_code = None
+        last_error = None
+        
+        for endpoint in qr_endpoints:
+            try:
+                if endpoint.endswith("/create"):
+                    # Endpoint de criação
+                    payload = {
+                        "instanceName": instance_name,
+                        "qrcode": True,
+                        "integration": "WHATSAPP-BAILEYS"
+                    }
+                    response = requests.post(endpoint, json=payload, headers=headers, timeout=30)
+                else:
+                    # Endpoint de conexão
+                    response = requests.get(endpoint, headers=headers, timeout=30)
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    # Tentar diferentes formatos de resposta
+                    qr_code = (
+                        data.get("qrcode", {}).get("base64") or
+                        data.get("qrcode", {}).get("code") or
+                        data.get("qrcode") or
+                        data.get("base64") or
+                        data.get("code")
+                    )
+                    
+                    if qr_code:
+                        # Garantir que está no formato base64 correto
+                        if isinstance(qr_code, str):
+                            if not qr_code.startswith("data:image"):
+                                if not qr_code.startswith("http"):
+                                    qr_code = f"data:image/png;base64,{qr_code}"
+                        break
+                elif response.status_code == 404 and instance_exists:
+                    # Instância existe mas endpoint diferente, tentar próximo
+                    continue
+                else:
+                    last_error = f"HTTP {response.status_code}: {response.text[:200]}"
+                    logger.debug(f"Endpoint {endpoint} retornou {response.status_code}")
+                    
+            except requests.exceptions.RequestException as e:
+                last_error = str(e)
+                logger.debug(f"Erro ao tentar endpoint {endpoint}: {e}")
+                continue
+        
+        if not qr_code:
+            # Se nenhum endpoint funcionou, tentar criar a instância
+            try:
+                create_url = f"{api_url}/instance/create"
+                create_payload = {
+                    "instanceName": instance_name,
+                    "qrcode": True,
+                    "integration": "WHATSAPP-BAILEYS"
+                }
+                create_response = requests.post(create_url, json=create_payload, headers=headers, timeout=30)
+                
+                if create_response.status_code in [200, 201]:
+                    data = create_response.json()
+                    qr_code = (
+                        data.get("qrcode", {}).get("base64") or
+                        data.get("qrcode", {}).get("code") or
+                        data.get("qrcode") or
+                        data.get("base64")
+                    )
+                    
+                    if qr_code and not qr_code.startswith("data:image") and not qr_code.startswith("http"):
+                        qr_code = f"data:image/png;base64,{qr_code}"
+            except Exception as e:
+                logger.error(f"Erro ao criar instância: {e}")
+        
+        if qr_code:
             return {
                 "qr_code": qr_code,
-                "base64": qr_code if isinstance(qr_code, str) and qr_code.startswith("data:image") else None,
+                "base64": qr_code,
                 "instance_name": instance_name,
                 "message": "QR code gerado com sucesso. Escaneie com WhatsApp para conectar."
             }
         else:
-            error_msg = response.text
-            logger.error(f"Erro ao gerar QR code: HTTP {response.status_code} - {error_msg}")
+            error_detail = last_error or "Não foi possível gerar QR code. Verifique se a instância existe e se a API Key está correta."
+            logger.error(f"Erro ao gerar QR code para {instance_name}: {error_detail}")
             raise HTTPException(
-                status_code=response.status_code,
-                detail=f"Erro ao gerar QR code: {error_msg}"
+                status_code=500,
+                detail=error_detail
             )
     
+    except HTTPException:
+        raise
     except requests.exceptions.RequestException as e:
-        logger.error(f"Erro de conexão ao gerar QR code: {e}")
-        raise HTTPException(status_code=500, detail=f"Erro de conexão: {str(e)}")
+        logger.error(f"Erro de conexão ao gerar QR code: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Erro de conexão com Evolution API: {str(e)}")
     except Exception as e:
         logger.error(f"Erro ao gerar QR code: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Erro: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Erro inesperado: {str(e)}")
 
 
 @router.post("/{instance_name}/connect")
@@ -166,10 +271,17 @@ async def connect_instance(
         raise HTTPException(status_code=403, detail="Apenas administradores podem verificar conexão")
     
     try:
-        # Carregar instâncias
+        # Carregar instâncias com tratamento de erros
         instances_config = []
-        if settings.EVOLUTION_INSTANCES and settings.EVOLUTION_INSTANCES != "[]":
-            instances_config = json.loads(settings.EVOLUTION_INSTANCES)
+        if settings.EVOLUTION_INSTANCES and settings.EVOLUTION_INSTANCES.strip() and settings.EVOLUTION_INSTANCES != "[]":
+            try:
+                instances_config = json.loads(settings.EVOLUTION_INSTANCES)
+                if not isinstance(instances_config, list):
+                    logger.error(f"EVOLUTION_INSTANCES não é uma lista: {type(instances_config)}")
+                    instances_config = []
+            except json.JSONDecodeError as e:
+                logger.error(f"Erro ao fazer parse de EVOLUTION_INSTANCES: {e}")
+                raise HTTPException(status_code=500, detail=f"Erro na configuração EVOLUTION_INSTANCES: JSON inválido. Verifique o formato no .env")
         
         # Encontrar instância
         instance_config = None
@@ -239,10 +351,17 @@ async def refresh_instance_status(
         raise HTTPException(status_code=403, detail="Apenas administradores podem atualizar status")
     
     try:
-        # Carregar instâncias
+        # Carregar instâncias com tratamento de erros
         instances_config = []
-        if settings.EVOLUTION_INSTANCES and settings.EVOLUTION_INSTANCES != "[]":
-            instances_config = json.loads(settings.EVOLUTION_INSTANCES)
+        if settings.EVOLUTION_INSTANCES and settings.EVOLUTION_INSTANCES.strip() and settings.EVOLUTION_INSTANCES != "[]":
+            try:
+                instances_config = json.loads(settings.EVOLUTION_INSTANCES)
+                if not isinstance(instances_config, list):
+                    logger.error(f"EVOLUTION_INSTANCES não é uma lista: {type(instances_config)}")
+                    instances_config = []
+            except json.JSONDecodeError as e:
+                logger.error(f"Erro ao fazer parse de EVOLUTION_INSTANCES: {e}")
+                raise HTTPException(status_code=500, detail=f"Erro na configuração EVOLUTION_INSTANCES: JSON inválido. Verifique o formato no .env")
         
         # Criar InstanceManager e verificar instância específica
         manager = InstanceManager(instances_config)

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../../store/authStore'
+import { BookOpen, Mail, Lock, Loader } from 'lucide-react'
 import './Login.css'
 
 export default function Login() {
@@ -31,63 +32,94 @@ export default function Login() {
   }
 
   return (
-    <div className="login-container">
-      <div className="login-card">
-        <div className="login-header">
-          <h1>📖 Sistema de Devocionais</h1>
-          <p>Faça login para continuar</p>
+    <div className="login-page-modern">
+      <div className="login-background">
+        <div className="login-background-shapes">
+          <div className="shape shape-1"></div>
+          <div className="shape shape-2"></div>
+          <div className="shape shape-3"></div>
         </div>
+      </div>
 
-        <form onSubmit={handleSubmit} className="login-form">
-          {error && <div className="error-message">{error}</div>}
-
-          <div className="form-group">
-            <label htmlFor="email">Email</label>
-            <input
-              id="email"
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="seu@email.com"
-              required
-              autoComplete="email"
-            />
+      <div className="login-container-modern">
+        <div className="login-card-modern">
+          <div className="login-header-modern">
+            <div className="login-icon-wrapper">
+              <BookOpen size={40} />
+            </div>
+            <h1>Sistema de Devocionais</h1>
+            <p>Entre com suas credenciais para continuar</p>
           </div>
 
-          <div className="form-group">
-            <label htmlFor="password">Senha</label>
-            <input
-              id="password"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••"
-              required
-              autoComplete="current-password"
-            />
-          </div>
+          <form onSubmit={handleSubmit} className="login-form-modern">
+            {error && (
+              <div className="error-message-modern">
+                <span>{error}</span>
+              </div>
+            )}
 
-          <div className="form-options">
-            <label className="checkbox-label">
+            <div className="form-group-modern">
+              <label htmlFor="email">
+                <Mail size={18} />
+                <span>Email</span>
+              </label>
               <input
-                type="checkbox"
-                checked={remember}
-                onChange={(e) => setRemember(e.target.checked)}
+                id="email"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="seu@email.com"
+                required
+                autoComplete="email"
+                className="input-modern"
               />
-              <span>Lembrar-me</span>
-            </label>
-          </div>
+            </div>
 
-          <button
-            type="submit"
-            className="login-button"
-            disabled={isLoading}
-          >
-            {isLoading ? 'Entrando...' : 'Entrar'}
-          </button>
-        </form>
+            <div className="form-group-modern">
+              <label htmlFor="password">
+                <Lock size={18} />
+                <span>Senha</span>
+              </label>
+              <input
+                id="password"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+                required
+                autoComplete="current-password"
+                className="input-modern"
+              />
+            </div>
+
+            <div className="form-options-modern">
+              <label className="checkbox-modern">
+                <input
+                  type="checkbox"
+                  checked={remember}
+                  onChange={(e) => setRemember(e.target.checked)}
+                />
+                <span>Lembrar-me</span>
+              </label>
+            </div>
+
+            <button
+              type="submit"
+              className="login-button-modern"
+              disabled={isLoading}
+            >
+              {isLoading ? (
+                <>
+                  <Loader size={20} className="spinning" />
+                  <span>Entrando...</span>
+                </>
+              ) : (
+                <span>Entrar</span>
+              )}
+            </button>
+          </form>
+        </div>
       </div>
     </div>
   )
 }
-

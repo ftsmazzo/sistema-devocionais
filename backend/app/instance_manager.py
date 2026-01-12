@@ -175,11 +175,38 @@ class InstanceManager:
                 "apikey": instance.api_key
             }
             
-            url = f"{instance.api_url}/instance/fetchInstances"
+            # Tentar diferentes formatos de URL da Evolution API
+            urls_to_try = [
+                f"{instance.api_url}/instance/fetchInstances",
+                f"{instance.api_url.rstrip('/')}/instance/fetchInstances",
+                f"{instance.api_url}/fetchInstances",
+            ]
             
-            logger.debug(f"Verificando instância {instance.name} em {url}")
+            response = None
+            last_error = None
             
-            response = requests.get(url, headers=headers, timeout=10)
+            for url in urls_to_try:
+                try:
+                    logger.debug(f"Verificando instância {instance.name} em {url}")
+                    response = requests.get(url, headers=headers, timeout=10)
+                    if response.status_code == 200:
+                        break
+                    else:
+                        last_error = f"HTTP {response.status_code}"
+                        logger.debug(f"URL {url} retornou {response.status_code}, tentando próxima...")
+                except requests.exceptions.RequestException as e:
+                    last_error = str(e)
+                    logger.debug(f"Erro ao tentar {url}: {e}")
+                    continue
+            
+            if not response or response.status_code != 200:
+                error_msg = last_error or f"HTTP {response.status_code if response else 'N/A'}"
+                instance.status = InstanceStatus.ERROR
+                instance.last_error = f"Erro ao verificar instância: {error_msg}"
+                instance.error_count += 1
+                instance.last_check = datetime.now()
+                logger.error(f"Erro ao verificar {instance.name}: {error_msg}")
+                return False
             
             if response.status_code == 200:
                 instances_data = response.json()
@@ -192,13 +219,24 @@ class InstanceManager:
                     instance.last_check = datetime.now()
                     return False
                 
-                # Procurar nossa instância
+                # Procurar nossa instância (comparação case-insensitive e com/sem espaços)
                 found = False
+                our_instance_name = instance.name.strip().lower()
+                
                 for inst_data in instances_data:
-                    instance_name = inst_data.get('instanceName') or inst_data.get('name')
-                    if instance_name == instance.name:
-                        found = True
-                        state = inst_data.get('state', 'unknown')
+                    # Tentar diferentes campos de nome
+                    api_instance_name = (
+                        inst_data.get('instanceName') or 
+                        inst_data.get('name') or 
+                        inst_data.get('instance') or
+                        inst_data.get('instance_name')
+                    )
+                    
+                    if api_instance_name:
+                        # Comparação case-insensitive e removendo espaços
+                        if api_instance_name.strip().lower() == our_instance_name:
+                            found = True
+                            state = inst_data.get('state', 'unknown')
                         
                         # Tentar obter número da instância
                         phone = inst_data.get('phoneNumber') or inst_data.get('phone') or inst_data.get('number')
