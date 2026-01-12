@@ -250,6 +250,23 @@ def run_scheduler():
         except Exception as e:
             logger.error(f"Erro no loop do scheduler: {e}", exc_info=True)
         
+        # Sincronizar status de mensagens pendentes a cada 5 minutos
+        try:
+            if not hasattr(run_scheduler, 'last_sync') or (now_brazil() - run_scheduler.last_sync).total_seconds() >= 300:
+                from app.message_status_sync import MessageStatusSync
+                db_sync = SessionLocal()
+                try:
+                    sync_service = MessageStatusSync(db_sync)
+                    result = sync_service.sync_pending_messages(hours_back=24)
+                    logger.info(f"🔄 Sincronização automática: {result.get('messages_updated', 0)} mensagens atualizadas")
+                    run_scheduler.last_sync = now_brazil()
+                except Exception as sync_error:
+                    logger.error(f"❌ Erro na sincronização automática: {sync_error}")
+                finally:
+                    db_sync.close()
+        except Exception as e:
+            logger.debug(f"Erro ao sincronizar status (não crítico): {e}")
+        
         schedule.run_pending()
         time.sleep(60)  # Verifica a cada minuto
     

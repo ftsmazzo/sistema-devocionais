@@ -970,6 +970,33 @@ async def test_webhook():
     }
 
 
+@router.post("/sync-status")
+async def sync_message_status(
+    db: Session = Depends(get_db),
+    hours_back: int = 24
+):
+    """
+    Endpoint para forçar sincronização de status de mensagens pendentes
+    Útil quando webhooks não estão chegando ou há mensagens desatualizadas
+    """
+    try:
+        from app.message_status_sync import MessageStatusSync
+        
+        sync_service = MessageStatusSync(db)
+        result = sync_service.sync_pending_messages(hours_back=hours_back)
+        
+        return {
+            "success": result.get("success", False),
+            "messages_checked": result.get("messages_checked", 0),
+            "messages_updated": result.get("messages_updated", 0),
+            "errors": result.get("errors", 0),
+            "message": f"Sincronização concluída: {result.get('messages_updated', 0)} mensagens atualizadas"
+        }
+    except Exception as e:
+        logger.error(f"❌ Erro ao sincronizar status: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Erro: {str(e)}")
+
+
 @router.get("/debug/events")
 async def debug_recent_events(limit: int = 10):
     """
