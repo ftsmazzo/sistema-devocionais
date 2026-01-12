@@ -40,9 +40,9 @@ SELECT '✅ Scores de engajamento resetados para 100' as status;
 -- DELETE FROM webhook_events;
 -- SELECT '✅ Eventos de webhook limpos' as status;
 
--- 6. Limpar consentimentos (opcional - mantém histórico de consentimento)
--- DELETE FROM contact_consent;
--- SELECT '✅ Consentimentos limpos' as status;
+-- 6. Resetar consentimentos (para desenvolvimento/testes)
+DELETE FROM contact_consent;
+SELECT '✅ Consentimentos deletados' as status;
 
 COMMIT;
 
@@ -54,4 +54,5 @@ SELECT
     (SELECT SUM(total_sent) FROM devocional_contatos) as total_sent_sum,
     (SELECT COUNT(*) FROM engagement_history) as total_historico_engajamento,
     (SELECT COUNT(*) FROM contact_engagement) as total_contatos_engajamento,
-    (SELECT AVG(engagement_score) FROM contact_engagement) as score_medio;
+    (SELECT AVG(engagement_score) FROM contact_engagement) as score_medio,
+    (SELECT COUNT(*) FROM contact_consent) as total_consentimentos;
