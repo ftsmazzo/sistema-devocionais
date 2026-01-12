@@ -111,6 +111,12 @@ class DevocionalServiceV2:
         self.send_vcard_to_new = settings.SEND_VCARD_TO_NEW_CONTACTS
         self.send_contact_request = settings.SEND_CONTACT_REQUEST
         
+        # Log de configuração de consentimento
+        if self.send_contact_request:
+            logger.info(f"✅ SEND_CONTACT_REQUEST está HABILITADO - mensagens de consentimento serão enviadas")
+        else:
+            logger.warning(f"⚠️ SEND_CONTACT_REQUEST está DESABILITADO - mensagens de consentimento NÃO serão enviadas. Configure SEND_CONTACT_REQUEST=true no .env para habilitar.")
+        
         # Estatísticas globais
         self.stats = {
             'total_sent': 0,
