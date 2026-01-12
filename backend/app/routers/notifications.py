@@ -330,27 +330,19 @@ async def setup_all_profiles():
 
 
 @router.get("/instances/debug")
-async def debug_instances():
+async def debug_instances(db: Session = Depends(get_db)):
     """Endpoint de debug para verificar configuração das instâncias"""
     try:
+        devocional_service = get_devocional_service(db)
         import json
         from app.config import settings
         
         # Informações de configuração
         config_info = {
-            "evolution_instances_config": settings.EVOLUTION_INSTANCES,
             "evolution_api_url": settings.EVOLUTION_API_URL,
             "evolution_api_key": settings.EVOLUTION_API_KEY[:10] + "..." if settings.EVOLUTION_API_KEY else None,
-            "evolution_instance_name": settings.EVOLUTION_INSTANCE_NAME,
+            "note": "Instâncias agora são gerenciadas via banco de dados"
         }
-        
-        # Tentar parsear instâncias
-        instances_parsed = []
-        try:
-            if settings.EVOLUTION_INSTANCES and settings.EVOLUTION_INSTANCES != "[]":
-                instances_parsed = json.loads(settings.EVOLUTION_INSTANCES)
-        except Exception as e:
-            instances_parsed = {"error": str(e)}
         
         # Status das instâncias no manager
         manager_stats = devocional_service.get_stats()
