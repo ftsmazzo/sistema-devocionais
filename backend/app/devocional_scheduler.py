@@ -79,21 +79,50 @@ def send_daily_devocional():
             # Criar registro de agendamento antes de enviar
             # O modelo AgendamentoEnvio só armazena informações básicas do agendamento
             scheduled_time = now_brazil_naive()
-            agendamento = AgendamentoEnvio(
-                devocional_id=devocional_id,
-                scheduled_for=scheduled_time,
-                sent=False  # Será marcado como True após envio bem-sucedido
-            )
-            db.add(agendamento)
             
-            # Fazer commit do agendamento ANTES de enviar
+            # Tentar criar agendamento - se falhar por falta de coluna, tentar criar a coluna
             try:
+                agendamento = AgendamentoEnvio(
+                    devocional_id=devocional_id,
+                    scheduled_for=scheduled_time,
+                    sent=False  # Será marcado como True após envio bem-sucedido
+                )
+                db.add(agendamento)
                 db.commit()
                 logger.info(f"✅ Agendamento criado no banco de dados (devocional_id={devocional_id}, scheduled_for={scheduled_time})")
             except Exception as e:
-                logger.error(f"Erro ao salvar agendamentos: {e}", exc_info=True)
-                db.rollback()
-                raise
+                error_str = str(e)
+                # Se o erro for por coluna 'sent' não existir, tentar criar
+                if "column \"sent\" of relation \"agendamento_envios\" does not exist" in error_str:
+                    logger.warning(f"⚠️ Coluna 'sent' não existe na tabela agendamento_envios. Tentando criar...")
+                    try:
+                        # Tentar criar a coluna via SQL direto
+                        db.execute("ALTER TABLE agendamento_envios ADD COLUMN IF NOT EXISTS sent BOOLEAN DEFAULT FALSE")
+                        db.execute("CREATE INDEX IF NOT EXISTS idx_agendamento_envios_sent ON agendamento_envios(sent)")
+                        db.commit()
+                        logger.info(f"✅ Coluna 'sent' criada com sucesso. Tentando criar agendamento novamente...")
+                        
+                        # Tentar novamente
+                        agendamento = AgendamentoEnvio(
+                            devocional_id=devocional_id,
+                            scheduled_for=scheduled_time,
+                            sent=False
+                        )
+                        db.add(agendamento)
+                        db.commit()
+                        logger.info(f"✅ Agendamento criado no banco de dados (devocional_id={devocional_id}, scheduled_for={scheduled_time})")
+                    except Exception as create_error:
+                        logger.error(f"❌ Erro ao criar coluna 'sent': {create_error}", exc_info=True)
+                        db.rollback()
+                        # Continuar mesmo sem agendamento (não bloquear envio)
+                        agendamento = None
+                        logger.warning(f"⚠️ Continuando envio sem registro de agendamento")
+                else:
+                    logger.error(f"Erro ao salvar agendamento: {e}", exc_info=True)
+                    db.rollback()
+                    # Continuar mesmo sem agendamento (não bloquear envio)
+                    agendamento = None
+                    logger.warning(f"⚠️ Continuando envio sem registro de agendamento")
             
             # Enviar mensagens
             results = devocional_service.send_bulk_devocionais(
