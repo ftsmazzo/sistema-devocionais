@@ -61,10 +61,25 @@ async def receive_message_status(
     }
     """
     try:
-        # Verificar secret se configurado
+        # NOTA IMPORTANTE: Webhooks da Evolution API não permitem configurar headers customizados
+        # Por isso, tornamos o secret OPCIONAL para webhooks da Evolution API
+        # O secret é usado apenas para webhooks do n8n (outro endpoint: /api/devocional/webhook)
+        # 
+        # Lógica:
+        # - Se secret configurado E fornecido no header → validar
+        # - Se secret configurado mas NÃO fornecido → PERMITIR (Evolution API não envia headers)
+        # - Se secret não configurado → permitir normalmente
+        
         if settings.DEVOCIONAL_WEBHOOK_SECRET:
-            if not x_webhook_secret or x_webhook_secret != settings.DEVOCIONAL_WEBHOOK_SECRET:
-                raise HTTPException(status_code=401, detail="Webhook secret inválido")
+            if x_webhook_secret:
+                # Secret fornecido - validar
+                if x_webhook_secret != settings.DEVOCIONAL_WEBHOOK_SECRET:
+                    logger.warning(f"⚠️ Webhook secret inválido recebido")
+                    raise HTTPException(status_code=401, detail="Webhook secret inválido")
+                logger.debug("✅ Webhook secret validado")
+            else:
+                # Secret configurado mas não fornecido - PERMITIR (Evolution API não envia headers)
+                logger.debug("ℹ️ Webhook secret configurado mas não fornecido - permitindo (Evolution API não envia headers customizados)")
         
         # Obter dados do request
         try:
