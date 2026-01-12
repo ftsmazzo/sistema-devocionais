@@ -25,8 +25,9 @@ async def get_historico_context(
     Usado para gerar direcionamento para o próximo devocional
     """
     try:
-        # Calcular data limite
-        date_limit = datetime.now() - timedelta(days=days)
+        # Calcular data limite (usando timezone de Brasília)
+        from app.timezone_utils import now_brazil
+        date_limit = now_brazil() - timedelta(days=days)
         
         # Buscar devocionais recentes (incluindo os não enviados para contexto)
         devocionais = db.query(Devocional).filter(

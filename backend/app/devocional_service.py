@@ -36,7 +36,8 @@ class MessageResult:
     
     def __post_init__(self):
         if self.timestamp is None:
-            self.timestamp = datetime.now()
+            from app.timezone_utils import now_brazil
+            self.timestamp = now_brazil()
 
 
 class DevocionalService:
@@ -78,7 +79,8 @@ class DevocionalService:
     
     def _reset_counters_if_needed(self):
         """Reseta contadores de rate limiting se necessário"""
-        now = datetime.now()
+        from app.timezone_utils import now_brazil
+        now = now_brazil()
         
         # Reset contador horário
         if now.hour != self.last_reset_hour:
