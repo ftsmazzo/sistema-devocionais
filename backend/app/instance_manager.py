@@ -392,6 +392,8 @@ class InstanceManager:
                         # Método 5: Tentar buscar número de telefone diretamente da Evolution API
                         try:
                             api_name = getattr(instance, 'api_instance_name', None) or instance.name
+                            logger.debug(f"Tentando buscar detalhes de {instance.name} via fetchInstance...")
+                            
                             # Tentar buscar informações detalhadas da instância
                             detail_urls = [
                                 f"{instance.api_url}/instance/fetchInstance/{api_name}",
@@ -400,22 +402,43 @@ class InstanceManager:
                             
                             for detail_url in detail_urls:
                                 try:
-                                    detail_response = requests.get(detail_url, headers=headers, timeout=5)
+                                    logger.debug(f"Tentando {detail_url}...")
+                                    detail_response = requests.get(detail_url, headers=headers, timeout=10)
+                                    
                                     if detail_response.status_code == 200:
                                         detail_data = detail_response.json()
+                                        logger.debug(f"Resposta de {detail_url}: {detail_data}")
+                                        
                                         if isinstance(detail_data, list) and len(detail_data) > 0:
                                             detail_data = detail_data[0]
                                         
-                                        # Tentar obter número de telefone
+                                        # Tentar obter número de telefone de TODOS os campos possíveis
                                         detail_phone = (
                                             detail_data.get('phoneNumber') or
                                             detail_data.get('phone') or
                                             detail_data.get('number') or
-                                            detail_data.get('jid', '').split('@')[0] if detail_data.get('jid') else None
+                                            detail_data.get('phone_number') or
+                                            detail_data.get('jid', '').split('@')[0] if detail_data.get('jid') else None or
+                                            detail_data.get('owner') or
+                                            detail_data.get('ownerNumber')
                                         )
+                                        
+                                        # Se não encontrou, tentar extrair de outros campos
+                                        if not detail_phone:
+                                            # Verificar se tem qrcode (indica que está desconectada)
+                                            if detail_data.get('qrcode'):
+                                                logger.debug(f"Instância {instance.name} tem QR code, provavelmente desconectada")
+                                            else:
+                                                # Se não tem QR code e não tem número, pode estar conectada mas sem número reportado
+                                                # Verificar outros indicadores
+                                                pass
                                         
                                         if detail_phone:
                                             phone_str = str(detail_phone).strip()
+                                            # Remover @s.whatsapp.net se presente
+                                            if '@' in phone_str:
+                                                phone_str = phone_str.split('@')[0]
+                                            
                                             if phone_str and len(phone_str) > 5:  # Número válido
                                                 instance.phone_number = phone_str
                                                 instance.status = InstanceStatus.ACTIVE
@@ -425,17 +448,28 @@ class InstanceManager:
                                                 return True
                                         
                                         # Verificar se tem outros indicadores de conexão
-                                        if detail_data.get('state', '').lower() in ['open', 'connected', 'ready']:
+                                        detail_state = detail_data.get('state', '').lower()
+                                        if detail_state in ['open', 'connected', 'ready']:
                                             instance.status = InstanceStatus.ACTIVE
                                             instance.error_count = 0
                                             instance.last_check = datetime.now()
                                             logger.info(f"✅ Instância {instance.name} marcada como ACTIVE (estado via fetchInstance: {detail_data.get('state')})")
                                             return True
+                                        
+                                        # Se não tem QR code, provavelmente está conectada (mesmo sem número)
+                                        if not detail_data.get('qrcode') and detail_state == 'unknown':
+                                            logger.info(f"Instância {instance.name} não tem QR code e estado é unknown, considerando como conectada")
+                                            instance.status = InstanceStatus.ACTIVE
+                                            instance.error_count = 0
+                                            instance.last_check = datetime.now()
+                                            logger.info(f"✅ Instância {instance.name} marcada como ACTIVE (sem QR code = provavelmente conectada)")
+                                            return True
+                                            
                                 except Exception as e:
                                     logger.debug(f"Erro ao buscar detalhes de {detail_url}: {e}")
                                     continue
                         except Exception as e:
-                            logger.debug(f"Erro ao buscar número de telefone: {e}")
+                            logger.warning(f"Erro ao buscar número de telefone via fetchInstance: {e}")
                         
                         # Se nenhum método funcionou, marcar como INACTIVE mas permitir uso
                         instance.status = InstanceStatus.INACTIVE
