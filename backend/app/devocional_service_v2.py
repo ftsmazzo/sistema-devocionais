@@ -620,7 +620,7 @@ class DevocionalServiceV2:
             # IMPORTANTE: Verificar e enviar mensagem de consentimento APÓS primeiro envio
             # A verificação deve ser feita ANTES do total_sent ser incrementado no router/scheduler
             # Por isso verificamos se total_sent == 0 (ainda não enviou) ou se acabou de enviar
-            if result.success:
+            if result.success and self.send_contact_request:
                 try:
                     from app.consent_service import ConsentService
                     from app.database import SessionLocal, DevocionalContato
@@ -635,28 +635,39 @@ class DevocionalServiceV2:
                             # Se total_sent == 0, acabou de enviar o primeiro (momento certo para consentimento)
                             current_total_sent = db_contact.total_sent or 0
                             
-                            consent_service = ConsentService(db_consent)
-                            consent = consent_service.get_or_create_consent(phone)
-                            
-                            # Deve enviar se: total_sent == 0 (primeiro envio) E ainda não enviou mensagem de consentimento
-                            if current_total_sent == 0 and not consent.consent_message_sent:
-                                logger.info(f"📨 Enviando mensagem de consentimento para {name or phone} (primeiro envio)")
-                                instance = self.instance_manager.get_instance_by_name(result.instance_name)
-                                if instance:
-                                    # Adicionar pequeno delay antes de enviar consentimento (2-3 segundos)
-                                    time.sleep(2)
+                            # Só processar consentimento se SEND_CONTACT_REQUEST estiver habilitado
+                            if current_total_sent == 0:
+                                try:
+                                    consent_service = ConsentService(db_consent)
+                                    consent = consent_service.get_or_create_consent(phone)
                                     
-                                    consent_result = consent_service.send_consent_message(instance, phone, name)
-                                    if consent_result.get("success"):
-                                        logger.info(f"✅ Mensagem de consentimento enviada para {phone}")
+                                    # Verificar se já enviou mensagem de consentimento
+                                    if not getattr(consent, 'consent_message_sent', False):
+                                        logger.info(f"📨 Enviando mensagem de consentimento para {name or phone} (primeiro envio)")
+                                        instance = self.instance_manager.get_instance_by_name(result.instance_name)
+                                        if instance:
+                                            # Adicionar pequeno delay antes de enviar consentimento (2-3 segundos)
+                                            time.sleep(2)
+                                            
+                                            consent_result = consent_service.send_consent_message(instance, phone, name)
+                                            if consent_result.get("success"):
+                                                logger.info(f"✅ Mensagem de consentimento enviada para {phone}")
+                                            else:
+                                                logger.error(f"❌ Erro ao enviar mensagem de consentimento: {consent_result.get('error')}")
                                     else:
-                                        logger.error(f"❌ Erro ao enviar mensagem de consentimento: {consent_result.get('error')}")
+                                        logger.debug(f"ℹ️ Mensagem de consentimento já enviada para {phone}")
+                                except AttributeError as attr_err:
+                                    # Se o campo não existir na tabela, apenas logar e continuar
+                                    logger.warning(f"⚠️ Campo de consentimento não encontrado (tabela pode precisar de migração): {attr_err}")
+                                except Exception as consent_err:
+                                    logger.error(f"Erro ao processar consentimento para {phone}: {consent_err}", exc_info=True)
                             else:
-                                logger.debug(f"ℹ️ Não enviando consentimento para {phone}: total_sent={current_total_sent}, already_sent={consent.consent_message_sent}")
+                                logger.debug(f"ℹ️ Não enviando consentimento para {phone}: total_sent={current_total_sent} (não é primeiro envio)")
                     finally:
                         db_consent.close()
                 except Exception as e:
-                    logger.error(f"Erro ao processar consentimento: {e}", exc_info=True)
+                    # Não deixar erro de consentimento quebrar o envio principal
+                    logger.error(f"Erro ao processar consentimento (não crítico): {e}", exc_info=True)
             
             # Se enviou com sucesso e é novo contato, enviar vCard
             if result.success and is_new_contact and self.send_vcard_to_new:
