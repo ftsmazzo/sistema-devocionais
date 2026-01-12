@@ -106,10 +106,21 @@ async def receive_message_status(
         logger.info(f"🔔 Webhook recebido: event={event}, instance={instance_name}")
         logger.info(f"📦 Body completo recebido: {json.dumps(body, indent=2, default=str)}")
         
-        # Verificar se é formato MessageUpdate (novo formato da Evolution API)
+        # Verificar se é formato messages.update (formato mais comum da Evolution API)
+        if event == "messages.update":
+            logger.info(f"📨 Detectado evento messages.update")
+            result = await process_messages_update(db, instance_name, data)
+            return {
+                "success": True, 
+                "message": "Webhook processado (formato messages.update)",
+                "format": "messages.update",
+                "processed": result
+            }
+        
+        # Verificar se é formato MessageUpdate (array - formato alternativo)
         message_updates = body.get("MessageUpdate", [])
         if message_updates:
-            # Formato novo: MessageUpdate array
+            # Formato alternativo: MessageUpdate array
             logger.info(f"📨 Detectado formato MessageUpdate com {len(message_updates)} atualizações")
             result = await process_message_update(db, body)
             return {
@@ -594,6 +605,173 @@ async def process_message_update(
         logger.error(f"❌ Erro ao processar MessageUpdate: {e}", exc_info=True)
         db.rollback()
         return {"error": str(e), "body": body}
+
+
+async def process_messages_update(
+    db: Session,
+    instance_name: str,
+    data: Dict[str, Any]
+):
+    """
+    Processa evento messages.update (formato mais comum da Evolution API)
+    
+    Formato:
+    {
+        "event": "messages.update",
+        "instance": "Devocional01",
+        "data": {
+            "keyId": "3EB0E62EC94C6C01256AE4",
+            "remoteJid": "5516996480805:90@s.whatsapp.net",
+            "fromMe": true,
+            "status": "READ",  // ou "DELIVERY_ACK", "SERVER_ACK"
+            "instanceId": "uuid",
+            "messageId": "cmkb4tcto1b7bje5p1842gaw9"
+        }
+    }
+    
+    Args:
+        db: Sessão do banco de dados
+        instance_name: Nome da instância
+        data: Dados do evento
+    
+    Returns:
+        Dict com informações do processamento
+    """
+    try:
+        # Extrair informações
+        message_id_webhook = data.get("messageId")  # ID interno da Evolution (ex: cmkb4tcto1b7bje5p1842gaw9)
+        key_id = data.get("keyId")  # ID da mensagem WhatsApp (ex: 3EB0E62EC94C6C01256AE4) - este é o que salvamos!
+        remote_jid = data.get("remoteJid", "")
+        status = data.get("status", "")
+        
+        logger.info(f"📨 Processando messages.update: messageId={message_id_webhook}, keyId={key_id}, status={status}, remote_jid={remote_jid}")
+        
+        if not key_id and not message_id_webhook:
+            logger.warning(f"⚠️ messages.update sem messageId/keyId, ignorando. Data: {data}")
+            return {"error": "messageId/keyId não encontrado", "data": data}
+        
+        if not status:
+            logger.warning(f"⚠️ messages.update sem status, ignorando. Data: {data}")
+            return {"error": "status não encontrado", "data": data}
+        
+        # Extrair telefone do remoteJid (formato: 5516996480805:90@s.whatsapp.net ou 5516996480805@s.whatsapp.net)
+        phone = remote_jid.split("@")[0].split(":")[0] if "@" in remote_jid else remote_jid.split(":")[0]
+        
+        # IMPORTANTE: O message_id que salvamos no banco é o keyId (response_data.get('key', {}).get('id'))
+        # Então devemos buscar pelo keyId primeiro!
+        envio = None
+        
+        # Buscar pelo keyId primeiro (este é o que salvamos quando enviamos)
+        if key_id:
+            envio = db.query(DevocionalEnvio).filter(
+                DevocionalEnvio.message_id == key_id
+            ).first()
+            if envio:
+                logger.info(f"✅ Encontrado envio pelo keyId: {key_id}")
+        
+        # Se não encontrou pelo keyId, tentar pelo messageId (pode ser que em alguns casos seja o mesmo)
+        if not envio and message_id_webhook:
+            envio = db.query(DevocionalEnvio).filter(
+                DevocionalEnvio.message_id == message_id_webhook
+            ).first()
+            if envio:
+                logger.info(f"✅ Encontrado envio pelo messageId: {message_id_webhook}")
+        
+        # Usar keyId como identificador principal para logs
+        message_id = key_id or message_id_webhook
+        
+        if not envio:
+            # Tentar buscar pelos últimos envios para debug
+            recent_envios = db.query(DevocionalEnvio).order_by(
+                DevocionalEnvio.sent_at.desc()
+            ).limit(5).all()
+            
+            logger.warning(f"⚠️ Envio não encontrado para message_id: {message_id} (keyId: {data.get('keyId')})")
+            logger.info(f"📋 Últimos 5 message_ids no banco:")
+            for e in recent_envios:
+                logger.info(f"   - message_id: {e.message_id}, phone: {e.recipient_phone}, status: {e.message_status}")
+            
+            return {
+                "error": f"Envio não encontrado para message_id: {message_id}",
+                "message_id_received": message_id,
+                "key_id": data.get("keyId"),
+                "recent_message_ids": [e.message_id for e in recent_envios if e.message_id]
+            }
+        
+        # Converter timestamp para datetime
+        from app.timezone_utils import now_brazil_naive
+        event_time = now_brazil_naive()
+        
+        # Mapear status da Evolution API para nosso formato
+        status_map = {
+            "SERVER_ACK": ("sent", "sent"),
+            "DELIVERY_ACK": ("delivered", "delivered"),
+            "READ": ("read", "read")
+        }
+        
+        mapped_status, db_status = status_map.get(status, (None, None))
+        
+        if not mapped_status:
+            logger.warning(f"⚠️ Status desconhecido: {status} para message_id {message_id}")
+            return {
+                "error": f"Status desconhecido: {status}",
+                "message_id": message_id,
+                "status_received": status
+            }
+        
+        logger.info(f"📊 Processando status: {status} -> {mapped_status}")
+        
+        # Atualizar status baseado no status recebido
+        updated = False
+        
+        if status == "SERVER_ACK" and envio.message_status != "sent":
+            envio.message_status = "sent"
+            envio.status = "sent"
+            updated = True
+            logger.info(f"✅ Mensagem {message_id} enviada para {phone}")
+        
+        elif status == "DELIVERY_ACK" and envio.message_status not in ["delivered", "read"]:
+            envio.message_status = "delivered"
+            envio.delivered_at = event_time
+            updated = True
+            logger.info(f"✅ Mensagem {message_id} entregue para {phone}")
+        
+        elif status == "READ":
+            # READ é o mais importante - sempre atualizar
+            envio.message_status = "read"
+            envio.read_at = event_time
+            if not envio.delivered_at:
+                envio.delivered_at = event_time
+            updated = True
+            logger.info(f"✅✅ Mensagem {message_id} LIDA por {phone}")
+            
+            # Atualizar engajamento
+            update_engagement_from_read(db, phone, True)
+        
+        if updated:
+            db.commit()
+            logger.info(f"✅ Status atualizado para message_id {message_id}: status={mapped_status}")
+            return {
+                "success": True,
+                "message_id": message_id,
+                "status_updated": mapped_status,
+                "status_received": status,
+                "phone": phone
+            }
+        else:
+            logger.debug(f"ℹ️ Status não atualizado (já estava em {envio.message_status}) para status={status}")
+            return {
+                "success": True,
+                "message_id": message_id,
+                "status": envio.message_status,
+                "status_received": status,
+                "already_updated": True
+            }
+    
+    except Exception as e:
+        logger.error(f"❌ Erro ao processar messages.update: {e}", exc_info=True)
+        db.rollback()
+        return {"error": str(e), "data": data}
 
 
 def update_engagement_from_read(db: Session, phone: str, was_read: bool):
