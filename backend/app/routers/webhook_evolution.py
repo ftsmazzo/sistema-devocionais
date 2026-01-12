@@ -275,8 +275,13 @@ async def process_message_ack(
             logger.warning(f"⚠️ ACK desconhecido: {ack} para message_id {message_id}")
         
         if updated:
-            db.commit()
-            logger.info(f"✅ Status atualizado para message_id {message_id}: ack={ack} -> status={envio.message_status}")
+            try:
+                db.commit()
+                logger.info(f"✅ Status COMMITADO no banco para message_id {message_id}: ack={ack} -> status={envio.message_status}")
+            except Exception as commit_error:
+                logger.error(f"❌ ERRO ao fazer commit: {commit_error}", exc_info=True)
+                db.rollback()
+                raise
             return {
                 "success": True,
                 "message_id": message_id,

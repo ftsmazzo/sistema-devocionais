@@ -322,67 +322,36 @@ async def list_contatos(
 ):
     """
     Lista todos os contatos com score de engajamento
+    SIMPLIFICADO: Retorna todos os contatos primeiro, depois calcula score
     """
     try:
-        from app.devocional_service_v2 import DevocionalServiceV2
-        from app.routers.engagement_stats import get_contact_engagement_stats
-        from datetime import timedelta
-        from app.timezone_utils import now_brazil_naive
-        
+        # Query simples - SEM filtros complexos
         query = db.query(DevocionalContato)
         
-        # Se active_only foi especificado, filtrar
-        # active_only=True: apenas ativos
-        # active_only=False: apenas inativos  
-        # active_only=None: todos
         if active_only is not None:
             query = query.filter(DevocionalContato.active == active_only)
-        # Se não especificado, retornar todos (ativos e inativos)
         
         contatos = query.order_by(DevocionalContato.name, DevocionalContato.phone).offset(skip).limit(limit).all()
         
-        # Buscar dados de engajamento do banco (mais confiável)
+        logger.info(f"📋 Encontrados {len(contatos)} contatos no banco")
+        
+        if not contatos:
+            logger.warning("⚠️ Nenhum contato encontrado no banco!")
+            return []
+        
         from app.database import ContactEngagement
         
-        # Calcular score de engajamento para cada contato
         result = []
         for contato in contatos:
             try:
-                # Primeiro, tentar buscar do ContactEngagement (dados persistidos)
+                # Buscar score do ContactEngagement (se existir)
                 engagement_db = db.query(ContactEngagement).filter(
                     ContactEngagement.phone == contato.phone
                 ).first()
                 
+                engagement_score = 0.5  # Default
                 if engagement_db and engagement_db.engagement_score is not None:
-                    # Usar score do banco (mais confiável)
                     engagement_score = float(engagement_db.engagement_score)
-                else:
-                    # Se não tiver no banco, calcular baseado nos envios
-                    date_limit = now_brazil_naive() - timedelta(days=30)
-                    envios = db.query(DevocionalEnvio).filter(
-                        DevocionalEnvio.recipient_phone == contato.phone,
-                        DevocionalEnvio.sent_at >= date_limit
-                    ).all()
-                    
-                    total_sent = len(envios)
-                    total_delivered = sum(1 for e in envios if hasattr(e, 'message_status') and e.message_status in ['delivered', 'read'])
-                    total_read = sum(1 for e in envios if hasattr(e, 'message_status') and e.message_status == 'read')
-                    
-                    # Calcular score baseado em taxa de leitura
-                    if total_sent > 0:
-                        delivery_rate = total_delivered / total_sent
-                        read_rate = total_read / total_sent
-                        
-                        # Score = média ponderada: 40% entrega, 60% leitura
-                        if delivery_rate < 0.5:
-                            engagement_score = 0.2
-                        elif read_rate < 0.3:
-                            engagement_score = 0.3 + (read_rate * 0.4)
-                        else:
-                            engagement_score = 0.5 + (read_rate * 0.5)
-                    else:
-                        # Sem histórico, score neutro
-                        engagement_score = 0.5
                 
                 # Buscar última instância usada
                 last_envio = db.query(DevocionalEnvio).filter(
@@ -391,27 +360,38 @@ async def list_contatos(
                 
                 instance_name = last_envio.instance_name if last_envio else None
                 
-                contato_dict = ContatoResponse.model_validate(contato).model_dump()
-                contato_dict['engagement_score'] = round(engagement_score, 2)
-                contato_dict['instance_name'] = instance_name
-                result.append(ContatoResponse(**contato_dict))
+                # Criar resposta simples
+                result.append(ContatoResponse(
+                    id=contato.id,
+                    phone=contato.phone,
+                    name=contato.name,
+                    active=contato.active,
+                    created_at=contato.created_at,
+                    last_sent=contato.last_sent,
+                    total_sent=contato.total_sent or 0,
+                    engagement_score=round(engagement_score, 2),
+                    instance_name=instance_name
+                ))
             except Exception as e:
-                # Se houver erro, ainda assim retornar o contato com valores padrão
-                logger.warning(f"Erro ao calcular score para contato {contato.phone}: {e}", exc_info=True)
-                try:
-                    contato_dict = ContatoResponse.model_validate(contato).model_dump()
-                    contato_dict['engagement_score'] = 0.5
-                    contato_dict['instance_name'] = None
-                    result.append(ContatoResponse(**contato_dict))
-                except Exception as e2:
-                    logger.error(f"Erro crítico ao processar contato {contato.phone}: {e2}", exc_info=True)
-                    # Continuar com próximo contato
-                    continue
+                logger.error(f"❌ Erro ao processar contato {contato.phone}: {e}", exc_info=True)
+                # Retornar contato mesmo com erro
+                result.append(ContatoResponse(
+                    id=contato.id,
+                    phone=contato.phone,
+                    name=contato.name,
+                    active=contato.active,
+                    created_at=contato.created_at,
+                    last_sent=contato.last_sent,
+                    total_sent=contato.total_sent or 0,
+                    engagement_score=0.5,
+                    instance_name=None
+                ))
         
+        logger.info(f"✅ Retornando {len(result)} contatos")
         return result
     
     except Exception as e:
-        logger.error(f"Erro ao listar contatos: {e}", exc_info=True)
+        logger.error(f"❌ Erro ao listar contatos: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Erro: {str(e)}")
 
 
