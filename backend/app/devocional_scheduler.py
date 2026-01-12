@@ -212,12 +212,13 @@ def run_scheduler():
             current_hour = now_sp.hour
             current_minute = now_sp.minute
             
-            # Verificar se a configuração mudou (a cada 5 minutos)
-            if (now_sp - last_config_check).total_seconds() >= 300:
+            # Verificar se a configuração mudou (a cada minuto para resposta mais rápida)
+            if (now_sp - last_config_check).total_seconds() >= 60:
                 new_hour, new_minute = get_send_time_from_db()
                 if new_hour != hour or new_minute != minute:
+                    old_time = f"{hour:02d}:{minute:02d}"
                     hour, minute = new_hour, new_minute
-                    logger.info(f"⏰ Horário de envio atualizado dinamicamente para {hour:02d}:{minute:02d}")
+                    logger.info(f"⏰ Horário de envio atualizado dinamicamente: {old_time} -> {hour:02d}:{minute:02d}")
                 last_config_check = now_sp
             
             # Log de debug a cada hora para verificar funcionamento
