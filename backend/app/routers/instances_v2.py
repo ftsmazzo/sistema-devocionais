@@ -76,7 +76,29 @@ async def list_instances(
         service = InstanceService(db)
         instances = service.get_all_instances(sync=sync)
         
-        return [InstanceResponse.from_orm(inst) for inst in instances]
+        # Converter instâncias para dict com last_check como string
+        result = []
+        for inst in instances:
+            inst_dict = {
+                "id": inst.id,
+                "name": inst.name,
+                "api_url": inst.api_url,
+                "display_name": inst.display_name,
+                "status": inst.status,
+                "phone_number": inst.phone_number,
+                "messages_sent_today": inst.messages_sent_today,
+                "messages_sent_this_hour": inst.messages_sent_this_hour,
+                "max_messages_per_hour": inst.max_messages_per_hour,
+                "max_messages_per_day": inst.max_messages_per_day,
+                "priority": inst.priority,
+                "enabled": inst.enabled,
+                "last_check": inst.last_check.isoformat() if inst.last_check else None,
+                "last_error": inst.last_error,
+                "error_count": inst.error_count,
+            }
+            result.append(InstanceResponse(**inst_dict))
+        
+        return result
     except Exception as e:
         logger.error(f"Erro ao listar instâncias: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Erro ao listar instâncias: {str(e)}")
