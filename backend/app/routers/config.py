@@ -5,10 +5,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import Optional
 from pydantic import BaseModel, Field
-from app.database import get_db
+from app.database import get_db, User, SystemConfig
 from app.config import settings
 from app.auth import get_current_user
-from app.database import User
 import logging
 import os
 
