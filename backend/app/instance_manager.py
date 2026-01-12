@@ -26,11 +26,12 @@ class InstanceStatus(Enum):
 @dataclass
 class EvolutionInstance:
     """Representa uma instância Evolution API"""
-    name: str
+    name: str  # Nome configurado no .env
     api_url: str
     api_key: str
     display_name: str  # Nome que aparece no WhatsApp
     phone_number: Optional[str] = None  # Número da instância
+    api_instance_name: Optional[str] = None  # Nome real da instância na Evolution API (pode ser diferente do name)
     status: InstanceStatus = InstanceStatus.INACTIVE
     last_check: Optional[datetime] = None
     messages_sent_today: int = 0
@@ -222,6 +223,8 @@ class InstanceManager:
                 # Procurar nossa instância (comparação case-insensitive e com/sem espaços)
                 found = False
                 our_instance_name = instance.name.strip().lower()
+                state = None
+                phone = None
                 
                 for inst_data in instances_data:
                     # Tentar diferentes campos de nome
@@ -233,68 +236,81 @@ class InstanceManager:
                     )
                     
                     if api_instance_name:
-                        # Comparação case-insensitive e removendo espaços
-                        if api_instance_name.strip().lower() == our_instance_name:
+                        api_name_normalized = api_instance_name.strip().lower()
+                        our_name_normalized = our_instance_name
+                        
+                        # Comparação case-insensitive e também verifica se contém ou é contido
+                        # Isso permite "Devocional" encontrar "Devocional-1" e vice-versa
+                        if (api_name_normalized == our_name_normalized or 
+                            api_name_normalized.startswith(our_name_normalized) or
+                            our_name_normalized.startswith(api_name_normalized)):
                             found = True
                             state = inst_data.get('state', 'unknown')
+                            
+                            # Salvar o nome real da instância na API (importante para chamadas)
+                            instance.api_instance_name = api_instance_name
+                            logger.info(f"Instância configurada como '{instance.name}' encontrada na API como '{api_instance_name}'")
+                            
+                            # Tentar obter número da instância
+                            phone = inst_data.get('phoneNumber') or inst_data.get('phone') or inst_data.get('number')
+                            if phone and not instance.phone_number:
+                                instance.phone_number = phone
+                                logger.info(f"Número da instância {instance.name} obtido: {phone}")
+                            
+                            logger.info(f"Instância {instance.name} encontrada (API: {api_instance_name}) com estado: {state}")
+                            break  # Encontrou, pode sair do loop
+                
+                # Se encontrou a instância, processar o estado
+                if found and state is not None:
+                    # Aceitar vários estados como válidos
+                    if state in ['open', 'connected', 'ready']:
+                        instance.status = InstanceStatus.ACTIVE
+                        instance.error_count = 0
+                        instance.last_check = datetime.now()
+                        logger.info(f"Instância {instance.name} marcada como ACTIVE (estado: {state})")
+                        return True
+                    elif state == 'unknown':
+                        # Estado "unknown" pode significar que a instância está funcionando mas não reportou status
+                        # Tentar verificar se conseguimos obter mais informações
+                        try:
+                            # Tentar buscar status mais detalhado
+                            status_url = f"{instance.api_url}/instance/connectionState/{instance.name}"
+                            status_response = requests.get(status_url, headers=headers, timeout=5)
+                            
+                            if status_response.status_code == 200:
+                                status_data = status_response.json()
+                                connection_state = status_data.get('state', 'unknown')
+                                
+                                if connection_state in ['open', 'connected', 'ready']:
+                                    instance.status = InstanceStatus.ACTIVE
+                                    instance.error_count = 0
+                                    instance.last_check = datetime.now()
+                                    logger.info(f"Instância {instance.name} com estado unknown mas connectionState={connection_state}, marcada como ACTIVE")
+                                    return True
+                        except Exception as e:
+                            logger.debug(f"Erro ao verificar connectionState de {instance.name}: {e}")
                         
-                        # Tentar obter número da instância
-                        phone = inst_data.get('phoneNumber') or inst_data.get('phone') or inst_data.get('number')
-                        if phone and not instance.phone_number:
-                            instance.phone_number = phone
-                            logger.info(f"Número da instância {instance.name} obtido: {phone}")
-                        
-                        logger.info(f"Instância {instance.name} encontrada com estado: {state}")
-                        
-                        # Aceitar vários estados como válidos
-                        if state in ['open', 'connected', 'ready']:
+                        # Se não conseguiu verificar ou connectionState também é unknown
+                        # Verificar se houve envios recentes (últimas 24h) ou se mensagens foram enviadas hoje
+                        if instance.messages_sent_today > 0 or (instance.last_message_time and 
+                            (datetime.now() - instance.last_message_time).total_seconds() < 86400):
                             instance.status = InstanceStatus.ACTIVE
                             instance.error_count = 0
                             instance.last_check = datetime.now()
-                            logger.info(f"Instância {instance.name} marcada como ACTIVE (estado: {state})")
+                            logger.info(f"Instância {instance.name} com estado unknown mas funcionou recentemente (envios hoje: {instance.messages_sent_today}), marcada como ACTIVE")
                             return True
-                        elif state == 'unknown':
-                            # Estado "unknown" pode significar que a instância está funcionando mas não reportou status
-                            # Tentar verificar se conseguimos obter mais informações
-                            try:
-                                # Tentar buscar status mais detalhado
-                                status_url = f"{instance.api_url}/instance/connectionState/{instance.name}"
-                                status_response = requests.get(status_url, headers=headers, timeout=5)
-                                
-                                if status_response.status_code == 200:
-                                    status_data = status_response.json()
-                                    connection_state = status_data.get('state', 'unknown')
-                                    
-                                    if connection_state in ['open', 'connected', 'ready']:
-                                        instance.status = InstanceStatus.ACTIVE
-                                        instance.error_count = 0
-                                        instance.last_check = datetime.now()
-                                        logger.info(f"Instância {instance.name} com estado unknown mas connectionState={connection_state}, marcada como ACTIVE")
-                                        return True
-                            except Exception as e:
-                                logger.debug(f"Erro ao verificar connectionState de {instance.name}: {e}")
-                            
-                            # Se não conseguiu verificar ou connectionState também é unknown
-                            # Verificar se houve envios recentes (últimas 24h) ou se mensagens foram enviadas hoje
-                            if instance.messages_sent_today > 0 or (instance.last_message_time and 
-                                (datetime.now() - instance.last_message_time).total_seconds() < 86400):
-                                instance.status = InstanceStatus.ACTIVE
-                                instance.error_count = 0
-                                instance.last_check = datetime.now()
-                                logger.info(f"Instância {instance.name} com estado unknown mas funcionou recentemente (envios hoje: {instance.messages_sent_today}), marcada como ACTIVE")
-                                return True
-                            else:
-                                # Se não funcionou recentemente, marcar como INACTIVE mas não ERROR
-                                # Isso permite que o sistema tente usar a instância mesmo assim
-                                instance.status = InstanceStatus.INACTIVE
-                                instance.last_check = datetime.now()
-                                logger.warning(f"Instância {instance.name} está {state}, marcada como INACTIVE (mas pode funcionar - tentará usar se necessário)")
-                                return False
                         else:
+                            # Se não funcionou recentemente, marcar como INACTIVE mas não ERROR
+                            # Isso permite que o sistema tente usar a instância mesmo assim
                             instance.status = InstanceStatus.INACTIVE
                             instance.last_check = datetime.now()
-                            logger.warning(f"Instância {instance.name} está {state}, marcada como INACTIVE")
+                            logger.warning(f"Instância {instance.name} está {state}, marcada como INACTIVE (mas pode funcionar - tentará usar se necessário)")
                             return False
+                    else:
+                        instance.status = InstanceStatus.INACTIVE
+                        instance.last_check = datetime.now()
+                        logger.warning(f"Instância {instance.name} está {state}, marcada como INACTIVE")
+                        return False
                 
                 # Instância não encontrada
                 if not found:

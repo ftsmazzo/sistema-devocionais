@@ -261,8 +261,10 @@ class DevocionalServiceV2:
             "apikey": instance.api_key
         }
         
-        # URL da API
-        url = f"{instance.api_url}/message/sendText/{instance.name}"
+        # URL da API - usar o nome real da instância na API (pode ser diferente do configurado)
+        # Se api_instance_name foi descoberto, usar ele; senão usar o name configurado
+        api_instance_name = getattr(instance, 'api_instance_name', None) or instance.name
+        url = f"{instance.api_url}/message/sendText/{api_instance_name}"
         
         try:
             logger.info(f"Enviando mensagem para {phone} via instância {instance.name} (tentativa {retry_count + 1})")

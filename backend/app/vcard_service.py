@@ -94,18 +94,21 @@ class VCardService:
                 "apikey": instance.api_key
             }
             
+            # Usar o nome real da instância na API (pode ser diferente do configurado)
+            api_instance_name = getattr(instance, 'api_instance_name', None) or instance.name
+            
             # Tentar diferentes endpoints para vCard (Evolution API pode variar)
             endpoints_to_try = [
-                (f"{instance.api_url}/message/sendMedia/{instance.name}", {
+                (f"{instance.api_url}/message/sendMedia/{api_instance_name}", {
                     "number": recipient_clean,
                     "mediatype": "vcard",
                     "media": vcard_content
                 }),
-                (f"{instance.api_url}/message/sendVCard/{instance.name}", {
+                (f"{instance.api_url}/message/sendVCard/{api_instance_name}", {
                     "number": recipient_clean,
                     "vcard": vcard_content
                 }),
-                (f"{instance.api_url}/message/sendContact/{instance.name}", {
+                (f"{instance.api_url}/message/sendContact/{api_instance_name}", {
                     "number": recipient_clean,
                     "contacts": [{
                         "displayName": contact_name,
@@ -116,7 +119,7 @@ class VCardService:
                     }]
                 }),
                 # Formato alternativo para sendMedia
-                (f"{instance.api_url}/message/sendMedia/{instance.name}", {
+                (f"{instance.api_url}/message/sendMedia/{api_instance_name}", {
                     "number": recipient_clean,
                     "media": vcard_content,
                     "mimetype": "text/vcard"
@@ -227,7 +230,9 @@ Que Deus abençoe seu dia! 🙏"""
                 "apikey": instance.api_key
             }
             
-            url = f"{instance.api_url}/message/sendText/{instance.name}"
+            # Usar o nome real da instância na API (pode ser diferente do configurado)
+            api_instance_name = getattr(instance, 'api_instance_name', None) or instance.name
+            url = f"{instance.api_url}/message/sendText/{api_instance_name}"
             
             payload = {
                 "number": recipient_clean,
