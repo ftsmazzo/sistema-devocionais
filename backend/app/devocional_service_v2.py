@@ -616,8 +616,8 @@ class DevocionalServiceV2:
             if self.shield and self.shield.should_take_break():
                 self.shield.take_break()
             
-            # Enviar mensagem
-            result = self.send_devocional(phone, message, name, retry=True)
+            # Enviar mensagem - PASSAR A INSTÂNCIA SELECIONADA
+            result = self.send_devocional(phone, message, name, retry=True, instance_name=instance.name if instance else None)
             results.append(result)
             
             # Atualizar engajamento (assumindo que não houve resposta por enquanto)
@@ -630,7 +630,7 @@ class DevocionalServiceV2:
             # IMPORTANTE: Verificar e enviar mensagem de consentimento APÓS primeiro envio
             # A verificação deve ser feita ANTES do total_sent ser incrementado no router/scheduler
             # Por isso verificamos se total_sent == 0 (ainda não enviou) ou se acabou de enviar
-            logger.debug(f"🔍 Verificando consentimento para {phone}: result.success={result.success}, send_contact_request={self.send_contact_request}")
+            logger.info(f"🔍 Verificando consentimento para {phone}: result.success={result.success}, send_contact_request={self.send_contact_request}")
             
             if result.success and self.send_contact_request:
                 try:
@@ -646,32 +646,35 @@ class DevocionalServiceV2:
                         if db_contact:
                             # Se total_sent == 0, acabou de enviar o primeiro (momento certo para consentimento)
                             current_total_sent = db_contact.total_sent or 0
-                            logger.debug(f"📊 Contato {phone}: total_sent={current_total_sent}")
+                            logger.info(f"📊 Contato {phone}: total_sent={current_total_sent} (verificando se deve enviar consentimento)")
                             
                             # Só processar consentimento se SEND_CONTACT_REQUEST estiver habilitado
+                            # IMPORTANTE: Verificar ANTES do router incrementar total_sent
                             if current_total_sent == 0:
+                                logger.info(f"✅ Contato {phone} tem total_sent=0, deve enviar consentimento")
                                 try:
                                     consent_service = ConsentService(db_consent)
                                     consent = consent_service.get_or_create_consent(phone)
                                     
                                     # Verificar se já enviou mensagem de consentimento
                                     consent_message_sent = getattr(consent, 'consent_message_sent', False)
-                                    logger.debug(f"📋 Consentimento para {phone}: consent_message_sent={consent_message_sent}")
+                                    logger.info(f"📋 Consentimento para {phone}: consent_message_sent={consent_message_sent}")
                                     
                                     if not consent_message_sent:
                                         logger.info(f"📨 Enviando mensagem de consentimento para {name or phone} (primeiro envio, total_sent=0)")
-                                        instance = self.instance_manager.get_instance_by_name(result.instance_name)
-                                        if instance:
+                                        # Usar a mesma instância que enviou o devocional
+                                        consent_instance = instance if instance else self.instance_manager.get_instance_by_name(result.instance_name)
+                                        if consent_instance:
                                             # Adicionar pequeno delay antes de enviar consentimento (2-3 segundos)
                                             time.sleep(2)
                                             
-                                            consent_result = consent_service.send_consent_message(instance, phone, name)
+                                            consent_result = consent_service.send_consent_message(consent_instance, phone, name)
                                             if consent_result.get("success"):
                                                 logger.info(f"✅ Mensagem de consentimento enviada para {phone}")
                                             else:
                                                 logger.error(f"❌ Erro ao enviar mensagem de consentimento: {consent_result.get('error')}")
                                         else:
-                                            logger.error(f"❌ Instância {result.instance_name} não encontrada para enviar consentimento")
+                                            logger.error(f"❌ Instância não encontrada para enviar consentimento. Tentou: {result.instance_name if result.instance_name else 'N/A'}")
                                     else:
                                         logger.info(f"ℹ️ Mensagem de consentimento já enviada para {phone} (pulando)")
                                 except AttributeError as attr_err:
