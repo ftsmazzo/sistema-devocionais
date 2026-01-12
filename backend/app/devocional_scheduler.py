@@ -78,6 +78,7 @@ def send_daily_devocional():
             
             # Criar registros de agendamento antes de enviar
             scheduled_time = now_brazil_naive()
+            agendamentos_list = []
             for contact in contacts:
                 agendamento = AgendamentoEnvio(
                     devocional_id=devocional_id,
@@ -85,13 +86,21 @@ def send_daily_devocional():
                     scheduled_for=scheduled_time,
                     recipient_phone=contact.phone,
                     recipient_name=contact.name,
-                    message_text=message,
+                    message_text=message[:500] if message else None,  # Limitar tamanho
                     status="pending",
                     agendamento_type="automatico"
                 )
                 db.add(agendamento)
+                agendamentos_list.append(agendamento)
             
-            db.flush()  # Para obter IDs dos agendamentos
+            # Fazer commit dos agendamentos ANTES de enviar
+            try:
+                db.commit()
+                logger.info(f"✅ {len(agendamentos_list)} agendamentos criados no banco de dados")
+            except Exception as e:
+                logger.error(f"Erro ao salvar agendamentos: {e}", exc_info=True)
+                db.rollback()
+                raise
             
             # Enviar mensagens
             results = devocional_service.send_bulk_devocionais(
@@ -107,10 +116,7 @@ def send_daily_devocional():
             logger.info(f"Envio automático concluído: {sent} enviadas, {failed} falharam")
             
             # Atualizar agendamentos e registrar envios
-            agendamentos = db.query(AgendamentoEnvio).filter(
-                AgendamentoEnvio.scheduled_for == scheduled_time,
-                AgendamentoEnvio.agendamento_type == "automatico"
-            ).all()
+            # Usar os agendamentos já criados (não precisa buscar novamente)
             
             # Registrar envios no banco e atualizar contatos
             for i, result in enumerate(results):
@@ -118,11 +124,11 @@ def send_daily_devocional():
                     contact = contacts[i]
                     
                     # Atualizar agendamento correspondente
-                    if i < len(agendamentos):
-                        agendamento = agendamentos[i]
-                        agendamento.sent_at = result.timestamp.replace(tzinfo=None) if result.timestamp else now_brazil_naive()
+                    if i < len(agendamentos_list):
+                        agendamento = agendamentos_list[i]
+                        agendamento.sent_at = result.timestamp if result.timestamp else now_brazil_naive()
                         agendamento.status = "sent" if result.success else "failed"
-                        agendamento.error_message = result.error
+                        agendamento.error_message = result.error[:500] if result.error else None  # Limitar tamanho
                         agendamento.instance_name = result.instance_name
                     
                     # Registrar envio no banco
