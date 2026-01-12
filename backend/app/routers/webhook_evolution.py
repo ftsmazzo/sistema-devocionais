@@ -4,7 +4,7 @@ Status de mensagens: sent, delivered, read, etc.
 """
 from fastapi import APIRouter, Request, HTTPException, Header, Depends
 from sqlalchemy.orm import Session
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from datetime import datetime
 from pydantic import BaseModel
 from app.database import get_db, DevocionalEnvio
@@ -16,6 +16,10 @@ import json
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/webhook/evolution", tags=["webhook-evolution"])
+
+# Armazenar últimos eventos recebidos para debug (em memória, máximo 50)
+_recent_events: List[Dict] = []
+MAX_DEBUG_EVENTS = 50
 
 
 class EvolutionWebhookEvent(BaseModel):
@@ -69,19 +73,40 @@ async def receive_message_status(
             logger.error(f"Erro ao parsear JSON do webhook: {e}")
             raise HTTPException(status_code=400, detail="JSON inválido")
         
+        # Armazenar evento para debug
+        event_debug = {
+            "timestamp": datetime.now().isoformat(),
+            "body": body,
+            "headers": dict(request.headers)
+        }
+        _recent_events.insert(0, event_debug)
+        if len(_recent_events) > MAX_DEBUG_EVENTS:
+            _recent_events.pop()
+        
         event = body.get("event", "")
         instance_name = body.get("instance", "")
         data = body.get("data", {})
         
-        logger.info(f"Webhook recebido: event={event}, instance={instance_name}")
+        # Log detalhado do que está chegando
+        logger.info(f"🔔 Webhook recebido: event={event}, instance={instance_name}")
+        logger.info(f"📦 Body completo recebido: {json.dumps(body, indent=2, default=str)}")
         
         # Processar apenas eventos de status de mensagem
         if event == "message.ack":
-            await process_message_ack(db, instance_name, data)
+            result = await process_message_ack(db, instance_name, data)
+            return {
+                "success": True, 
+                "message": "Webhook processado",
+                "event": event,
+                "processed": result
+            }
         else:
             logger.debug(f"Evento ignorado: {event}")
-        
-        return {"success": True, "message": "Webhook processado"}
+            return {
+                "success": True, 
+                "message": "Webhook recebido mas evento ignorado",
+                "event": event
+            }
     
     except HTTPException:
         raise
@@ -102,18 +127,36 @@ async def process_message_ack(
         db: Sessão do banco de dados
         instance_name: Nome da instância
         data: Dados do evento
+    
+    Returns:
+        Dict com informações do processamento
     """
     try:
-        # Extrair informações
+        # Log detalhado dos dados recebidos
+        logger.info(f"📨 Processando message.ack: data={json.dumps(data, indent=2, default=str)}")
+        
+        # Extrair informações - tentar diferentes formatos
+        # Formato 1: data.key.id
         key = data.get("key", {})
-        message_id = key.get("id")
-        remote_jid = key.get("remoteJid", "")
+        message_id = key.get("id") if isinstance(key, dict) else None
+        
+        # Formato 2: data.id (alternativo)
+        if not message_id:
+            message_id = data.get("id")
+        
+        # Formato 3: data.messageId (alternativo)
+        if not message_id:
+            message_id = data.get("messageId")
+        
+        remote_jid = key.get("remoteJid", "") if isinstance(key, dict) else data.get("remoteJid", "")
         ack = data.get("ack", 0)  # 1=sent, 2=delivered, 3=read
         timestamp = data.get("timestamp")
         
+        logger.info(f"🔍 Extraído: message_id={message_id}, ack={ack}, remote_jid={remote_jid}")
+        
         if not message_id:
-            logger.warning("Webhook sem message_id, ignorando")
-            return
+            logger.warning(f"⚠️ Webhook sem message_id, ignorando. Data recebida: {data}")
+            return {"error": "message_id não encontrado", "data_received": data}
         
         # Extrair telefone do remoteJid (formato: 5516999999999@s.whatsapp.net)
         phone = remote_jid.split("@")[0] if "@" in remote_jid else remote_jid
@@ -124,8 +167,21 @@ async def process_message_ack(
         ).first()
         
         if not envio:
-            logger.debug(f"Envio não encontrado para message_id: {message_id}")
-            return
+            # Tentar buscar pelos últimos envios para debug
+            recent_envios = db.query(DevocionalEnvio).order_by(
+                DevocionalEnvio.sent_at.desc()
+            ).limit(5).all()
+            
+            logger.warning(f"⚠️ Envio não encontrado para message_id: {message_id}")
+            logger.info(f"📋 Últimos 5 message_ids no banco:")
+            for e in recent_envios:
+                logger.info(f"   - message_id: {e.message_id}, phone: {e.recipient_phone}, status: {e.message_status}")
+            
+            return {
+                "error": f"Envio não encontrado para message_id: {message_id}",
+                "message_id_received": message_id,
+                "recent_message_ids": [e.message_id for e in recent_envios if e.message_id]
+            }
         
         # Converter timestamp para datetime
         from app.timezone_utils import now_brazil_naive
@@ -146,20 +202,22 @@ async def process_message_ack(
         # ACK 3 = read (lido/visualizado)
         
         updated = False
+        ack_description = {1: "sent", 2: "delivered", 3: "read"}.get(ack, f"unknown({ack})")
+        logger.info(f"📊 Processando ACK {ack} ({ack_description}) para message_id {message_id}")
         
         if ack == 1:  # Sent
             if envio.message_status != "sent":
                 envio.message_status = "sent"
                 envio.status = "sent"
                 updated = True
-                logger.info(f"Mensagem {message_id} enviada para {phone}")
+                logger.info(f"✅ Mensagem {message_id} enviada para {phone}")
         
         elif ack == 2:  # Delivered
             if envio.message_status != "delivered":
                 envio.message_status = "delivered"
                 envio.delivered_at = event_time
                 updated = True
-                logger.info(f"Mensagem {message_id} entregue para {phone}")
+                logger.info(f"✅ Mensagem {message_id} entregue para {phone}")
         
         elif ack == 3:  # Read
             if envio.message_status != "read":
@@ -169,21 +227,39 @@ async def process_message_ack(
                 if not envio.delivered_at:
                     envio.delivered_at = event_time
                 updated = True
-                logger.info(f"Mensagem {message_id} lida por {phone}")
+                logger.info(f"✅✅ Mensagem {message_id} LIDA por {phone}")
                 
                 # Atualizar engajamento no ShieldService
-                # Buscar instância do ShieldService (precisa ser injetada ou global)
-                # Por enquanto, vamos atualizar via contato
                 update_engagement_from_read(db, phone, True)
+        else:
+            logger.warning(f"⚠️ ACK desconhecido: {ack} para message_id {message_id}")
         
         if updated:
             db.commit()
-            logger.debug(f"Status atualizado para message_id {message_id}: ack={ack}")
+            logger.info(f"✅ Status atualizado para message_id {message_id}: ack={ack} -> status={envio.message_status}")
+            return {
+                "success": True,
+                "message_id": message_id,
+                "ack": ack,
+                "ack_description": ack_description,
+                "status_updated": envio.message_status,
+                "phone": phone
+            }
+        else:
+            logger.debug(f"ℹ️ Status não atualizado (já estava em {envio.message_status}) para ack={ack}")
+            return {
+                "success": True,
+                "message_id": message_id,
+                "ack": ack,
+                "ack_description": ack_description,
+                "status": envio.message_status,
+                "already_updated": True
+            }
     
     except Exception as e:
-        logger.error(f"Erro ao processar message.ack: {e}", exc_info=True)
+        logger.error(f"❌ Erro ao processar message.ack: {e}", exc_info=True)
         db.rollback()
-        raise
+        return {"error": str(e), "data": data}
 
 
 def update_engagement_from_read(db: Session, phone: str, was_read: bool):
@@ -214,7 +290,7 @@ def update_engagement_from_read(db: Session, phone: str, was_read: bool):
             
             if was_read and phone in devocional_service.shield.engagement_data:
                 data = devocional_service.shield.engagement_data[phone]
-                logger.info(f"Engajamento atualizado para {phone}: score={data.engagement_score:.2f} (visualizou)")
+                logger.info(f"📈 Engajamento atualizado para {phone}: score={data.engagement_score:.2f} (visualizou)")
         else:
             logger.warning("ShieldService não está habilitado, não é possível atualizar engajamento")
     
@@ -230,4 +306,44 @@ async def test_webhook():
         "message": "Webhook da Evolution API está funcionando",
         "endpoint": "/webhook/evolution/message-status",
         "instructions": "Configure este endpoint na Evolution API como webhook para receber eventos de status de mensagens"
+    }
+
+
+@router.get("/debug/events")
+async def debug_recent_events(limit: int = 10):
+    """
+    Endpoint de debug para ver os últimos eventos recebidos
+    
+    Útil para verificar se os eventos estão chegando e em que formato
+    """
+    return {
+        "total_events": len(_recent_events),
+        "events": _recent_events[:limit]
+    }
+
+
+@router.get("/debug/message-ids")
+async def debug_message_ids(db: Session = Depends(get_db), limit: int = 10):
+    """
+    Endpoint de debug para ver os últimos message_ids salvos no banco
+    
+    Útil para comparar com os message_ids que estão chegando no webhook
+    """
+    envios = db.query(DevocionalEnvio).order_by(
+        DevocionalEnvio.sent_at.desc()
+    ).limit(limit).all()
+    
+    return {
+        "total": len(envios),
+        "message_ids": [
+            {
+                "message_id": e.message_id,
+                "phone": e.recipient_phone,
+                "status": e.message_status,
+                "sent_at": e.sent_at.isoformat() if e.sent_at else None,
+                "delivered_at": e.delivered_at.isoformat() if e.delivered_at else None,
+                "read_at": e.read_at.isoformat() if e.read_at else None
+            }
+            for e in envios
+        ]
     }
