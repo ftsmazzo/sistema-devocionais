@@ -205,10 +205,17 @@ class EvolutionInstanceConfig(Base):
     api_url = Column(String(255), nullable=False)  # URL da API
     api_key = Column(String(255), nullable=False)  # API Key
     display_name = Column(String(100))  # Nome de exibição
+    phone_number = Column(String(20), nullable=True)  # Número da instância
+    status = Column(String(20), default="unknown", index=True)  # active, inactive, error, blocked, unknown
     max_messages_per_hour = Column(Integer, default=20)  # Limite por hora
     max_messages_per_day = Column(Integer, default=200)  # Limite por dia
     priority = Column(Integer, default=1)  # Prioridade (menor = maior prioridade)
     enabled = Column(Boolean, default=True, index=True)  # Se está habilitada
+    last_check = Column(DateTime, nullable=True)  # Última verificação
+    messages_sent_today = Column(Integer, default=0)  # Mensagens enviadas hoje
+    messages_sent_this_hour = Column(Integer, default=0)  # Mensagens enviadas nesta hora
+    error_count = Column(Integer, default=0)  # Contador de erros
+    last_error = Column(String(500), nullable=True)  # Último erro
     
     # Timestamps
     created_at = Column(DateTime, default=now_brazil)

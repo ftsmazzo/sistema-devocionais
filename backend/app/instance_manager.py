@@ -81,7 +81,9 @@ class InstanceManager:
                     "error": InstanceStatus.ERROR,
                     "blocked": InstanceStatus.BLOCKED,
                 }
-                status = status_map.get(db_inst.status, InstanceStatus.INACTIVE)
+                # Usar getattr para evitar erro se status não existir
+                status_str = getattr(db_inst, 'status', 'unknown') or 'unknown'
+                status = status_map.get(status_str, InstanceStatus.INACTIVE)
                 
                 instance = EvolutionInstance(
                     name=db_inst.name,
