@@ -1,6 +1,6 @@
 """
 Serviço para sincronizar status de mensagens com Evolution API
-Consulta periodicamente a Evolution API para atualizar status de mensagens pendentes
+Consulta periodicamente a Evolution API para atualizar status de mensagens pendentes/entregues
 """
 import logging
 import requests
@@ -24,27 +24,28 @@ class MessageStatusSync:
     
     def sync_pending_messages(self, hours_back: int = 24) -> Dict[str, Any]:
         """
-        Sincroniza status de mensagens pendentes com Evolution API
+        Sincroniza status de mensagens pendentes/entregues com Evolution API
+        Busca mensagens recentes da Evolution API e compara com o banco
         
         Args:
-            hours_back: Quantas horas atrás buscar mensagens pendentes
+            hours_back: Quantas horas atrás buscar mensagens
             
         Returns:
             Dict com estatísticas da sincronização
         """
         try:
-            # Buscar mensagens pendentes das últimas X horas
+            # Buscar mensagens que ainda não foram lidas das últimas X horas
             cutoff_time = now_brazil_naive() - timedelta(hours=hours_back)
             
-            pending_messages = self.db.query(DevocionalEnvio).filter(
-                DevocionalEnvio.message_status.in_(["pending", "sent"]),
+            messages_to_check = self.db.query(DevocionalEnvio).filter(
+                DevocionalEnvio.message_status.in_(["pending", "sent", "delivered"]),
                 DevocionalEnvio.sent_at >= cutoff_time,
                 DevocionalEnvio.message_id.isnot(None)
             ).all()
             
-            logger.info(f"🔄 Sincronizando {len(pending_messages)} mensagens pendentes")
+            logger.info(f"🔄 Sincronizando {len(messages_to_check)} mensagens com Evolution API")
             
-            if not pending_messages:
+            if not messages_to_check:
                 return {
                     "success": True,
                     "messages_checked": 0,
@@ -54,7 +55,7 @@ class MessageStatusSync:
             
             # Agrupar por instância
             messages_by_instance = {}
-            for msg in pending_messages:
+            for msg in messages_to_check:
                 instance_name = msg.instance_name
                 if not instance_name:
                     continue
@@ -65,7 +66,7 @@ class MessageStatusSync:
             updated_count = 0
             error_count = 0
             
-            # Para cada instância, buscar status das mensagens
+            # Para cada instância, buscar mensagens recentes da Evolution API
             for instance_name, messages in messages_by_instance.items():
                 try:
                     instance_config = self.instance_service.get_instance_by_name(instance_name)
@@ -73,35 +74,64 @@ class MessageStatusSync:
                         logger.warning(f"⚠️ Instância {instance_name} não encontrada no banco")
                         continue
                     
-                    # NOTA: A Evolution API não tem endpoint para buscar status por message_id
-                    # O status só vem via webhook. Por isso, este sync apenas verifica se há
-                    # mensagens muito antigas que ainda estão pendentes e marca como possivelmente falhadas
+                    # Buscar mensagens recentes da Evolution API
+                    recent_messages = self._fetch_recent_messages_from_evolution(
+                        instance_config.api_url,
+                        instance_config.api_key,
+                        instance_name,
+                        limit=100  # Buscar últimas 100 mensagens
+                    )
+                    
+                    if not recent_messages:
+                        logger.debug(f"ℹ️ Nenhuma mensagem recente encontrada na Evolution API para {instance_name}")
+                        continue
+                    
+                    # Criar mapa de message_id -> status da Evolution API
+                    evolution_status_map = {}
+                    for evo_msg in recent_messages:
+                        msg_id = evo_msg.get("key", {}).get("id") or evo_msg.get("keyId") or evo_msg.get("id")
+                        if msg_id:
+                            # Verificar status mais recente da mensagem
+                            status_updates = evo_msg.get("status", [])
+                            if status_updates:
+                                # Pegar último status (mais recente)
+                                last_status = status_updates[-1] if isinstance(status_updates, list) else status_updates
+                                evolution_status_map[msg_id] = last_status
+                            else:
+                                # Se não tem status explícito, verificar se tem ack
+                                ack = evo_msg.get("ack")
+                                if ack == 1:
+                                    evolution_status_map[msg_id] = "SERVER_ACK"
+                                elif ack == 2:
+                                    evolution_status_map[msg_id] = "DELIVERY_ACK"
+                                elif ack == 3:
+                                    evolution_status_map[msg_id] = "READ"
+                    
+                    # Comparar e atualizar mensagens do banco
                     for msg in messages:
                         try:
-                            # Se mensagem está pendente há mais de 1 hora, pode ter falhado
-                            time_since_sent = now_brazil_naive() - msg.sent_at
-                            if time_since_sent.total_seconds() > 3600:  # 1 hora
-                                # Marcar como possivelmente falhada se ainda está pending
-                                if msg.message_status == "pending":
-                                    msg.message_status = "failed"
-                                    msg.status = "failed"
+                            evo_status = evolution_status_map.get(msg.message_id)
+                            if evo_status:
+                                # Atualizar status se necessário
+                                updated = self._update_status_from_evolution(msg, evo_status)
+                                if updated:
                                     updated_count += 1
-                                    logger.info(f"⚠️ Mensagem {msg.message_id} marcada como falhada (pendente há mais de 1h)")
                         except Exception as e:
                             logger.error(f"❌ Erro ao processar mensagem {msg.message_id}: {e}")
                             error_count += 1
                             
                 except Exception as e:
-                    logger.error(f"❌ Erro ao processar instância {instance_name}: {e}")
+                    logger.error(f"❌ Erro ao processar instância {instance_name}: {e}", exc_info=True)
                     error_count += len(messages)
             
             self.db.commit()
             
-            logger.info(f"✅ Sincronização concluída: {updated_count} atualizadas, {error_count} erros")
+            if updated_count > 0:
+                logger.info(f"✅ Sincronização concluída: {updated_count} atualizadas, {error_count} erros")
             
             return {
                 "success": True,
-                "messages_checked": len(pending_messages),
+                "messages_checked": len(messages_to_check),
                 "messages_updated": updated_count,
                 "errors": error_count
             }
@@ -117,75 +147,108 @@ class MessageStatusSync:
                 "errors": 1
             }
     
-    def _fetch_message_status(
+    def _fetch_recent_messages_from_evolution(
         self,
         api_url: str,
         api_key: str,
         instance_name: str,
-        message_id: str
-    ) -> Optional[Dict[str, Any]]:
+        limit: int = 100
+    ) -> List[Dict[str, Any]]:
         """
-        NOTA: A Evolution API não tem endpoint direto para buscar status por message_id.
-        O status só vem via webhook. Este método é um placeholder para futuras implementações.
-        Por enquanto, retornamos None e confiamos apenas no webhook.
+        Busca mensagens recentes da Evolution API
         
-        TODO: Se a Evolution API adicionar endpoint para buscar status, implementar aqui.
+        Args:
+            api_url: URL da Evolution API
+            api_key: API Key
+            instance_name: Nome da instância
+            limit: Quantidade de mensagens a buscar
+            
+        Returns:
+            Lista de mensagens da Evolution API
         """
-        # A Evolution API não expõe endpoint para buscar status de mensagem específica
-        # O status só é disponibilizado via webhook em tempo real
-        # Por isso, este método retorna None e confiamos apenas no webhook
-        logger.debug(f"ℹ️ Evolution API não tem endpoint para buscar status por ID. Confiando apenas no webhook.")
-        return None
+        try:
+            headers = {"apikey": api_key}
+            
+            # Tentar diferentes endpoints da Evolution API
+            endpoints_to_try = [
+                f"{api_url}/chat/fetchMessages/{instance_name}",
+                f"{api_url}/message/fetchMessages/{instance_name}",
+                f"{api_url}/chat/getMessages/{instance_name}",
+            ]
+            
+            for endpoint in endpoints_to_try:
+                try:
+                    response = requests.get(
+                        endpoint,
+                        headers=headers,
+                        params={"limit": limit},
+                        timeout=10
+                    )
+                    
+                    if response.status_code == 200:
+                        messages = response.json()
+                        if isinstance(messages, list):
+                            logger.debug(f"✅ Buscadas {len(messages)} mensagens de {endpoint}")
+                            return messages
+                        elif isinstance(messages, dict) and "messages" in messages:
+                            msgs = messages.get("messages", [])
+                            logger.debug(f"✅ Buscadas {len(msgs)} mensagens de {endpoint}")
+                            return msgs
+                except Exception as e:
+                    logger.debug(f"Endpoint {endpoint} não funcionou: {e}")
+                    continue
+            
+            logger.warning(f"⚠️ Nenhum endpoint funcionou para buscar mensagens de {instance_name}")
+            return []
+            
+        except Exception as e:
+            logger.error(f"❌ Erro ao buscar mensagens da Evolution API: {e}", exc_info=True)
+            return []
     
-    def _update_message_status(
+    def _update_status_from_evolution(
         self,
         envio: DevocionalEnvio,
-        status_data: Dict[str, Any],
-        instance_name: str
+        evo_status: str
     ) -> bool:
         """
-        Atualiza status de uma mensagem no banco
+        Atualiza status de uma mensagem baseado no status da Evolution API
         
         Args:
             envio: Registro de envio no banco
-            status_data: Dados de status da Evolution API
-            instance_name: Nome da instância
+            evo_status: Status da Evolution API (SERVER_ACK, DELIVERY_ACK, READ)
             
         Returns:
             True se atualizou, False caso contrário
         """
         try:
-            status = status_data.get("status", "").upper()
-            phone = status_data.get("phone") or envio.recipient_phone
-            
             updated = False
+            phone = envio.recipient_phone
             
-            # Mapear status da Evolution API
-            if status == "SERVER_ACK" and envio.message_status != "sent":
+            if evo_status == "SERVER_ACK" and envio.message_status != "sent":
                 envio.message_status = "sent"
                 envio.status = "sent"
                 updated = True
-                logger.debug(f"✅ Mensagem {envio.message_id} atualizada para SENT")
+                logger.debug(f"✅ Sync: Mensagem {envio.message_id} atualizada para SENT")
                 
-            elif status == "DELIVERY_ACK" and envio.message_status not in ["delivered", "read"]:
+            elif evo_status == "DELIVERY_ACK" and envio.message_status not in ["delivered", "read"]:
                 envio.message_status = "delivered"
                 envio.delivered_at = now_brazil_naive()
                 updated = True
-                logger.debug(f"✅ Mensagem {envio.message_id} atualizada para DELIVERED")
+                logger.info(f"✅ Sync: Mensagem {envio.message_id} atualizada para DELIVERED")
                 
                 # Atualizar engajamento
-                update_engagement_from_delivered(self.db, phone, True)
+                update_engagement_from_delivered(self.db, phone, True, envio.message_id)
                 
-            elif status == "READ" and envio.message_status != "read":
+            elif evo_status == "READ" and envio.message_status != "read":
                 envio.message_status = "read"
                 envio.read_at = now_brazil_naive()
                 if not envio.delivered_at:
                     envio.delivered_at = envio.read_at
                 updated = True
-                logger.debug(f"✅✅ Mensagem {envio.message_id} atualizada para READ")
+                logger.info(f"✅✅ Sync: Mensagem {envio.message_id} atualizada para READ")
                 
                 # Atualizar engajamento
-                update_engagement_from_read(self.db, phone, True)
+                update_engagement_from_read(self.db, phone, True, envio.message_id)
             
             return updated
             
