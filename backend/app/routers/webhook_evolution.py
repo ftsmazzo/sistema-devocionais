@@ -235,13 +235,30 @@ async def process_message_ack(
             logger.warning(f"⚠️ Webhook sem message_id, ignorando. Data recebida: {data}")
             return {"error": "message_id não encontrado", "data_received": data}
         
-        # Extrair telefone do remoteJid (formato: 5516999999999@s.whatsapp.net)
-        phone = remote_jid.split("@")[0] if "@" in remote_jid else remote_jid
-        
-        # Buscar envio pelo message_id
+        # IMPORTANTE: Buscar o envio PRIMEIRO pelo message_id
+        # Depois extrair o telefone do banco, pois o webhook pode não ter remoteJid quando é READ
         envio = db.query(DevocionalEnvio).filter(
             DevocionalEnvio.message_id == message_id
         ).first()
+        
+        # Extrair telefone: PRIMEIRO do banco (mais confiável), depois do webhook
+        phone = None
+        if envio:
+            phone = envio.recipient_phone
+            logger.info(f"📞 Telefone extraído do banco: {phone}")
+        else:
+            # Se não encontrou no banco, tentar extrair do webhook
+            if remote_jid:
+                phone = remote_jid.split("@")[0] if "@" in remote_jid else remote_jid
+                logger.info(f"📞 Telefone extraído do webhook: {phone}")
+        
+        if not phone:
+            logger.error(f"❌ Não foi possível extrair telefone nem do banco nem do webhook. message_id={message_id}, remoteJid={remote_jid}")
+            return {
+                "error": "Telefone não encontrado",
+                "message_id": message_id,
+                "remote_jid": remote_jid
+            }
         
         if not envio:
             # Tentar buscar pelos últimos envios para debug
