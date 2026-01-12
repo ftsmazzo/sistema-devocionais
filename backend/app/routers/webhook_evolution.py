@@ -820,6 +820,7 @@ def update_engagement_from_delivered(db: Session, phone: str, was_delivered: boo
 def update_engagement_from_read(db: Session, phone: str, was_read: bool):
     """
     Atualiza score de engajamento baseado em visualização
+    Salva no banco de dados para persistência
     
     Args:
         db: Sessão do banco de dados
@@ -827,30 +828,49 @@ def update_engagement_from_read(db: Session, phone: str, was_read: bool):
         was_read: Se a mensagem foi lida
     """
     try:
-        # Buscar serviço de devocionais para acessar o ShieldService
-        # Criar instância do DevocionalServiceV2 que contém o ShieldService
+        from app.database import ContactEngagement
+        from app.timezone_utils import now_brazil_naive
+        
+        # Buscar ou criar registro de engajamento
+        engagement = db.query(ContactEngagement).filter(
+            ContactEngagement.phone == phone
+        ).first()
+        
+        if not engagement:
+            engagement = ContactEngagement(phone=phone, engagement_score=0.5)
+            db.add(engagement)
+        
+        # Atualizar dados
+        if was_read:
+            engagement.total_read += 1
+            engagement.last_read_date = now_brazil_naive()
+            engagement.consecutive_not_read = 0
+            
+            # Aumentar score por visualização
+            engagement.engagement_score = min(1.0, engagement.engagement_score + 0.05)
+            
+            logger.info(f"✅ Engajamento atualizado no banco para {phone}: score={engagement.engagement_score:.2f} (visualizou)")
+        else:
+            engagement.consecutive_not_read += 1
+            # Diminuir score se não foi lida
+            engagement.engagement_score = max(0.0, engagement.engagement_score - 0.02)
+        
+        engagement.updated_at = now_brazil_naive()
+        db.commit()
+        
+        # Também atualizar no ShieldService (memória) para consistência
         from app.devocional_service_v2 import DevocionalServiceV2
-        
         devocional_service = DevocionalServiceV2(db=db)
-        
-        # Atualizar engajamento via ShieldService
         if devocional_service.shield:
-            # Atualizar engajamento baseado em visualização
             devocional_service.shield.update_engagement(
                 phone=phone,
-                responded=False,  # Não é resposta, é visualização
+                responded=False,
                 is_devocional=True,
                 was_read=was_read
             )
-            
-            if was_read and phone in devocional_service.shield.engagement_data:
-                data = devocional_service.shield.engagement_data[phone]
-                logger.info(f"📈 Engajamento atualizado para {phone}: score={data.engagement_score:.2f} (visualizou)")
-        else:
-            logger.warning("ShieldService não está habilitado, não é possível atualizar engajamento")
-    
     except Exception as e:
-        logger.error(f"Erro ao atualizar engajamento: {e}", exc_info=True)
+        logger.error(f"❌ Erro ao atualizar engajamento no banco: {e}", exc_info=True)
+        db.rollback()
 
 
 @router.get("/test")
