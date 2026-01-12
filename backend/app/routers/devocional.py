@@ -325,18 +325,29 @@ async def list_contatos(
     SIMPLIFICADO: Retorna todos os contatos primeiro, depois calcula score
     """
     try:
+        # DEBUG: Verificar conexão e tabela
+        logger.info(f"🔍 Buscando contatos: active_only={active_only}, skip={skip}, limit={limit}")
+        
         # Query simples - SEM filtros complexos
         query = db.query(DevocionalContato)
         
         if active_only is not None:
             query = query.filter(DevocionalContato.active == active_only)
         
+        # DEBUG: Contar total antes de filtrar
+        total_count = db.query(DevocionalContato).count()
+        logger.info(f"📊 Total de contatos na tabela: {total_count}")
+        
         contatos = query.order_by(DevocionalContato.name, DevocionalContato.phone).offset(skip).limit(limit).all()
         
-        logger.info(f"📋 Encontrados {len(contatos)} contatos no banco")
+        logger.info(f"📋 Encontrados {len(contatos)} contatos após filtros")
         
         if not contatos:
-            logger.warning("⚠️ Nenhum contato encontrado no banco!")
+            # Se não encontrou, tentar sem filtros para debug
+            all_contatos = db.query(DevocionalContato).all()
+            logger.warning(f"⚠️ Nenhum contato encontrado com filtros! Total sem filtros: {len(all_contatos)}")
+            if all_contatos:
+                logger.info(f"📋 Primeiros 3 contatos encontrados: {[(c.id, c.phone, c.name, c.active) for c in all_contatos[:3]]}")
             return []
         
         from app.database import ContactEngagement

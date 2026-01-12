@@ -16,10 +16,10 @@ export default function Contatos() {
   useEffect(() => {
     loadContatos()
     
-    // Atualizar em tempo real a cada 10 segundos
+    // Atualizar em tempo real a cada 5 segundos (mais frequente)
     const interval = setInterval(() => {
       loadContatos()
-    }, 10000)
+    }, 5000)
     
     return () => clearInterval(interval)
   }, [])

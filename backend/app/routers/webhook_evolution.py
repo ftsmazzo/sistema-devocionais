@@ -106,6 +106,16 @@ async def receive_message_status(
         logger.info(f"🔔 Webhook recebido: event={event}, instance={instance_name}")
         logger.info(f"📦 Body completo recebido: {json.dumps(body, indent=2, default=str)}")
         
+        # Se for evento que não é de status de mensagem, ignorar (ex: send_devocional vai para /api/notifications/webhook)
+        if event not in ["messages.update", "message.ack", ""] and not body.get("MessageUpdate"):
+            logger.info(f"ℹ️ Evento '{event}' não é de status de mensagem, ignorando (deve ir para /api/notifications/webhook)")
+            return {
+                "success": True,
+                "message": f"Evento '{event}' ignorado (não é evento de status de mensagem)",
+                "event": event,
+                "note": "Eventos de envio devem ir para /api/notifications/webhook"
+            }
+        
         # Verificar se é formato messages.update (formato mais comum da Evolution API)
         if event == "messages.update":
             logger.info(f"📨 Detectado evento messages.update")
