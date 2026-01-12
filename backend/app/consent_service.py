@@ -67,8 +67,11 @@ class ConsentService:
         Verifica se deve enviar mensagem de consentimento
         
         Deve enviar se:
-        - É primeiro envio (total_sent == 0 ou 1)
+        - É primeiro envio (total_sent == 0) OU acabou de enviar o primeiro (total_sent == 1)
         - Ainda não enviou mensagem de consentimento
+        
+        IMPORTANTE: Esta função deve ser chamada DEPOIS de incrementar total_sent
+        para detectar que acabou de enviar o primeiro devocional
         """
         # Verificar total_sent do contato
         contact = self.db.query(DevocionalContato).filter(
@@ -78,12 +81,16 @@ class ConsentService:
         if not contact:
             return False
         
-        # Se é primeiro envio (total_sent == 0 ou 1)
-        is_first_send = (not contact.total_sent or contact.total_sent <= 1)
+        # Se é primeiro envio (total_sent == 0) OU acabou de enviar o primeiro (total_sent == 1)
+        # total_sent == 0: ainda não enviou nenhum
+        # total_sent == 1: acabou de enviar o primeiro (momento certo para enviar consentimento)
+        is_first_send = (not contact.total_sent or contact.total_sent == 0 or contact.total_sent == 1)
         
         # Verificar se já enviou mensagem de consentimento
         consent = self.get_or_create_consent(phone)
         already_sent = consent.consent_message_sent
+        
+        logger.debug(f"📋 Verificando consentimento para {phone}: total_sent={contact.total_sent}, is_first_send={is_first_send}, already_sent={already_sent}")
         
         return is_first_send and not already_sent
     
