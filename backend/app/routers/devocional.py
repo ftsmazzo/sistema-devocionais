@@ -142,17 +142,21 @@ async def send_devocional(
         )
         
         # Registrar no banco de dados
+        from app.timezone_utils import now_brazil_naive
         sent_count = 0
         failed_count = 0
         
         for i, result in enumerate(results):
             contact = contacts[i] if i < len(contacts) else {}
             
+            # Converter timestamp para naive (sem timezone) para PostgreSQL
+            timestamp_naive = result.timestamp.replace(tzinfo=None) if result.timestamp and result.timestamp.tzinfo else (now_brazil_naive() if result.timestamp is None else result.timestamp)
+            
             envio = DevocionalEnvio(
                 recipient_phone=contact.get('phone', ''),
                 recipient_name=contact.get('name'),
                 message_text=message,
-                sent_at=result.timestamp,
+                sent_at=timestamp_naive,
                 status=result.status.value,
                 message_id=result.message_id,
                 error_message=result.error,
@@ -168,7 +172,7 @@ async def send_devocional(
                 ).first()
                 
                 if db_contact:
-                    db_contact.last_sent = result.timestamp
+                    db_contact.last_sent = timestamp_naive
                     db_contact.total_sent += 1
             else:
                 failed_count += 1
@@ -221,11 +225,14 @@ async def send_single_devocional(
         )
         
         # Registrar no banco
+        from app.timezone_utils import now_brazil_naive
+        timestamp_naive = result.timestamp.replace(tzinfo=None) if result.timestamp and result.timestamp.tzinfo else (now_brazil_naive() if result.timestamp is None else result.timestamp)
+        
         envio = DevocionalEnvio(
             recipient_phone=phone,
             recipient_name=name,
             message_text=message,
-            sent_at=result.timestamp,
+            sent_at=timestamp_naive,
             status=result.status.value,
             message_id=result.message_id,
             error_message=result.error,
