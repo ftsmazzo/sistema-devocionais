@@ -72,7 +72,7 @@ async def get_config(
             "retry_delay": settings.RETRY_DELAY,
         },
         "schedule": {
-            "send_time": settings.DEVOCIONAL_SEND_TIME,
+            "send_time": db.query(SystemConfig).filter(SystemConfig.key == "devocional_send_time").first().value if db.query(SystemConfig).filter(SystemConfig.key == "devocional_send_time").first() else settings.DEVOCIONAL_SEND_TIME,
         }
     }
 
