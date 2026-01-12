@@ -573,13 +573,14 @@ class DevocionalServiceV2:
             
             # Obter instância disponível
             # Se o contato tiver ID, usar distribuição baseada em ID
-            contact_id = contact.get('id')
             if contact_id:
                 # Usar estratégia baseada no ID do contato
                 instance = self.instance_manager.get_available_instance("contact_id", contact_id=contact_id)
+                logger.info(f"📊 Distribuição por ID: Contato ID {contact_id} -> Instância {instance.name if instance else 'NENHUMA'}")
             else:
                 # Fallback para estratégia padrão se não houver ID
                 instance = self.instance_manager.get_available_instance(self.distribution_strategy)
+                logger.warning(f"⚠️ Contato {phone} não tem ID, usando estratégia padrão: {self.distribution_strategy}")
             
             if not instance:
                 logger.warning("Nenhuma instância disponível. Parando envio.")

@@ -87,10 +87,13 @@ async def n8n_webhook(
             # Obter contatos
             if request.contacts:
                 contacts = request.contacts
+                logger.info(f"📋 Usando {len(contacts)} contatos fornecidos na requisição")
             else:
                 db_contacts = db.query(DevocionalContato).filter(
                     DevocionalContato.active == True
                 ).all()
+                
+                logger.info(f"📊 Total de contatos ativos no banco: {len(db_contacts)}")
                 
                 if not db_contacts:
                     raise HTTPException(
@@ -102,6 +105,7 @@ async def n8n_webhook(
                     {"id": c.id, "phone": c.phone, "name": c.name}
                     for c in db_contacts
                 ]
+                logger.info(f"✅ Preparados {len(contacts)} contatos para envio: {[(c.get('id'), c.get('name')) for c in contacts]}")
             
             # Enviar
             devocional_service = get_devocional_service(db)
