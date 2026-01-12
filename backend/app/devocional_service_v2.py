@@ -533,6 +533,31 @@ class DevocionalServiceV2:
             
             logger.info(f"Processando contato {i}/{len(contacts)}: {name or phone}")
             
+            # Verificar consentimento ANTES de enviar
+            try:
+                from app.consent_service import ConsentService
+                from app.database import SessionLocal
+                db_consent = SessionLocal()
+                try:
+                    consent_service = ConsentService(db_consent)
+                    can_send, reason = consent_service.can_send_devocional(phone)
+                    
+                    if not can_send:
+                        logger.info(f"⏸️ Pulando contato {phone}: {reason}")
+                        results.append(MessageResult(
+                            success=False,
+                            status=MessageStatus.FAILED,
+                            error=reason,
+                            instance_name=None
+                        ))
+                        db_consent.close()
+                        continue
+                finally:
+                    db_consent.close()
+            except Exception as e:
+                logger.warning(f"Erro ao verificar consentimento: {e}")
+                # Continuar mesmo com erro (não bloquear envio)
+            
             # Verificar engajamento (se shield habilitado)
             # Para devocionais, sempre permitir envio (is_devocional=True)
             if self.shield and not self.shield.should_send_to_contact(phone, is_devocional=True):

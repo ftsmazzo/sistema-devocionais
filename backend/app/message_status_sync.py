@@ -242,12 +242,16 @@ class MessageStatusSync:
             elif evo_status == "READ" and envio.message_status != "read":
                 envio.message_status = "read"
                 envio.read_at = now_brazil_naive()
+                # IMPORTANTE: Se passou direto de pending para READ, marcar como delivered também
                 if not envio.delivered_at:
                     envio.delivered_at = envio.read_at
+                    logger.info(f"✅ Sync: Mensagem {envio.message_id} marcada como DELIVERED (passou direto para READ)")
+                    # Atualizar engajamento de delivered também
+                    update_engagement_from_delivered(self.db, phone, True, envio.message_id)
                 updated = True
                 logger.info(f"✅✅ Sync: Mensagem {envio.message_id} atualizada para READ")
                 
-                # Atualizar engajamento
+                # Atualizar engajamento no banco
                 update_engagement_from_read(self.db, phone, True, envio.message_id)
             
             return updated

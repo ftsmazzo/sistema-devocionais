@@ -831,8 +831,12 @@ async def process_messages_update(
             if envio.message_status != "read":
                 envio.message_status = "read"
                 envio.read_at = event_time
+                # IMPORTANTE: Se passou direto de pending para READ, marcar como delivered também
                 if not envio.delivered_at:
                     envio.delivered_at = event_time
+                    logger.info(f"✅ Mensagem {message_id} marcada como DELIVERED (passou direto para READ)")
+                    # Atualizar engajamento de delivered também
+                    update_engagement_from_delivered(db, phone, True, message_id)
                 updated = True
                 logger.info(f"✅✅ Mensagem {message_id} LIDA por {phone}")
                 
@@ -950,6 +954,77 @@ async def sync_message_status(
     except Exception as e:
         logger.error(f"❌ Erro ao sincronizar status: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Erro: {str(e)}")
+
+
+async def process_incoming_message(
+    db: Session,
+    body: Dict[str, Any],
+    instance_name: str
+):
+    """
+    Processa mensagem recebida (pode ser resposta de consentimento)
+    
+    Args:
+        db: Sessão do banco de dados
+        body: Body do webhook
+        instance_name: Nome da instância
+    """
+    try:
+        from app.consent_service import ConsentService
+        
+        data = body.get("data", {})
+        
+        # Extrair informações da mensagem
+        message_data = data if isinstance(data, dict) else {}
+        if isinstance(data, list) and len(data) > 0:
+            message_data = data[0]
+        
+        # Extrair telefone do remetente
+        key = message_data.get("key", {})
+        remote_jid = key.get("remoteJid", "") if isinstance(key, dict) else message_data.get("remoteJid", "")
+        
+        if not remote_jid:
+            logger.debug("Mensagem recebida sem remoteJid, ignorando")
+            return
+        
+        # Extrair telefone
+        phone = remote_jid.split("@")[0].split(":")[0] if "@" in remote_jid else remote_jid.split(":")[0]
+        
+        # Extrair texto da mensagem
+        message_text = ""
+        message_obj = message_data.get("message", {})
+        if isinstance(message_obj, dict):
+            # Tentar diferentes campos onde o texto pode estar
+            message_text = (
+                message_obj.get("conversation") or
+                message_obj.get("extendedTextMessage", {}).get("text") or
+                message_obj.get("text") or
+                ""
+            )
+        
+        if not message_text:
+            logger.debug(f"Mensagem recebida de {phone} sem texto, ignorando")
+            return
+        
+        # Verificar se é mensagem de resposta (não é de nós)
+        from_me = key.get("fromMe", False) if isinstance(key, dict) else message_data.get("fromMe", False)
+        if from_me:
+            # É mensagem que enviamos, não processar
+            return
+        
+        logger.info(f"📩 Mensagem recebida de {phone}: {message_text[:50]}...")
+        
+        # Processar como possível resposta de consentimento
+        consent_service = ConsentService(db)
+        processed = consent_service.process_consent_response(phone, message_text)
+        
+        if processed:
+            logger.info(f"✅ Resposta de consentimento processada para {phone}")
+        else:
+            logger.debug(f"ℹ️ Mensagem de {phone} não foi resposta de consentimento")
+            
+    except Exception as e:
+        logger.error(f"❌ Erro ao processar mensagem recebida: {e}", exc_info=True)
 
 
 @router.get("/debug/events")

@@ -152,6 +152,28 @@ class EngagementHistory(Base):
     created_at = Column(DateTime, default=now_brazil, index=True)
 
 
+class ContactConsent(Base):
+    """Tabela para armazenar consentimento dos contatos para receber devocionais"""
+    __tablename__ = "contact_consent"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    phone = Column(String(20), unique=True, nullable=False, index=True)  # Telefone do contato
+    
+    # Status do consentimento
+    consented = Column(Boolean, nullable=True, index=True)  # True=sim, False=não, None=aguardando resposta
+    consent_message_sent = Column(Boolean, default=False, index=True)  # Se já foi enviada mensagem de consentimento
+    consent_message_sent_at = Column(DateTime, nullable=True)  # Quando foi enviada a mensagem de consentimento
+    
+    # Resposta do usuário
+    response_received = Column(Boolean, default=False)  # Se recebeu resposta
+    response_received_at = Column(DateTime, nullable=True)  # Quando recebeu resposta
+    response_text = Column(Text, nullable=True)  # Texto da resposta recebida
+    
+    # Timestamps
+    created_at = Column(DateTime, default=now_brazil, index=True)
+    updated_at = Column(DateTime, default=now_brazil, onupdate=now_brazil)
+
+
 class Devocional(Base):
     """Modelo para armazenar devocionais gerados"""
     __tablename__ = "devocionais"
