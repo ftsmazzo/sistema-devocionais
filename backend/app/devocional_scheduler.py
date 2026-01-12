@@ -178,22 +178,19 @@ def run_scheduler():
         logger.error(f"Erro ao parsear horário de envio: {e}. Usando 06:00 como padrão.")
         hour, minute = 6, 0
     
-    sao_paulo_tz = ZoneInfo("America/Sao_Paulo")
-    utc_tz = ZoneInfo("UTC")
-    
     logger.info(f"Scheduler de devocionais iniciado. Envio agendado para {hour:02d}:{minute:02d} (horário de São Paulo)")
     
     # Loop do scheduler - verifica a cada minuto
     while scheduler_running:
         try:
             # Verificar se é hora de enviar (usando horário de São Paulo)
-            now_sp = datetime.now(sao_paulo_tz)
+            now_sp = now_brazil()
             current_hour = now_sp.hour
             current_minute = now_sp.minute
             
             # Log de debug a cada hora para verificar funcionamento
             if current_minute == 0:
-                logger.debug(f"Scheduler rodando. Horário atual SP: {current_hour:02d}:{current_minute:02d}, Horário agendado: {hour:02d}:{minute:02d}")
+                logger.info(f"⏰ Scheduler rodando. Horário atual SP: {current_hour:02d}:{current_minute:02d}, Horário agendado: {hour:02d}:{minute:02d}")
             
             # Se chegou no horário agendado (verifica a cada minuto)
             if current_hour == hour and current_minute == minute:
@@ -202,9 +199,10 @@ def run_scheduler():
                 today = now_sp.date()
                 
                 if last_sent != today:
-                    logger.info(f"⏰ Horário de envio atingido ({hour:02d}:{minute:02d} SP - {now_sp.strftime('%Y-%m-%d %H:%M:%S')}). Iniciando envio...")
+                    logger.info(f"⏰ Horário de envio atingido ({hour:02d}:{minute:02d} SP - {now_sp.strftime('%Y-%m-%d %H:%M:%S %Z')}). Iniciando envio...")
                     send_daily_devocional()
                     run_scheduler.last_sent_date = today
+                    logger.info(f"✅ Envio automático concluído. Próximo envio: amanhã às {hour:02d}:{minute:02d}")
                 else:
                     logger.debug(f"Horário de envio atingido mas já foi enviado hoje ({last_sent}). Pulando...")
         except Exception as e:
