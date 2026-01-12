@@ -8,12 +8,13 @@ BEGIN;
 DELETE FROM devocional_envios;
 SELECT '✅ Envios deletados' as status;
 
--- 2. Zerar contadores de envios dos contatos
+-- 2. Zerar contadores de envios dos contatos e ativar todos
 UPDATE devocional_contatos 
 SET 
     total_sent = 0,
-    last_sent = NULL;
-SELECT '✅ Contadores de contatos zerados' as status;
+    last_sent = NULL,
+    active = true;
+SELECT '✅ Contadores de contatos zerados e todos ativados' as status;
 
 -- 3. Limpar histórico de engajamento
 DELETE FROM engagement_history;
