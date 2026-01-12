@@ -49,6 +49,10 @@ export default function Contatos() {
     }
   }
 
+  const handleRefresh = () => {
+    loadContatos(true)
+  }
+
   const handleCreate = () => {
     setEditingContato(null)
     setFormData({ phone: '', name: '' })
@@ -84,7 +88,7 @@ export default function Contatos() {
       }
 
       setShowModal(false)
-      loadContatos()
+      loadContatos(true)
     } catch (err: any) {
       alert(err.response?.data?.detail || 'Erro ao salvar contato')
     }
@@ -95,7 +99,7 @@ export default function Contatos() {
 
     try {
       await contatoApi.delete(id)
-      loadContatos()
+      loadContatos(true)
     } catch (err: any) {
       alert(err.response?.data?.detail || 'Erro ao excluir contato')
     }
@@ -104,7 +108,7 @@ export default function Contatos() {
   const handleToggle = async (id: number) => {
     try {
       await contatoApi.toggle(id)
-      loadContatos()
+      loadContatos(true)
     } catch (err: any) {
       alert(err.response?.data?.detail || 'Erro ao alterar status')
     }
@@ -165,7 +169,7 @@ export default function Contatos() {
       {error && (
         <div className="error-message">
           <p>{error}</p>
-          <button onClick={loadContatos}>Tentar novamente</button>
+          <button onClick={handleRefresh}>Tentar novamente</button>
         </div>
       )}
 

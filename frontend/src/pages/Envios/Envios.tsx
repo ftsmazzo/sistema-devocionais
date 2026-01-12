@@ -47,6 +47,10 @@ export default function Envios() {
     }
   }
 
+  const handleRefresh = () => {
+    loadEnvios(true)
+  }
+
   const filteredEnvios = envios.filter((envio) => {
     const matchesSearch =
       envio.recipient_phone.includes(searchTerm) ||
@@ -174,7 +178,7 @@ export default function Envios() {
       {error && (
         <div className="error-message">
           <p>{error}</p>
-          <button onClick={loadEnvios}>Tentar novamente</button>
+          <button onClick={handleRefresh}>Tentar novamente</button>
         </div>
       )}
 
