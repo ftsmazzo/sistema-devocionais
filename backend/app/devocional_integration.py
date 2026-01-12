@@ -8,6 +8,7 @@ from typing import Optional, Dict
 from datetime import datetime, date
 from app.config import settings
 from app.database import SessionLocal, Devocional
+from app.timezone_utils import now_brazil, today_brazil
 
 logger = logging.getLogger(__name__)
 
@@ -114,7 +115,6 @@ class DevocionalIntegration:
         db = SessionLocal()
         try:
             # Verificar se já existe devocional para hoje
-            from app.timezone_utils import today_brazil
             today = today_brazil().date()
             existing = db.query(Devocional).filter(
                 Devocional.date >= datetime.combine(today, datetime.min.time()),
@@ -138,7 +138,6 @@ class DevocionalIntegration:
                 devocional = Devocional(
                     content=content,
                     title=title,
-                    from app.timezone_utils import now_brazil
                     date=now_brazil(),
                     source=source,
                     metadata_json=json.dumps(metadata) if metadata else None
