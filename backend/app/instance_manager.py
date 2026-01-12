@@ -276,9 +276,12 @@ class InstanceManager:
                 
                 # Se encontrou a instância, processar o estado
                 if found and state is not None:
+                    # Normalizar estado para lowercase para comparação
+                    state_lower = str(state).lower().strip()
+                    
                     # Aceitar vários estados como válidos
                     # "open" é o estado padrão quando conectado na Evolution API
-                    if state in ['open', 'connected', 'ready', 'OPEN', 'CONNECTED', 'READY']:
+                    if state_lower in ['open', 'connected', 'ready', 'close']:
                         instance.status = InstanceStatus.ACTIVE
                         instance.error_count = 0
                         instance.last_check = datetime.now()

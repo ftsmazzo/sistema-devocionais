@@ -58,8 +58,8 @@ export default function Instancias() {
   useEffect(() => {
     // Primeira carga com sincronização para pegar instâncias criadas dinamicamente
     loadInstances(true)
-    // Atualizar a cada 60s (menos frequente para não causar problemas)
-    const interval = setInterval(() => loadInstances(false), 60000)
+    // Atualizar a cada 60s com sincronização para manter todas as instâncias
+    const interval = setInterval(() => loadInstances(true), 60000)
     return () => clearInterval(interval)
   }, [])
 
@@ -104,7 +104,8 @@ export default function Instancias() {
       } else {
         setError(`⚠️ Instância ${instanceName} não está conectada. Estado: ${data.state || 'desconhecido'}`)
       }
-      await loadInstances()
+      // Recarregar com sincronização para manter todas as instâncias
+      await loadInstances(true)
     } catch (err: any) {
       setError(err.message || 'Erro ao verificar conexão')
     } finally {
@@ -119,7 +120,8 @@ export default function Instancias() {
       setSuccess(null)
       await instancesApi.refresh(instanceName)
       setSuccess(`Status da instância ${instanceName} atualizado!`)
-      await loadInstances()
+      // Recarregar com sincronização para manter todas as instâncias
+      await loadInstances(true)
     } catch (err: any) {
       setError(err.message || 'Erro ao atualizar status')
     } finally {
