@@ -235,13 +235,18 @@ def run_scheduler():
                 last_sent = getattr(run_scheduler, 'last_sent_date', None)
                 today = now_sp.date()
                 
+                logger.info(f"🔔 Verificando envio: Horário atual {current_hour:02d}:{current_minute:02d} == Agendado {hour:02d}:{minute:02d}, Último envio: {last_sent}, Hoje: {today}")
+                
                 if last_sent != today:
                     logger.info(f"⏰ Horário de envio atingido ({hour:02d}:{minute:02d} SP - {now_sp.strftime('%Y-%m-%d %H:%M:%S %Z')}). Iniciando envio...")
-                    send_daily_devocional()
-                    run_scheduler.last_sent_date = today
-                    logger.info(f"✅ Envio automático concluído. Próximo envio: amanhã às {hour:02d}:{minute:02d}")
+                    try:
+                        send_daily_devocional()
+                        run_scheduler.last_sent_date = today
+                        logger.info(f"✅ Envio automático concluído. Próximo envio: amanhã às {hour:02d}:{minute:02d}")
+                    except Exception as e:
+                        logger.error(f"❌ Erro ao executar envio automático: {e}", exc_info=True)
                 else:
-                    logger.debug(f"Horário de envio atingido mas já foi enviado hoje ({last_sent}). Pulando...")
+                    logger.warning(f"⚠️ Horário de envio atingido mas já foi enviado hoje ({last_sent}). Pulando...")
         except Exception as e:
             logger.error(f"Erro no loop do scheduler: {e}", exc_info=True)
         
