@@ -1,14 +1,25 @@
 -- Migração: Adicionar tabelas de auditoria e refatorar engajamento para sistema de pontos
 
 -- 1. Atualizar ContactEngagement para usar sistema de pontos (0-100)
-ALTER TABLE contact_engagement 
-ALTER COLUMN engagement_score TYPE FLOAT,
-ALTER COLUMN engagement_score SET DEFAULT 100.0;
+-- Primeiro, verificar se precisa converter valores antigos
+DO $$
+BEGIN
+    -- Se houver valores <= 1.0, converter para 0-100
+    IF EXISTS (SELECT 1 FROM contact_engagement WHERE engagement_score <= 1.0 AND engagement_score > 0) THEN
+        UPDATE contact_engagement 
+        SET engagement_score = engagement_score * 100.0 
+        WHERE engagement_score <= 1.0 AND engagement_score > 0;
+    END IF;
+    
+    -- Se houver valores NULL ou 0, definir como 100 (padrão inicial)
+    UPDATE contact_engagement 
+    SET engagement_score = 100.0 
+    WHERE engagement_score IS NULL OR engagement_score = 0;
+END $$;
 
--- Atualizar registros existentes: converter de 0-1 para 0-100
-UPDATE contact_engagement 
-SET engagement_score = engagement_score * 100.0 
-WHERE engagement_score <= 1.0;
+-- Garantir que o default seja 100.0
+ALTER TABLE contact_engagement 
+ALTER COLUMN engagement_score SET DEFAULT 100.0;
 
 -- 2. Criar tabela de eventos de webhook
 CREATE TABLE IF NOT EXISTS webhook_events (
