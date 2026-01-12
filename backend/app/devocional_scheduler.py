@@ -219,6 +219,10 @@ def run_scheduler():
                     old_time = f"{hour:02d}:{minute:02d}"
                     hour, minute = new_hour, new_minute
                     logger.info(f"⏰ Horário de envio atualizado dinamicamente: {old_time} -> {hour:02d}:{minute:02d}")
+                    # Resetar last_sent_date se mudou o horário para permitir envio no novo horário
+                    if hasattr(run_scheduler, 'last_sent_date'):
+                        logger.info(f"🔄 Resetando controle de envio para permitir envio no novo horário")
+                        run_scheduler.last_sent_date = None
                 last_config_check = now_sp
             
             # Log de debug a cada hora para verificar funcionamento
