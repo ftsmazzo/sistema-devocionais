@@ -756,8 +756,13 @@ async def process_messages_update(
                 logger.debug(f"ℹ️ Mensagem {message_id} já estava marcada como lida")
         
         if updated:
-            db.commit()
-            logger.info(f"✅ Status atualizado para message_id {message_id}: status={mapped_status}")
+            try:
+                db.commit()
+                logger.info(f"✅ Status atualizado e commitado no banco para message_id {message_id}: status={mapped_status}")
+            except Exception as e:
+                logger.error(f"❌ Erro ao fazer commit: {e}", exc_info=True)
+                db.rollback()
+                raise
             return {
                 "success": True,
                 "message_id": message_id,
