@@ -56,15 +56,18 @@ export default function Instancias() {
   })
 
   useEffect(() => {
-    loadInstances()
-    const interval = setInterval(loadInstances, 30000) // Atualizar a cada 30s
+    // Primeira carga com sincronização para pegar instâncias criadas dinamicamente
+    loadInstances(true)
+    // Atualizar a cada 60s (menos frequente para não causar problemas)
+    const interval = setInterval(() => loadInstances(false), 60000)
     return () => clearInterval(interval)
   }, [])
 
-  const loadInstances = async () => {
+  const loadInstances = async (sync: boolean = false) => {
     try {
       setLoading(true)
-      const data = await instancesApi.list()
+      // Se sync=true, busca instâncias da Evolution API que não estão no .env
+      const data = await instancesApi.list(sync)
       setInstances(data.instances || [])
       setError(null)
     } catch (err: any) {
@@ -147,6 +150,8 @@ export default function Instancias() {
         priority: 1,
         enabled: true
       })
+      // Recarregar lista com sincronização para mostrar a nova instância
+      setTimeout(() => loadInstances(true), 2000)
     } catch (err: any) {
       setError(err.message || 'Erro ao criar instância')
     } finally {
@@ -206,17 +211,22 @@ export default function Instancias() {
           <p className="instancias-subtitle">Configure e monitore suas instâncias Evolution API</p>
         </div>
         <div style={{ display: 'flex', gap: '0.75rem' }}>
+            <button 
+              className="btn-refresh-modern" 
+              onClick={() => setShowCreateModal(true)}
+              style={{ background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)' }}
+            >
+              <Plus size={18} />
+              <span>Nova Instância</span>
+            </button>
           <button 
             className="btn-refresh-modern" 
-            onClick={() => setShowCreateModal(true)}
-            style={{ background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)' }}
+            onClick={() => loadInstances(true)} 
+            disabled={loading}
+            title="Atualizar e sincronizar com Evolution API"
           >
-            <Plus size={18} />
-            <span>Nova Instância</span>
-          </button>
-          <button className="btn-refresh-modern" onClick={loadInstances} disabled={loading}>
             <RefreshCw size={18} className={loading ? 'spinning' : ''} />
-            <span>Atualizar</span>
+            <span>Sincronizar</span>
           </button>
         </div>
       </div>

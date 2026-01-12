@@ -49,9 +49,13 @@ class QRCodeResponse(BaseModel):
 
 @router.get("/")
 async def list_instances(
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    sync: bool = False  # Query param para sincronizar com Evolution API
 ):
-    """Lista todas as instâncias configuradas"""
+    """
+    Lista todas as instâncias configuradas
+    Se sync=true, também busca instâncias que existem na Evolution API mas não estão no .env
+    """
     try:
         # Carregar instâncias do config com tratamento de erros
         instances_config = []
@@ -65,6 +69,53 @@ async def list_instances(
                 logger.error(f"Erro ao fazer parse de EVOLUTION_INSTANCES: {e}")
                 logger.error(f"Conteúdo: {settings.EVOLUTION_INSTANCES[:200]}")
                 instances_config = []
+        
+        # Se sync=true, buscar instâncias da Evolution API que não estão no .env
+        if sync and instances_config:
+            try:
+                # Agrupar por api_url e api_key para buscar todas as instâncias
+                api_groups = {}
+                for inst_config in instances_config:
+                    key = f"{inst_config.get('api_url')}_{inst_config.get('api_key')}"
+                    if key not in api_groups:
+                        api_groups[key] = {
+                            'api_url': inst_config.get('api_url'),
+                            'api_key': inst_config.get('api_key'),
+                            'configured_names': set()
+                        }
+                    api_groups[key]['configured_names'].add(inst_config.get('name', '').lower())
+                
+                # Buscar instâncias da Evolution API
+                for key, group in api_groups.items():
+                    try:
+                        headers = {"apikey": group['api_key']}
+                        url = f"{group['api_url']}/instance/fetchInstances"
+                        response = requests.get(url, headers=headers, timeout=10)
+                        
+                        if response.status_code == 200:
+                            api_instances = response.json()
+                            if isinstance(api_instances, list):
+                                for api_inst in api_instances:
+                                    api_name = api_inst.get('instanceName') or api_inst.get('name')
+                                    if api_name and api_name.lower() not in group['configured_names']:
+                                        # Instância existe na API mas não está no .env
+                                        # Adicionar com configurações padrão
+                                        logger.info(f"Instância {api_name} encontrada na Evolution API mas não está no .env, adicionando...")
+                                        instances_config.append({
+                                            "name": api_name,
+                                            "api_url": group['api_url'],
+                                            "api_key": group['api_key'],
+                                            "display_name": api_name,
+                                            "max_messages_per_hour": 20,
+                                            "max_messages_per_day": 200,
+                                            "priority": 1,
+                                            "enabled": True
+                                        })
+                    except Exception as e:
+                        logger.debug(f"Erro ao sincronizar instâncias de {group['api_url']}: {e}")
+                        continue
+            except Exception as e:
+                logger.warning(f"Erro ao sincronizar instâncias: {e}")
         
         # Criar InstanceManager temporário para obter status
         manager = InstanceManager(instances_config)

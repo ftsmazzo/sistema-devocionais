@@ -220,8 +220,10 @@ export const configApi = {
 // ============================================
 
 export const instancesApi = {
-  list: async () => {
-    const response = await api.get('/instances/')
+  list: async (sync: boolean = false) => {
+    const response = await api.get('/instances/', {
+      params: { sync }
+    })
     return response.data
   },
   create: async (instanceData: {
