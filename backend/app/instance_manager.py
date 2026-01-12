@@ -89,18 +89,18 @@ class InstanceManager:
                     name=db_inst.name,
                     api_url=db_inst.api_url,
                     api_key=db_inst.api_key,
-                    display_name=db_inst.display_name,
-                    phone_number=db_inst.phone_number,
+                    display_name=db_inst.display_name or db_inst.name,
+                    phone_number=getattr(db_inst, 'phone_number', None),
                     status=status,
-                    last_check=db_inst.last_check,
-                    messages_sent_today=db_inst.messages_sent_today,
-                    messages_sent_this_hour=db_inst.messages_sent_this_hour,
+                    last_check=getattr(db_inst, 'last_check', None),
+                    messages_sent_today=getattr(db_inst, 'messages_sent_today', 0),
+                    messages_sent_this_hour=getattr(db_inst, 'messages_sent_this_hour', 0),
                     max_messages_per_hour=db_inst.max_messages_per_hour,
                     max_messages_per_day=db_inst.max_messages_per_day,
                     priority=db_inst.priority,
                     enabled=db_inst.enabled,
-                    error_count=db_inst.error_count,
-                    last_error=db_inst.last_error
+                    error_count=getattr(db_inst, 'error_count', 0),
+                    last_error=getattr(db_inst, 'last_error', None)
                 )
                 self.instances.append(instance)
         elif instances:
