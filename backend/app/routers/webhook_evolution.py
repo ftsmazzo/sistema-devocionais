@@ -7,9 +7,10 @@ from sqlalchemy.orm import Session
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 from pydantic import BaseModel
-from app.database import get_db, DevocionalEnvio
+from app.database import get_db, DevocionalEnvio, WebhookEvent, EngagementHistory
 from app.shield_service import ShieldService
 from app.config import settings
+from app.timezone_utils import now_brazil_naive
 import logging
 import json
 
@@ -105,6 +106,32 @@ async def receive_message_status(
         # Log detalhado do que está chegando
         logger.info(f"🔔 Webhook recebido: event={event}, instance={instance_name}")
         logger.info(f"📦 Body completo recebido: {json.dumps(body, indent=2, default=str)}")
+        
+        # REGISTRAR WEBHOOK EVENT NA TABELA DE AUDITORIA
+        try:
+            key_id = data.get("keyId") or data.get("key", {}).get("id") or body.get("id", "")
+            status_received = data.get("status") or ""
+            phone = ""
+            if "remoteJid" in data:
+                phone = data.get("remoteJid", "").split("@")[0].split(":")[0]
+            elif "key" in data and "remoteJid" in data.get("key", {}):
+                phone = data.get("key", {}).get("remoteJid", "").split("@")[0].split(":")[0]
+            
+            webhook_event = WebhookEvent(
+                event_type=event or "unknown",
+                instance_name=instance_name,
+                message_id=key_id,
+                status_received=status_received,
+                phone=phone if phone else None,
+                raw_data=json.dumps(body, default=str),
+                processed=False,
+                received_at=now_brazil_naive()
+            )
+            db.add(webhook_event)
+            db.flush()  # Garantir que o ID seja gerado
+        except Exception as audit_error:
+            logger.error(f"❌ Erro ao registrar webhook event: {audit_error}", exc_info=True)
+            # Não falhar o webhook por causa do audit
         
         # Se for evento que não é de status de mensagem, ignorar (ex: send_devocional vai para /api/notifications/webhook)
         if event not in ["messages.update", "message.ack", ""] and not body.get("MessageUpdate"):
@@ -635,7 +662,8 @@ async def process_message_update(
 async def process_messages_update(
     db: Session,
     instance_name: str,
-    data: Dict[str, Any]
+    data: Dict[str, Any],
+    webhook_event_id: Optional[int] = None
 ):
     """
     Processa evento messages.update (formato mais comum da Evolution API)
@@ -762,8 +790,7 @@ async def process_messages_update(
             logger.info(f"✅ Mensagem {message_id} entregue para {phone}")
             
             # Atualizar engajamento: entregue mas não lido ainda
-            # Não penalizar ainda, mas marcar como entregue
-            update_engagement_from_delivered(db, phone, True)
+            update_engagement_from_delivered(db, phone, True, message_id)
         
         elif status == "READ":
             # READ é o mais importante - sempre atualizar
@@ -776,7 +803,7 @@ async def process_messages_update(
                 logger.info(f"✅✅ Mensagem {message_id} LIDA por {phone}")
                 
                 # Atualizar engajamento no banco
-                update_engagement_from_read(db, phone, True)
+                update_engagement_from_read(db, phone, True, message_id)
             else:
                 logger.debug(f"ℹ️ Mensagem {message_id} já estava marcada como lida")
         
@@ -811,142 +838,36 @@ async def process_messages_update(
         return {"error": str(e), "data": data}
 
 
-def update_engagement_from_delivered(db: Session, phone: str, was_delivered: bool):
+def update_engagement_from_delivered(db: Session, phone: str, was_delivered: bool, message_id: Optional[str] = None):
     """
-    Atualiza score de engajamento baseado em entrega
-    Se não aparecer "delivered", é arriscado (pode estar bloqueado)
-    Salva no banco de dados
+    Atualiza score de engajamento baseado em entrega usando novo sistema de pontos
     """
     try:
-        from app.database import ContactEngagement
-        from app.timezone_utils import now_brazil_naive
-        
-        # Buscar ou criar registro de engajamento
-        engagement = db.query(ContactEngagement).filter(
-            ContactEngagement.phone == phone
-        ).first()
-        
-        if not engagement:
-            engagement = ContactEngagement(
-                phone=phone,
-                engagement_score=0.5,
-                total_sent=0,
-                total_responded=0,
-                total_read=0,
-                total_delivered=0,
-                consecutive_no_response=0,
-                consecutive_not_read=0,
-                consecutive_not_delivered=0
-            )
-            db.add(engagement)
-            db.flush()  # Garantir que o objeto seja persistido antes de usar
-        
-        # Garantir que valores não sejam None
-        if engagement.total_delivered is None:
-            engagement.total_delivered = 0
-        if engagement.consecutive_not_delivered is None:
-            engagement.consecutive_not_delivered = 0
+        from app.engagement_service import handle_message_delivered, handle_message_not_delivered
         
         if was_delivered:
-            engagement.total_delivered += 1
-            engagement.last_delivered_date = now_brazil_naive()
-            engagement.consecutive_not_delivered = 0
-            logger.debug(f"✅ Engajamento: mensagem entregue para {phone}")
+            handle_message_delivered(db, phone, message_id)
         else:
-            if engagement.consecutive_not_delivered is None:
-                engagement.consecutive_not_delivered = 0
-            engagement.consecutive_not_delivered += 1
-            # Penalizar se não foi entregue
-            if engagement.engagement_score is None:
-                engagement.engagement_score = 0.5
-            engagement.engagement_score = max(0.0, engagement.engagement_score - 0.03)
-        
-        engagement.updated_at = now_brazil_naive()
-        try:
-            db.commit()
-            logger.info(f"✅ Engajamento (delivered) atualizado no banco para {phone}: total_delivered={engagement.total_delivered}, score={engagement.engagement_score:.2f}")
-        except Exception as commit_error:
-            logger.error(f"❌ Erro ao fazer commit do engajamento (delivered): {commit_error}", exc_info=True)
-            db.rollback()
-            raise
+            handle_message_not_delivered(db, phone, message_id)
     except Exception as e:
         logger.error(f"❌ Erro ao atualizar engajamento (delivered): {e}", exc_info=True)
         db.rollback()
 
 
-def update_engagement_from_read(db: Session, phone: str, was_read: bool):
+def update_engagement_from_read(db: Session, phone: str, was_read: bool, message_id: Optional[str] = None):
     """
-    Atualiza score de engajamento baseado em visualização
-    Salva no banco de dados para persistência
-    
-    Args:
-        db: Sessão do banco de dados
-        phone: Número do telefone
-        was_read: Se a mensagem foi lida
+    Atualiza score de engajamento baseado em visualização usando novo sistema de pontos
     """
     try:
-        from app.database import ContactEngagement
-        from app.timezone_utils import now_brazil_naive
+        from app.engagement_service import handle_message_read, handle_message_not_read
         
-        # Buscar ou criar registro de engajamento
-        engagement = db.query(ContactEngagement).filter(
-            ContactEngagement.phone == phone
-        ).first()
-        
-        if not engagement:
-            engagement = ContactEngagement(
-                phone=phone,
-                engagement_score=0.5,
-                total_sent=0,
-                total_responded=0,
-                total_read=0,
-                total_delivered=0,
-                consecutive_no_response=0,
-                consecutive_not_read=0,
-                consecutive_not_delivered=0
-            )
-            db.add(engagement)
-            db.flush()  # Garantir que o objeto seja persistido antes de usar
-        
-        # Garantir que valores não sejam None
-        if engagement.total_read is None:
-            engagement.total_read = 0
-        if engagement.consecutive_not_read is None:
-            engagement.consecutive_not_read = 0
-        
-        # Atualizar dados
         if was_read:
-            engagement.total_read += 1
-            engagement.last_read_date = now_brazil_naive()
-            engagement.consecutive_not_read = 0
-            
-            # Aumentar score por visualização
-            if engagement.engagement_score is None:
-                engagement.engagement_score = 0.5
-            engagement.engagement_score = min(1.0, engagement.engagement_score + 0.05)
-            
-            logger.info(f"✅ Engajamento atualizado no banco para {phone}: score={engagement.engagement_score:.2f} (visualizou)")
+            handle_message_read(db, phone, message_id)
         else:
-            if engagement.consecutive_not_read is None:
-                engagement.consecutive_not_read = 0
-            engagement.consecutive_not_read += 1
-            # Diminuir score se não foi lida
-            if engagement.engagement_score is None:
-                engagement.engagement_score = 0.5
-            engagement.engagement_score = max(0.0, engagement.engagement_score - 0.02)
-        
-        engagement.updated_at = now_brazil_naive()
-        try:
-            db.commit()
-            logger.info(f"✅ Engajamento (read) atualizado no banco para {phone}: total_read={engagement.total_read}, score={engagement.engagement_score:.2f}")
-        except Exception as commit_error:
-            logger.error(f"❌ Erro ao fazer commit do engajamento (read): {commit_error}", exc_info=True)
-            db.rollback()
-            raise
-        
-        # Também atualizar no ShieldService (memória) para consistência
-        from app.devocional_service_v2 import DevocionalServiceV2
-        devocional_service = DevocionalServiceV2(db=db)
+            handle_message_not_read(db, phone, message_id)
+    except Exception as e:
+        logger.error(f"❌ Erro ao atualizar engajamento (read): {e}", exc_info=True)
+        db.rollback()
         if devocional_service.shield:
             devocional_service.shield.update_engagement(
                 phone=phone,

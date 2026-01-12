@@ -82,8 +82,8 @@ class ContactEngagement(Base):
     id = Column(Integer, primary_key=True, index=True)
     phone = Column(String(20), unique=True, nullable=False, index=True)  # Telefone do contato
     
-    # Score de engajamento (0.0 a 1.0)
-    engagement_score = Column(Float, default=0.5, index=True)
+    # Score de engajamento (0 a 100 pontos - sistema de pontos com descontos)
+    engagement_score = Column(Float, default=100.0, index=True)  # Começa com 100 pontos
     
     # Estatísticas
     total_sent = Column(Integer, default=0)  # Total de mensagens enviadas
@@ -105,6 +105,51 @@ class ContactEngagement(Base):
     # Timestamps
     created_at = Column(DateTime, default=now_brazil)
     updated_at = Column(DateTime, default=now_brazil, onupdate=now_brazil)
+
+
+class WebhookEvent(Base):
+    """Tabela de auditoria para eventos de webhook recebidos"""
+    __tablename__ = "webhook_events"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    event_type = Column(String(50), nullable=False, index=True)  # messages.update, message.ack, etc
+    instance_name = Column(String(100), nullable=True, index=True)
+    message_id = Column(String(100), nullable=True, index=True)  # keyId ou messageId
+    status_received = Column(String(50), nullable=True)  # DELIVERY_ACK, READ, etc
+    phone = Column(String(20), nullable=True, index=True)
+    
+    # Dados completos do webhook (JSON)
+    raw_data = Column(Text)  # JSON completo do webhook
+    
+    # Resultado do processamento
+    processed = Column(Boolean, default=False, index=True)
+    processing_error = Column(Text, nullable=True)
+    updated_message_status = Column(String(20), nullable=True)  # Status atualizado no banco
+    
+    # Timestamps
+    received_at = Column(DateTime, default=now_brazil, index=True)
+    processed_at = Column(DateTime, nullable=True)
+
+
+class EngagementHistory(Base):
+    """Histórico de mudanças no score de engajamento"""
+    __tablename__ = "engagement_history"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    phone = Column(String(20), nullable=False, index=True)
+    
+    # Mudança
+    action_type = Column(String(50), nullable=False, index=True)  # message_sent, message_delivered, message_read, penalty, bonus
+    points_change = Column(Float, nullable=False)  # Mudança de pontos (+ ou -)
+    points_before = Column(Float, nullable=False)  # Pontos antes da mudança
+    points_after = Column(Float, nullable=False)  # Pontos depois da mudança
+    
+    # Contexto
+    message_id = Column(String(100), nullable=True)
+    reason = Column(Text, nullable=True)  # Motivo da mudança
+    
+    # Timestamps
+    created_at = Column(DateTime, default=now_brazil, index=True)
 
 
 class Devocional(Base):

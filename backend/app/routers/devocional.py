@@ -380,33 +380,15 @@ async def list_contatos(
                     ContactEngagement.phone == contato.phone
                 ).first()
                 
-                engagement_score = None  # Sem score se não houver dados
+                # Sistema de pontos (0-100)
+                engagement_score = None
                 if engagement_db and engagement_db.engagement_score is not None:
                     engagement_score = float(engagement_db.engagement_score)
                 else:
-                    # Calcular baseado nos envios reais (últimos 30 dias)
-                    date_limit = now_brazil_naive() - timedelta(days=30)
-                    envios = db.query(DevocionalEnvio).filter(
-                        DevocionalEnvio.recipient_phone == contato.phone,
-                        DevocionalEnvio.sent_at >= date_limit
-                    ).all()
-                    
-                    if envios:
-                        total_sent = len(envios)
-                        total_delivered = sum(1 for e in envios if hasattr(e, 'message_status') and e.message_status in ['delivered', 'read'])
-                        total_read = sum(1 for e in envios if hasattr(e, 'message_status') and e.message_status == 'read')
-                        
-                        if total_sent > 0:
-                            delivery_rate = total_delivered / total_sent
-                            read_rate = total_read / total_sent
-                            
-                            # Calcular score baseado em taxa de leitura
-                            if delivery_rate < 0.5:
-                                engagement_score = 0.2
-                            elif read_rate < 0.3:
-                                engagement_score = 0.3 + (read_rate * 0.4)
-                            else:
-                                engagement_score = 0.5 + (read_rate * 0.5)
+                    # Se não tem registro, criar com 100 pontos iniciais
+                    from app.engagement_service import get_or_create_engagement
+                    engagement = get_or_create_engagement(db, contato.phone)
+                    engagement_score = float(engagement.engagement_score)
                 
                 # Buscar última instância usada
                 last_envio = db.query(DevocionalEnvio).filter(
@@ -424,7 +406,7 @@ async def list_contatos(
                     created_at=contato.created_at,
                     last_sent=contato.last_sent,
                     total_sent=contato.total_sent or 0,
-                    engagement_score=round(engagement_score, 2) if engagement_score is not None else None,
+                    engagement_score=round(engagement_score, 1) if engagement_score is not None else None,
                     instance_name=instance_name
                 ))
             except Exception as e:
