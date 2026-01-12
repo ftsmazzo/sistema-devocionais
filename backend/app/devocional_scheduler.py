@@ -68,9 +68,9 @@ def send_daily_devocional():
                 logger.warning("Nenhum contato ativo encontrado.")
                 return
             
-            # Converter para formato esperado
+            # Converter para formato esperado (incluindo ID para distribuição)
             contacts_list = [
-                {"phone": c.phone, "name": c.name}
+                {"id": c.id, "phone": c.phone, "name": c.name}
                 for c in contacts
             ]
             
