@@ -224,6 +224,19 @@ export const instancesApi = {
     const response = await api.get('/instances/')
     return response.data
   },
+  create: async (instanceData: {
+    name: string
+    api_url: string
+    api_key: string
+    display_name: string
+    max_messages_per_hour?: number
+    max_messages_per_day?: number
+    priority?: number
+    enabled?: boolean
+  }) => {
+    const response = await api.post('/instances/create', instanceData)
+    return response.data
+  },
   generateQR: async (instanceName: string) => {
     const response = await api.post(`/instances/${instanceName}/qr`)
     return response.data

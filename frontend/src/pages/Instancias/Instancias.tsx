@@ -12,7 +12,8 @@ import {
   WifiOff,
   Phone,
   Clock,
-  TrendingUp
+  TrendingUp,
+  Plus
 } from 'lucide-react'
 import './Instancias.css'
 
@@ -41,6 +42,18 @@ export default function Instancias() {
   const [refreshing, setRefreshing] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
   const [checkingConnection, setCheckingConnection] = useState<string | null>(null)
+  const [showCreateModal, setShowCreateModal] = useState(false)
+  const [creating, setCreating] = useState(false)
+  const [newInstance, setNewInstance] = useState({
+    name: '',
+    api_url: 'https://imobmiq-evolution-api.90qhxz.easypanel.host',
+    api_key: '429683C4C977415CAAFCCE10F7D57E11',
+    display_name: 'Devocional Diário',
+    max_messages_per_hour: 20,
+    max_messages_per_day: 200,
+    priority: 1,
+    enabled: true
+  })
 
   useEffect(() => {
     loadInstances()
@@ -111,6 +124,36 @@ export default function Instancias() {
     }
   }
 
+  const handleCreateInstance = async () => {
+    try {
+      setCreating(true)
+      setError(null)
+      setSuccess(null)
+      const data = await instancesApi.create(newInstance)
+      setQrCode({
+        instance: newInstance.name,
+        qr: data.qr_code || data.base64 || '',
+      })
+      setSuccess('Instância criada! Escaneie o QR code para conectar.')
+      setShowCreateModal(false)
+      // Reset form
+      setNewInstance({
+        name: '',
+        api_url: 'https://imobmiq-evolution-api.90qhxz.easypanel.host',
+        api_key: '429683C4C977415CAAFCCE10F7D57E11',
+        display_name: 'Devocional Diário',
+        max_messages_per_hour: 20,
+        max_messages_per_day: 200,
+        priority: 1,
+        enabled: true
+      })
+    } catch (err: any) {
+      setError(err.message || 'Erro ao criar instância')
+    } finally {
+      setCreating(false)
+    }
+  }
+
   const getStatusIcon = (status: string) => {
     switch (status) {
       case 'active':
@@ -162,10 +205,20 @@ export default function Instancias() {
           <h1>Gerenciar Instâncias WhatsApp</h1>
           <p className="instancias-subtitle">Configure e monitore suas instâncias Evolution API</p>
         </div>
-        <button className="btn-refresh-modern" onClick={loadInstances} disabled={loading}>
-          <RefreshCw size={18} className={loading ? 'spinning' : ''} />
-          <span>Atualizar</span>
-        </button>
+        <div style={{ display: 'flex', gap: '0.75rem' }}>
+          <button 
+            className="btn-refresh-modern" 
+            onClick={() => setShowCreateModal(true)}
+            style={{ background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)' }}
+          >
+            <Plus size={18} />
+            <span>Nova Instância</span>
+          </button>
+          <button className="btn-refresh-modern" onClick={loadInstances} disabled={loading}>
+            <RefreshCw size={18} className={loading ? 'spinning' : ''} />
+            <span>Atualizar</span>
+          </button>
+        </div>
       </div>
 
       {error && (
@@ -203,9 +256,112 @@ export default function Instancias() {
                 />
               </div>
             )}
-            <button className="btn-primary-modern" onClick={() => setQrCode(null)}>
+            <button className="btn-primary-modern" onClick={() => {
+              setQrCode(null)
+              loadInstances()
+            }}>
               Fechar
             </button>
+          </div>
+        </div>
+      )}
+
+      {showCreateModal && (
+        <div className="qr-modal-modern" onClick={() => setShowCreateModal(false)}>
+          <div className="qr-modal-content-modern" style={{ maxWidth: '600px' }} onClick={(e) => e.stopPropagation()}>
+            <div className="qr-modal-header">
+              <h3>Criar Nova Instância</h3>
+              <button className="btn-close-modern" onClick={() => setShowCreateModal(false)}>
+                <XCircle size={20} />
+              </button>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginTop: '1rem' }}>
+              <div>
+                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 600 }}>Nome da Instância *</label>
+                <input
+                  type="text"
+                  value={newInstance.name}
+                  onChange={(e) => setNewInstance({ ...newInstance, name: e.target.value })}
+                  placeholder="Ex: Devocional-1"
+                  style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #e5e7eb' }}
+                />
+              </div>
+              <div>
+                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 600 }}>URL da API *</label>
+                <input
+                  type="text"
+                  value={newInstance.api_url}
+                  onChange={(e) => setNewInstance({ ...newInstance, api_url: e.target.value })}
+                  style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #e5e7eb' }}
+                />
+              </div>
+              <div>
+                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 600 }}>API Key *</label>
+                <input
+                  type="text"
+                  value={newInstance.api_key}
+                  onChange={(e) => setNewInstance({ ...newInstance, api_key: e.target.value })}
+                  style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #e5e7eb' }}
+                />
+              </div>
+              <div>
+                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 600 }}>Nome de Exibição *</label>
+                <input
+                  type="text"
+                  value={newInstance.display_name}
+                  onChange={(e) => setNewInstance({ ...newInstance, display_name: e.target.value })}
+                  placeholder="Nome que aparece no WhatsApp"
+                  style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #e5e7eb' }}
+                />
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                <div>
+                  <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 600 }}>Mensagens/Hora</label>
+                  <input
+                    type="number"
+                    value={newInstance.max_messages_per_hour}
+                    onChange={(e) => setNewInstance({ ...newInstance, max_messages_per_hour: parseInt(e.target.value) || 20 })}
+                    style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #e5e7eb' }}
+                  />
+                </div>
+                <div>
+                  <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 600 }}>Mensagens/Dia</label>
+                  <input
+                    type="number"
+                    value={newInstance.max_messages_per_day}
+                    onChange={(e) => setNewInstance({ ...newInstance, max_messages_per_day: parseInt(e.target.value) || 200 })}
+                    style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #e5e7eb' }}
+                  />
+                </div>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1.5rem' }}>
+              <button
+                className="btn-primary-modern"
+                onClick={handleCreateInstance}
+                disabled={creating || !newInstance.name || !newInstance.api_url || !newInstance.api_key}
+                style={{ flex: 1 }}
+              >
+                {creating ? (
+                  <>
+                    <Loader size={16} className="spinning" />
+                    <span>Criando...</span>
+                  </>
+                ) : (
+                  <>
+                    <Plus size={16} />
+                    <span>Criar e Gerar QR Code</span>
+                  </>
+                )}
+              </button>
+              <button
+                className="btn-secondary"
+                onClick={() => setShowCreateModal(false)}
+                style={{ padding: '0.75rem 1.5rem' }}
+              >
+                Cancelar
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -215,7 +371,15 @@ export default function Instancias() {
           <div className="empty-state-modern">
             <Server size={64} />
             <p>Nenhuma instância configurada</p>
-            <small>Configure instâncias no arquivo .env do EasyPanel</small>
+            <small>Crie uma nova instância para começar</small>
+            <button 
+              className="btn-refresh-modern" 
+              onClick={() => setShowCreateModal(true)}
+              style={{ marginTop: '1rem', background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)' }}
+            >
+              <Plus size={18} />
+              <span>Criar Primeira Instância</span>
+            </button>
           </div>
         ) : (
           instances.map((instance) => (
@@ -240,11 +404,6 @@ export default function Instancias() {
               </div>
 
               <div className="instance-details-modern">
-                <div className="detail-item-modern">
-                  <span className="detail-label">URL da API:</span>
-                  <span className="detail-value">{instance.api_url}</span>
-                </div>
-                
                 {instance.phone_number ? (
                   <div className="detail-item-modern">
                     <Phone size={16} />
@@ -299,13 +458,15 @@ export default function Instancias() {
                   )}
                   <span>Atualizar</span>
                 </button>
-                <button
-                  className="btn-action-modern btn-secondary"
-                  onClick={() => handleGenerateQR(instance.name)}
-                >
-                  <QrCode size={16} />
-                  <span>QR Code</span>
-                </button>
+                {instance.status !== 'active' && (
+                  <button
+                    className="btn-action-modern btn-secondary"
+                    onClick={() => handleGenerateQR(instance.name)}
+                  >
+                    <QrCode size={16} />
+                    <span>Conectar</span>
+                  </button>
+                )}
                 <button
                   className="btn-action-modern btn-success"
                   onClick={() => handleConnect(instance.name)}

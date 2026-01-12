@@ -95,14 +95,91 @@ async def list_instances(
         raise HTTPException(status_code=500, detail=f"Erro ao listar instâncias: {str(e)}")
 
 
+@router.post("/create")
+async def create_instance(
+    instance_data: InstanceCreate,
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Cria uma nova instância na Evolution API e retorna QR code
+    """
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Apenas administradores podem criar instâncias")
+    
+    try:
+        headers = {
+            "apikey": instance_data.api_key,
+            "Content-Type": "application/json"
+        }
+        
+        # Criar instância na Evolution API
+        create_url = f"{instance_data.api_url}/instance/create"
+        create_payload = {
+            "instanceName": instance_data.name,
+            "qrcode": True,
+            "integration": "WHATSAPP-BAILEYS"
+        }
+        
+        logger.info(f"Criando instância {instance_data.name} na Evolution API...")
+        create_response = requests.post(create_url, json=create_payload, headers=headers, timeout=30)
+        
+        if create_response.status_code not in [200, 201]:
+            error_text = create_response.text[:500]
+            logger.error(f"Erro ao criar instância na Evolution API: HTTP {create_response.status_code} - {error_text}")
+            raise HTTPException(
+                status_code=create_response.status_code,
+                detail=f"Erro ao criar instância na Evolution API: {error_text}"
+            )
+        
+        data = create_response.json()
+        qr_code = (
+            data.get("qrcode", {}).get("base64") or
+            data.get("qrcode", {}).get("code") or
+            data.get("qrcode") or
+            data.get("base64") or
+            data.get("code")
+        )
+        
+        if not qr_code:
+            logger.error(f"QR code não encontrado na resposta: {data}")
+            raise HTTPException(
+                status_code=500,
+                detail="QR code não recebido da Evolution API. A instância pode ter sido criada, mas não foi possível obter o QR code."
+            )
+        
+        # Garantir formato correto
+        if isinstance(qr_code, str):
+            if not qr_code.startswith("data:image") and not qr_code.startswith("http"):
+                qr_code = f"data:image/png;base64,{qr_code}"
+        
+        logger.info(f"Instância {instance_data.name} criada com sucesso na Evolution API")
+        
+        return {
+            "qr_code": qr_code,
+            "base64": qr_code,
+            "instance_name": instance_data.name,
+            "message": "Instância criada com sucesso! Escaneie o QR code com WhatsApp para conectar.",
+            "instance_config": instance_data.dict()
+        }
+    
+    except HTTPException:
+        raise
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Erro de conexão ao criar instância: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Erro de conexão com Evolution API: {str(e)}")
+    except Exception as e:
+        logger.error(f"Erro ao criar instância: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Erro inesperado: {str(e)}")
+
+
 @router.post("/{instance_name}/qr")
 async def generate_qr_code(
     instance_name: str,
     current_user: User = Depends(get_current_user)
 ):
     """
-    Gera QR code para conectar instância
-    Primeiro verifica se a instância já existe, se não existir, cria
+    Gera QR code para reconectar instância desconectada
+    Só funciona se a instância não estiver conectada
     """
     if not current_user.is_admin:
         raise HTTPException(status_code=403, detail="Apenas administradores podem gerar QR codes")
@@ -134,54 +211,40 @@ async def generate_qr_code(
         api_key = instance_config["api_key"]
         headers = {"apikey": api_key}
         
-        # Primeiro, verificar se a instância já existe
+        # Verificar se a instância já existe e está conectada
         check_url = f"{api_url}/instance/fetchInstances"
         check_response = requests.get(check_url, headers=headers, timeout=10)
         
-        instance_exists = False
         if check_response.status_code == 200:
             instances_data = check_response.json()
             if isinstance(instances_data, list):
                 for inst_data in instances_data:
-                    if (inst_data.get('instanceName') or inst_data.get('name')) == instance_name:
-                        instance_exists = True
+                    api_name = inst_data.get('instanceName') or inst_data.get('name')
+                    if api_name == instance_name:
                         state = inst_data.get('state', 'unknown')
                         # Se já está conectada, retornar erro informativo
-                        if state in ['open', 'connected', 'ready']:
+                        if state.lower() in ['open', 'connected', 'ready']:
                             raise HTTPException(
                                 status_code=400,
                                 detail=f"Instância {instance_name} já está conectada (estado: {state}). Não é necessário gerar QR code."
                             )
                         break
         
-        # Se a instância não existe ou está desconectada, tentar obter QR code
-        # Tentar diferentes endpoints da Evolution API
-        qr_endpoints = [
+        # Tentar obter QR code para reconectar
+        # Tentar endpoint de conexão primeiro
+        connect_urls = [
             f"{api_url}/instance/connect/{instance_name}",
             f"{api_url}/instance/{instance_name}/connect",
-            f"{api_url}/instance/create",
         ]
         
         qr_code = None
         last_error = None
         
-        for endpoint in qr_endpoints:
+        for connect_url in connect_urls:
             try:
-                if endpoint.endswith("/create"):
-                    # Endpoint de criação
-                    payload = {
-                        "instanceName": instance_name,
-                        "qrcode": True,
-                        "integration": "WHATSAPP-BAILEYS"
-                    }
-                    response = requests.post(endpoint, json=payload, headers=headers, timeout=30)
-                else:
-                    # Endpoint de conexão
-                    response = requests.get(endpoint, headers=headers, timeout=30)
-                
+                response = requests.get(connect_url, headers=headers, timeout=30)
                 if response.status_code == 200:
                     data = response.json()
-                    # Tentar diferentes formatos de resposta
                     qr_code = (
                         data.get("qrcode", {}).get("base64") or
                         data.get("qrcode", {}).get("code") or
@@ -189,28 +252,15 @@ async def generate_qr_code(
                         data.get("base64") or
                         data.get("code")
                     )
-                    
                     if qr_code:
-                        # Garantir que está no formato base64 correto
-                        if isinstance(qr_code, str):
-                            if not qr_code.startswith("data:image"):
-                                if not qr_code.startswith("http"):
-                                    qr_code = f"data:image/png;base64,{qr_code}"
                         break
-                elif response.status_code == 404 and instance_exists:
-                    # Instância existe mas endpoint diferente, tentar próximo
-                    continue
-                else:
-                    last_error = f"HTTP {response.status_code}: {response.text[:200]}"
-                    logger.debug(f"Endpoint {endpoint} retornou {response.status_code}")
-                    
             except requests.exceptions.RequestException as e:
                 last_error = str(e)
-                logger.debug(f"Erro ao tentar endpoint {endpoint}: {e}")
+                logger.debug(f"Erro ao tentar {connect_url}: {e}")
                 continue
         
+        # Se não conseguiu via connect, tentar recriar a instância
         if not qr_code:
-            # Se nenhum endpoint funcionou, tentar criar a instância
             try:
                 create_url = f"{api_url}/instance/create"
                 create_payload = {
@@ -228,18 +278,21 @@ async def generate_qr_code(
                         data.get("qrcode") or
                         data.get("base64")
                     )
-                    
-                    if qr_code and not qr_code.startswith("data:image") and not qr_code.startswith("http"):
-                        qr_code = f"data:image/png;base64,{qr_code}"
             except Exception as e:
-                logger.error(f"Erro ao criar instância: {e}")
+                logger.error(f"Erro ao recriar instância: {e}")
+                last_error = str(e)
         
         if qr_code:
+            # Garantir formato correto
+            if isinstance(qr_code, str):
+                if not qr_code.startswith("data:image") and not qr_code.startswith("http"):
+                    qr_code = f"data:image/png;base64,{qr_code}"
+            
             return {
                 "qr_code": qr_code,
                 "base64": qr_code,
                 "instance_name": instance_name,
-                "message": "QR code gerado com sucesso. Escaneie com WhatsApp para conectar."
+                "message": "QR code gerado com sucesso. Escaneie com WhatsApp para reconectar."
             }
         else:
             error_detail = last_error or "Não foi possível gerar QR code. Verifique se a instância existe e se a API Key está correta."
