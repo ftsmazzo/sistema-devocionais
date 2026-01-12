@@ -742,15 +742,18 @@ async def process_messages_update(
         
         elif status == "READ":
             # READ é o mais importante - sempre atualizar
-            envio.message_status = "read"
-            envio.read_at = event_time
-            if not envio.delivered_at:
-                envio.delivered_at = event_time
-            updated = True
-            logger.info(f"✅✅ Mensagem {message_id} LIDA por {phone}")
-            
-            # Atualizar engajamento
-            update_engagement_from_read(db, phone, True)
+            if envio.message_status != "read":
+                envio.message_status = "read"
+                envio.read_at = event_time
+                if not envio.delivered_at:
+                    envio.delivered_at = event_time
+                updated = True
+                logger.info(f"✅✅ Mensagem {message_id} LIDA por {phone}")
+                
+                # Atualizar engajamento no banco
+                update_engagement_from_read(db, phone, True)
+            else:
+                logger.debug(f"ℹ️ Mensagem {message_id} já estava marcada como lida")
         
         if updated:
             db.commit()
@@ -782,18 +785,36 @@ def update_engagement_from_delivered(db: Session, phone: str, was_delivered: boo
     """
     Atualiza score de engajamento baseado em entrega
     Se não aparecer "delivered", é arriscado (pode estar bloqueado)
+    Salva no banco de dados
     """
     try:
-        from app.devocional_service_v2 import DevocionalServiceV2
-        devocional_service = DevocionalServiceV2(db=db)
-        if devocional_service.shield:
-            # Se foi entregue, não penalizar ainda
-            # Mas se não aparecer delivered após alguns minutos, pode ser bloqueado
-            logger.debug(f"Engajamento: mensagem entregue para {phone}")
+        from app.database import ContactEngagement
+        from app.timezone_utils import now_brazil_naive
+        
+        # Buscar ou criar registro de engajamento
+        engagement = db.query(ContactEngagement).filter(
+            ContactEngagement.phone == phone
+        ).first()
+        
+        if not engagement:
+            engagement = ContactEngagement(phone=phone, engagement_score=0.5)
+            db.add(engagement)
+        
+        if was_delivered:
+            engagement.total_delivered += 1
+            engagement.last_delivered_date = now_brazil_naive()
+            engagement.consecutive_not_delivered = 0
+            logger.debug(f"✅ Engajamento: mensagem entregue para {phone}")
         else:
-            logger.warning("ShieldService não está habilitado, não é possível atualizar engajamento")
+            engagement.consecutive_not_delivered += 1
+            # Penalizar se não foi entregue
+            engagement.engagement_score = max(0.0, engagement.engagement_score - 0.03)
+        
+        engagement.updated_at = now_brazil_naive()
+        db.commit()
     except Exception as e:
-        logger.error(f"Erro ao atualizar engajamento (delivered): {e}", exc_info=True)
+        logger.error(f"❌ Erro ao atualizar engajamento (delivered): {e}", exc_info=True)
+        db.rollback()
 
 
 def update_engagement_from_read(db: Session, phone: str, was_read: bool):

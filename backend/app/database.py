@@ -1,7 +1,7 @@
 """
 Configuração do banco de dados
 """
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, Text, Boolean, ARRAY
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, Text, Boolean, ARRAY, Float
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from datetime import datetime
@@ -75,6 +75,38 @@ class DevocionalContato(Base):
     updated_at = Column(DateTime, default=now_brazil, onupdate=now_brazil)
 
 
+class ContactEngagement(Base):
+    """Modelo para armazenar dados de engajamento dos contatos no banco"""
+    __tablename__ = "contact_engagement"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    phone = Column(String(20), unique=True, nullable=False, index=True)  # Telefone do contato
+    
+    # Score de engajamento (0.0 a 1.0)
+    engagement_score = Column(Float, default=0.5, index=True)
+    
+    # Estatísticas
+    total_sent = Column(Integer, default=0)  # Total de mensagens enviadas
+    total_responded = Column(Integer, default=0)  # Total de respostas
+    total_read = Column(Integer, default=0)  # Total de mensagens lidas
+    total_delivered = Column(Integer, default=0)  # Total de mensagens entregues
+    
+    # Datas importantes
+    last_response_date = Column(DateTime, nullable=True)  # Última resposta
+    last_sent_date = Column(DateTime, nullable=True)  # Último envio
+    last_read_date = Column(DateTime, nullable=True)  # Última leitura
+    last_delivered_date = Column(DateTime, nullable=True)  # Última entrega
+    
+    # Contadores consecutivos
+    consecutive_no_response = Column(Integer, default=0)  # Mensagens consecutivas sem resposta
+    consecutive_not_read = Column(Integer, default=0)  # Mensagens consecutivas não lidas
+    consecutive_not_delivered = Column(Integer, default=0)  # Mensagens consecutivas não entregues
+    
+    # Timestamps
+    created_at = Column(DateTime, default=now_brazil)
+    updated_at = Column(DateTime, default=now_brazil, onupdate=now_brazil)
+
+
 class Devocional(Base):
     """Modelo para armazenar devocionais gerados"""
     __tablename__ = "devocionais"
@@ -119,32 +151,14 @@ class AgendamentoEnvio(Base):
     
     # Relacionamento
     devocional_id = Column(Integer, nullable=True, index=True)  # FK para devocionais
-    contato_id = Column(Integer, nullable=True, index=True)  # FK para contatos (opcional, pode ser envio em massa)
     
-    # Informações do agendamento
+    # Agendamento
     scheduled_for = Column(DateTime, nullable=False, index=True)  # Quando deve ser enviado
-    sent_at = Column(DateTime, nullable=True, index=True)  # Quando foi realmente enviado
+    sent = Column(Boolean, default=False, index=True)  # Se já foi enviado
+    sent_at = Column(DateTime, nullable=True)  # Quando foi enviado
     
-    # Status
-    status = Column(String(20), default="pending", index=True)  # pending, sent, failed, cancelled
-    error_message = Column(Text)  # Mensagem de erro (se houver)
-    
-    # Informações do envio
-    recipient_phone = Column(String(20), nullable=False)  # Telefone do destinatário
-    recipient_name = Column(String(100))  # Nome do destinatário
-    message_text = Column(Text)  # Texto que será/enviado
-    
-    # Instância que deve enviar
-    instance_name = Column(String(100))  # Nome da instância Evolution API
-    
-    # Tipo de agendamento
-    agendamento_type = Column(String(20), default="automatico")  # automatico, manual, recorrente
-    
-    # Metadados
-    metadata_json = Column(Text)  # JSON com metadados adicionais
-    
-    # Timestamps (sempre em horário de Brasília)
-    created_at = Column(DateTime, default=now_brazil, index=True)
+    # Timestamps
+    created_at = Column(DateTime, default=now_brazil)
     updated_at = Column(DateTime, default=now_brazil, onupdate=now_brazil)
 
 
@@ -180,44 +194,23 @@ class SystemConfig(Base):
 
 
 class EvolutionInstanceConfig(Base):
-    """Modelo para configuração de instâncias Evolution API (armazenado no banco)"""
+    """
+    Modelo para configurações de instâncias da Evolution API
+    Armazenado no banco para persistência
+    """
     __tablename__ = "evolution_instance_configs"
     
     id = Column(Integer, primary_key=True, index=True)
-    
-    # Identificação
-    name = Column(String(100), unique=True, nullable=False, index=True)  # Nome da instância na Evolution API
-    
-    # Configuração da API
-    api_url = Column(String(255), nullable=False)  # URL da Evolution API
+    name = Column(String(100), unique=True, nullable=False, index=True)  # Nome da instância
+    api_url = Column(String(255), nullable=False)  # URL da API
     api_key = Column(String(255), nullable=False)  # API Key
+    display_name = Column(String(100))  # Nome de exibição
+    max_messages_per_hour = Column(Integer, default=20)  # Limite por hora
+    max_messages_per_day = Column(Integer, default=200)  # Limite por dia
+    priority = Column(Integer, default=1)  # Prioridade (menor = maior prioridade)
+    enabled = Column(Boolean, default=True, index=True)  # Se está habilitada
     
-    # Configurações de exibição
-    display_name = Column(String(100), default="Devocional Diário")  # Nome que aparece no WhatsApp
-    
-    # Limites de envio
-    max_messages_per_hour = Column(Integer, default=20)
-    max_messages_per_day = Column(Integer, default=200)
-    
-    # Prioridade e controle
-    priority = Column(Integer, default=1)  # 1=alta, 2=média, 3=baixa
-    enabled = Column(Boolean, default=True, index=True)
-    
-    # Status atual (atualizado dinamicamente)
-    status = Column(String(20), default="unknown", index=True)  # active, inactive, error, blocked
-    phone_number = Column(String(20), nullable=True)  # Número da instância (obtido da API)
-    
-    # Estatísticas (atualizadas dinamicamente)
-    messages_sent_today = Column(Integer, default=0)
-    messages_sent_this_hour = Column(Integer, default=0)
-    last_message_time = Column(DateTime, nullable=True)
-    
-    # Informações de erro
-    error_count = Column(Integer, default=0)
-    last_error = Column(Text, nullable=True)
-    last_check = Column(DateTime, nullable=True)
-    
-    # Timestamps (sempre em horário de Brasília)
+    # Timestamps
     created_at = Column(DateTime, default=now_brazil)
     updated_at = Column(DateTime, default=now_brazil, onupdate=now_brazil)
 
