@@ -802,8 +802,25 @@ def update_engagement_from_delivered(db: Session, phone: str, was_delivered: boo
         ).first()
         
         if not engagement:
-            engagement = ContactEngagement(phone=phone, engagement_score=0.5)
+            engagement = ContactEngagement(
+                phone=phone,
+                engagement_score=0.5,
+                total_sent=0,
+                total_responded=0,
+                total_read=0,
+                total_delivered=0,
+                consecutive_no_response=0,
+                consecutive_not_read=0,
+                consecutive_not_delivered=0
+            )
             db.add(engagement)
+            db.flush()  # Garantir que o objeto seja persistido antes de usar
+        
+        # Garantir que valores não sejam None
+        if engagement.total_delivered is None:
+            engagement.total_delivered = 0
+        if engagement.consecutive_not_delivered is None:
+            engagement.consecutive_not_delivered = 0
         
         if was_delivered:
             engagement.total_delivered += 1
@@ -811,12 +828,22 @@ def update_engagement_from_delivered(db: Session, phone: str, was_delivered: boo
             engagement.consecutive_not_delivered = 0
             logger.debug(f"✅ Engajamento: mensagem entregue para {phone}")
         else:
+            if engagement.consecutive_not_delivered is None:
+                engagement.consecutive_not_delivered = 0
             engagement.consecutive_not_delivered += 1
             # Penalizar se não foi entregue
+            if engagement.engagement_score is None:
+                engagement.engagement_score = 0.5
             engagement.engagement_score = max(0.0, engagement.engagement_score - 0.03)
         
         engagement.updated_at = now_brazil_naive()
-        db.commit()
+        try:
+            db.commit()
+            logger.info(f"✅ Engajamento (delivered) atualizado no banco para {phone}: total_delivered={engagement.total_delivered}, score={engagement.engagement_score:.2f}")
+        except Exception as commit_error:
+            logger.error(f"❌ Erro ao fazer commit do engajamento (delivered): {commit_error}", exc_info=True)
+            db.rollback()
+            raise
     except Exception as e:
         logger.error(f"❌ Erro ao atualizar engajamento (delivered): {e}", exc_info=True)
         db.rollback()
@@ -842,8 +869,25 @@ def update_engagement_from_read(db: Session, phone: str, was_read: bool):
         ).first()
         
         if not engagement:
-            engagement = ContactEngagement(phone=phone, engagement_score=0.5)
+            engagement = ContactEngagement(
+                phone=phone,
+                engagement_score=0.5,
+                total_sent=0,
+                total_responded=0,
+                total_read=0,
+                total_delivered=0,
+                consecutive_no_response=0,
+                consecutive_not_read=0,
+                consecutive_not_delivered=0
+            )
             db.add(engagement)
+            db.flush()  # Garantir que o objeto seja persistido antes de usar
+        
+        # Garantir que valores não sejam None
+        if engagement.total_read is None:
+            engagement.total_read = 0
+        if engagement.consecutive_not_read is None:
+            engagement.consecutive_not_read = 0
         
         # Atualizar dados
         if was_read:
@@ -852,16 +896,28 @@ def update_engagement_from_read(db: Session, phone: str, was_read: bool):
             engagement.consecutive_not_read = 0
             
             # Aumentar score por visualização
+            if engagement.engagement_score is None:
+                engagement.engagement_score = 0.5
             engagement.engagement_score = min(1.0, engagement.engagement_score + 0.05)
             
             logger.info(f"✅ Engajamento atualizado no banco para {phone}: score={engagement.engagement_score:.2f} (visualizou)")
         else:
+            if engagement.consecutive_not_read is None:
+                engagement.consecutive_not_read = 0
             engagement.consecutive_not_read += 1
             # Diminuir score se não foi lida
+            if engagement.engagement_score is None:
+                engagement.engagement_score = 0.5
             engagement.engagement_score = max(0.0, engagement.engagement_score - 0.02)
         
         engagement.updated_at = now_brazil_naive()
-        db.commit()
+        try:
+            db.commit()
+            logger.info(f"✅ Engajamento (read) atualizado no banco para {phone}: total_read={engagement.total_read}, score={engagement.engagement_score:.2f}")
+        except Exception as commit_error:
+            logger.error(f"❌ Erro ao fazer commit do engajamento (read): {commit_error}", exc_info=True)
+            db.rollback()
+            raise
         
         # Também atualizar no ShieldService (memória) para consistência
         from app.devocional_service_v2 import DevocionalServiceV2

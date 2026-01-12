@@ -341,42 +341,48 @@ async def list_contatos(
         
         contatos = query.order_by(DevocionalContato.name, DevocionalContato.phone).offset(skip).limit(limit).all()
         
+        # Buscar dados de engajamento do banco (mais confiável)
+        from app.database import ContactEngagement
+        
         # Calcular score de engajamento para cada contato
         result = []
         for contato in contatos:
             try:
-                # Buscar envios do contato nos últimos 30 dias
-                date_limit = now_brazil_naive() - timedelta(days=30)
-                envios = db.query(DevocionalEnvio).filter(
-                    DevocionalEnvio.recipient_phone == contato.phone,
-                    DevocionalEnvio.sent_at >= date_limit
-                ).all()
+                # Primeiro, tentar buscar do ContactEngagement (dados persistidos)
+                engagement_db = db.query(ContactEngagement).filter(
+                    ContactEngagement.phone == contato.phone
+                ).first()
                 
-                total_sent = len(envios)
-                total_delivered = sum(1 for e in envios if hasattr(e, 'message_status') and e.message_status in ['delivered', 'read'])
-                total_read = sum(1 for e in envios if hasattr(e, 'message_status') and e.message_status == 'read')
-                
-                # Calcular score baseado em taxa de leitura
-                # Se não aparecer "delivered", é arriscado (reduz score)
-                # Se não ler, reduz score ainda mais
-                if total_sent > 0:
-                    delivery_rate = total_delivered / total_sent
-                    read_rate = total_read / total_sent
-                    
-                    # Score = média ponderada: 40% entrega, 60% leitura
-                    # Se não foi entregue, penalizar mais
-                    if delivery_rate < 0.5:
-                        # Menos de 50% entregue = muito arriscado
-                        engagement_score = 0.2
-                    elif read_rate < 0.3:
-                        # Menos de 30% lido = arriscado
-                        engagement_score = 0.3 + (read_rate * 0.4)
-                    else:
-                        # Bom engajamento
-                        engagement_score = 0.5 + (read_rate * 0.5)
+                if engagement_db and engagement_db.engagement_score is not None:
+                    # Usar score do banco (mais confiável)
+                    engagement_score = float(engagement_db.engagement_score)
                 else:
-                    # Sem histórico, score neutro
-                    engagement_score = 0.5
+                    # Se não tiver no banco, calcular baseado nos envios
+                    date_limit = now_brazil_naive() - timedelta(days=30)
+                    envios = db.query(DevocionalEnvio).filter(
+                        DevocionalEnvio.recipient_phone == contato.phone,
+                        DevocionalEnvio.sent_at >= date_limit
+                    ).all()
+                    
+                    total_sent = len(envios)
+                    total_delivered = sum(1 for e in envios if hasattr(e, 'message_status') and e.message_status in ['delivered', 'read'])
+                    total_read = sum(1 for e in envios if hasattr(e, 'message_status') and e.message_status == 'read')
+                    
+                    # Calcular score baseado em taxa de leitura
+                    if total_sent > 0:
+                        delivery_rate = total_delivered / total_sent
+                        read_rate = total_read / total_sent
+                        
+                        # Score = média ponderada: 40% entrega, 60% leitura
+                        if delivery_rate < 0.5:
+                            engagement_score = 0.2
+                        elif read_rate < 0.3:
+                            engagement_score = 0.3 + (read_rate * 0.4)
+                        else:
+                            engagement_score = 0.5 + (read_rate * 0.5)
+                    else:
+                        # Sem histórico, score neutro
+                        engagement_score = 0.5
                 
                 # Buscar última instância usada
                 last_envio = db.query(DevocionalEnvio).filter(
@@ -390,12 +396,17 @@ async def list_contatos(
                 contato_dict['instance_name'] = instance_name
                 result.append(ContatoResponse(**contato_dict))
             except Exception as e:
-                # Se houver erro ao calcular score, usar valores padrão
-                logger.warning(f"Erro ao calcular score para contato {contato.phone}: {e}")
-                contato_dict = ContatoResponse.model_validate(contato).model_dump()
-                contato_dict['engagement_score'] = 0.5
-                contato_dict['instance_name'] = None
-                result.append(ContatoResponse(**contato_dict))
+                # Se houver erro, ainda assim retornar o contato com valores padrão
+                logger.warning(f"Erro ao calcular score para contato {contato.phone}: {e}", exc_info=True)
+                try:
+                    contato_dict = ContatoResponse.model_validate(contato).model_dump()
+                    contato_dict['engagement_score'] = 0.5
+                    contato_dict['instance_name'] = None
+                    result.append(ContatoResponse(**contato_dict))
+                except Exception as e2:
+                    logger.error(f"Erro crítico ao processar contato {contato.phone}: {e2}", exc_info=True)
+                    # Continuar com próximo contato
+                    continue
         
         return result
     
