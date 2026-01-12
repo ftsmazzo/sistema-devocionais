@@ -220,7 +220,7 @@ async def n8n_webhook(
 
 
 @router.get("/instances")
-async def get_instances_status():
+async def get_instances_status(db: Session = Depends(get_db)):
     """Retorna status de todas as instâncias"""
     try:
         devocional_service = get_devocional_service(db)
@@ -301,11 +301,11 @@ async def setup_instance_profile(instance_name: str):
 
 
 @router.post("/instances/setup-all-profiles")
-async def setup_all_profiles():
+async def setup_all_profiles(db: Session = Depends(get_db)):
     """Configura o perfil (nome) de todas as instâncias"""
     try:
-        results = []
         devocional_service = get_devocional_service(db)
+        results = []
         for instance in devocional_service.instance_manager.instances:
             if instance.enabled:
                 success = devocional_service.instance_manager.set_instance_profile(
@@ -373,7 +373,6 @@ async def debug_instances(db: Session = Depends(get_db)):
         
         return {
             "config": config_info,
-            "instances_parsed": instances_parsed,
             "manager_stats": manager_stats,
             "instance_details": instance_details
         }
