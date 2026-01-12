@@ -67,6 +67,22 @@ X-Webhook-Secret: seu-secret-aqui
    ```
 
 **Formato do Evento** (enviado pela Evolution API):
+
+**Formato 1 - MessageUpdate (mais comum):**
+```json
+{
+  "MessageUpdate": [
+    {"status": "SERVER_ACK"},    // sent
+    {"status": "DELIVERY_ACK"},  // delivered
+    {"status": "READ"}           // read ⭐
+  ],
+  "id": "cmkb3zxuo1b57je5pm1707e8u",
+  "messageTimestamp": 1768219669,
+  "instanceId": "5f31e754-309b-4795-98f3-1c7df55eb765"
+}
+```
+
+**Formato 2 - message.ack (formato antigo):**
 ```json
 {
   "event": "message.ack",
@@ -81,6 +97,8 @@ X-Webhook-Secret: seu-secret-aqui
   }
 }
 ```
+
+**⚠️ IMPORTANTE**: O sistema agora suporta **ambos os formatos** automaticamente!
 
 ### 3. Verificar se Está Funcionando
 

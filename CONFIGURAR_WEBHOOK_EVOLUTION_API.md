@@ -67,11 +67,16 @@ Selecione ou digite os eventos que você quer receber:
 
 **Evento principal:**
 ```
-message.ack
+MESSAGES_UPDATE
 ```
+
+**⚠️ IMPORTANTE**: 
+- O evento `MESSAGES_UPDATE` é o que envia o formato `MessageUpdate` com status `READ`, `DELIVERY_ACK`, `SERVER_ACK`
+- Este é o evento que você precisa habilitar para rastrear visualizações!
 
 **Outros eventos úteis (opcional):**
 ```
+message.ack (formato antigo, ainda suportado)
 qrcode.updated
 connection.update
 ```
