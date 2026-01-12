@@ -56,39 +56,64 @@ class InstanceManager:
     - Failover automático
     """
     
-    def __init__(self, instances: List[Dict[str, any]]):
+    def __init__(self, instances: Optional[List[Dict[str, any]]] = None, db: Optional[Any] = None):
         """
         Inicializa o gerenciador com lista de instâncias
         
         Args:
-            instances: Lista de dicionários com configuração das instâncias
-                [
-                    {
-                        "name": "Devocional-1",
-                        "api_url": "http://localhost:8080",
-                        "api_key": "key1",
-                        "display_name": "Devocional Diário",
-                        "max_messages_per_hour": 20,
-                        "max_messages_per_day": 200,
-                        "priority": 1
-                    },
-                    ...
-                ]
+            instances: Lista de dicionários com configuração das instâncias (legado)
+            db: Sessão do banco de dados (novo método - preferido)
         """
         self.instances: List[EvolutionInstance] = []
         
-        for instance_config in instances:
-            instance = EvolutionInstance(
-                name=instance_config.get("name"),
-                api_url=instance_config.get("api_url"),
-                api_key=instance_config.get("api_key"),
-                display_name=instance_config.get("display_name", "Devocional"),
-                max_messages_per_hour=instance_config.get("max_messages_per_hour", 20),
-                max_messages_per_day=instance_config.get("max_messages_per_day", 200),
-                priority=instance_config.get("priority", 1),
-                enabled=instance_config.get("enabled", True)
-            )
-            self.instances.append(instance)
+        # Se db fornecido, buscar do banco de dados
+        if db is not None:
+            from app.instance_service import InstanceService
+            service = InstanceService(db)
+            db_instances = service.get_all_instances(sync=True)
+            
+            for db_inst in db_instances:
+                # Converter status string para enum
+                status_map = {
+                    "active": InstanceStatus.ACTIVE,
+                    "inactive": InstanceStatus.INACTIVE,
+                    "error": InstanceStatus.ERROR,
+                    "blocked": InstanceStatus.BLOCKED,
+                }
+                status = status_map.get(db_inst.status, InstanceStatus.INACTIVE)
+                
+                instance = EvolutionInstance(
+                    name=db_inst.name,
+                    api_url=db_inst.api_url,
+                    api_key=db_inst.api_key,
+                    display_name=db_inst.display_name,
+                    phone_number=db_inst.phone_number,
+                    status=status,
+                    last_check=db_inst.last_check,
+                    messages_sent_today=db_inst.messages_sent_today,
+                    messages_sent_this_hour=db_inst.messages_sent_this_hour,
+                    max_messages_per_hour=db_inst.max_messages_per_hour,
+                    max_messages_per_day=db_inst.max_messages_per_day,
+                    priority=db_inst.priority,
+                    enabled=db_inst.enabled,
+                    error_count=db_inst.error_count,
+                    last_error=db_inst.last_error
+                )
+                self.instances.append(instance)
+        elif instances:
+            # Método legado - usar lista de dicionários
+            for instance_config in instances:
+                instance = EvolutionInstance(
+                    name=instance_config.get("name"),
+                    api_url=instance_config.get("api_url"),
+                    api_key=instance_config.get("api_key"),
+                    display_name=instance_config.get("display_name", "Devocional"),
+                    max_messages_per_hour=instance_config.get("max_messages_per_hour", 20),
+                    max_messages_per_day=instance_config.get("max_messages_per_day", 200),
+                    priority=instance_config.get("priority", 1),
+                    enabled=instance_config.get("enabled", True)
+                )
+                self.instances.append(instance)
         
         logger.info(f"InstanceManager inicializado com {len(self.instances)} instâncias")
     

@@ -15,8 +15,10 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/notifications", tags=["notifications"])
 
-# Instância do serviço
-devocional_service = DevocionalServiceV2()
+# Função helper para obter serviço com db
+def get_devocional_service(db: Session) -> DevocionalServiceV2:
+    """Retorna instância do serviço com banco de dados"""
+    return DevocionalServiceV2(db=db)
 
 
 class NotificationRequest(BaseModel):
@@ -102,6 +104,7 @@ async def n8n_webhook(
                 ]
             
             # Enviar
+            devocional_service = get_devocional_service(db)
             results = devocional_service.send_bulk_devocionais(
                 contacts=contacts,
                 message=message,
@@ -170,6 +173,7 @@ async def n8n_webhook(
             
             test_message = request.message or "Mensagem de teste do sistema de devocionais"
             
+            devocional_service = get_devocional_service(db)
             result = devocional_service.send_devocional(
                 phone=request.phone,
                 message=test_message,
@@ -191,6 +195,7 @@ async def n8n_webhook(
         
         elif request.event == "check_status":
             # Verificar saúde das instâncias
+            devocional_service = get_devocional_service(db)
             devocional_service.check_all_instances_health()
             stats = devocional_service.get_stats()
             
@@ -218,6 +223,7 @@ async def n8n_webhook(
 async def get_instances_status():
     """Retorna status de todas as instâncias"""
     try:
+        devocional_service = get_devocional_service(db)
         devocional_service.check_all_instances_health()
         stats = devocional_service.get_stats()
         return stats
@@ -230,6 +236,7 @@ async def get_instances_status():
 async def setup_instance_profile(instance_name: str):
     """Configura o perfil (nome) de uma instância específica"""
     try:
+        devocional_service = get_devocional_service(db)
         instance = devocional_service.instance_manager.get_instance_by_name(instance_name)
         if not instance:
             raise HTTPException(status_code=404, detail=f"Instância {instance_name} não encontrada")
@@ -263,6 +270,7 @@ async def setup_instance_profile(instance_name: str):
 async def setup_instance_profile(instance_name: str):
     """Configura o perfil (nome) de uma instância específica"""
     try:
+        devocional_service = get_devocional_service(db)
         instance = devocional_service.instance_manager.get_instance_by_name(instance_name)
         if not instance:
             raise HTTPException(status_code=404, detail=f"Instância {instance_name} não encontrada")
@@ -297,6 +305,7 @@ async def setup_all_profiles():
     """Configura o perfil (nome) de todas as instâncias"""
     try:
         results = []
+        devocional_service = get_devocional_service(db)
         for instance in devocional_service.instance_manager.instances:
             if instance.enabled:
                 success = devocional_service.instance_manager.set_instance_profile(

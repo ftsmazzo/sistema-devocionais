@@ -50,31 +50,43 @@ class DevocionalServiceV2:
     com suporte a multi-instância, vCard e perfil personalizado
     """
     
-    def __init__(self):
+    def __init__(self, db: Optional[Any] = None):
+        """
+        Inicializa o serviço de devocionais
+        
+        Args:
+            db: Sessão do banco de dados (opcional, para usar instâncias do banco)
+        """
         # Inicializar InstanceManager
-        instances_config = []
-        
-        # Tentar carregar instâncias do JSON
-        try:
-            if settings.EVOLUTION_INSTANCES and settings.EVOLUTION_INSTANCES != "[]":
-                instances_config = json.loads(settings.EVOLUTION_INSTANCES)
-        except Exception as e:
-            logger.warning(f"Erro ao carregar configuração de instâncias: {e}")
-        
-        # Se não houver instâncias configuradas, usar configuração legada
-        if not instances_config:
-            logger.info("Usando configuração legada (instância única)")
-            instances_config = [{
-                "name": settings.EVOLUTION_INSTANCE_NAME,
-                "api_url": settings.EVOLUTION_API_URL,
-                "api_key": settings.EVOLUTION_API_KEY,
-                "display_name": settings.EVOLUTION_DISPLAY_NAME,
-                "max_messages_per_hour": settings.MAX_MESSAGES_PER_HOUR,
-                "max_messages_per_day": settings.MAX_MESSAGES_PER_DAY,
-                "priority": 1
-            }]
-        
-        self.instance_manager = InstanceManager(instances_config)
+        # Se db fornecido, usar banco de dados (preferido)
+        if db is not None:
+            logger.info("Inicializando InstanceManager com banco de dados")
+            self.instance_manager = InstanceManager(db=db)
+        else:
+            # Método legado - usar .env
+            instances_config = []
+            
+            # Tentar carregar instâncias do JSON
+            try:
+                if settings.EVOLUTION_INSTANCES and settings.EVOLUTION_INSTANCES != "[]":
+                    instances_config = json.loads(settings.EVOLUTION_INSTANCES)
+            except Exception as e:
+                logger.warning(f"Erro ao carregar configuração de instâncias: {e}")
+            
+            # Se não houver instâncias configuradas, usar configuração legada
+            if not instances_config:
+                logger.info("Usando configuração legada (instância única)")
+                instances_config = [{
+                    "name": settings.EVOLUTION_INSTANCE_NAME,
+                    "api_url": settings.EVOLUTION_API_URL,
+                    "api_key": settings.EVOLUTION_API_KEY,
+                    "display_name": settings.EVOLUTION_DISPLAY_NAME,
+                    "max_messages_per_hour": settings.MAX_MESSAGES_PER_HOUR,
+                    "max_messages_per_day": settings.MAX_MESSAGES_PER_DAY,
+                    "priority": 1
+                }]
+            
+            self.instance_manager = InstanceManager(instances=instances_config)
         
         # Verificar saúde das instâncias na inicialização (não falha se não conseguir)
         try:

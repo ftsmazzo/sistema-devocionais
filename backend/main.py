@@ -8,7 +8,8 @@ from contextlib import asynccontextmanager
 import uvicorn
 
 from app.database import init_db
-from app.routers import notifications, devocional, auth, config, instances
+from app.routers import notifications, devocional, auth, config
+from app.routers import instances_v2 as instances
 from app.routers import devocional_context, devocional_test
 from app.routers.notifications import router as notifications_router
 from app.devocional_scheduler import start_scheduler as start_devocional_scheduler, stop_scheduler as stop_devocional_scheduler

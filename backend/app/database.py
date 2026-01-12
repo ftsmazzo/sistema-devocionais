@@ -159,6 +159,49 @@ class User(Base):
     last_login = Column(DateTime, nullable=True)
 
 
+class EvolutionInstanceConfig(Base):
+    """Modelo para configuração de instâncias Evolution API (armazenado no banco)"""
+    __tablename__ = "evolution_instance_configs"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    
+    # Identificação
+    name = Column(String(100), unique=True, nullable=False, index=True)  # Nome da instância na Evolution API
+    
+    # Configuração da API
+    api_url = Column(String(255), nullable=False)  # URL da Evolution API
+    api_key = Column(String(255), nullable=False)  # API Key
+    
+    # Configurações de exibição
+    display_name = Column(String(100), default="Devocional Diário")  # Nome que aparece no WhatsApp
+    
+    # Limites de envio
+    max_messages_per_hour = Column(Integer, default=20)
+    max_messages_per_day = Column(Integer, default=200)
+    
+    # Prioridade e controle
+    priority = Column(Integer, default=1)  # 1=alta, 2=média, 3=baixa
+    enabled = Column(Boolean, default=True, index=True)
+    
+    # Status atual (atualizado dinamicamente)
+    status = Column(String(20), default="unknown", index=True)  # active, inactive, error, blocked
+    phone_number = Column(String(20), nullable=True)  # Número da instância (obtido da API)
+    
+    # Estatísticas (atualizadas dinamicamente)
+    messages_sent_today = Column(Integer, default=0)
+    messages_sent_this_hour = Column(Integer, default=0)
+    last_message_time = Column(DateTime, nullable=True)
+    
+    # Informações de erro
+    error_count = Column(Integer, default=0)
+    last_error = Column(Text, nullable=True)
+    last_check = Column(DateTime, nullable=True)
+    
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 # Função para obter sessão do banco
 def get_db():
     db = SessionLocal()
