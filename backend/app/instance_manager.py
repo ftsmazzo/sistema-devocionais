@@ -264,14 +264,31 @@ class InstanceManager:
                             # Salvar o nome real da instância na API (importante para chamadas)
                             instance.api_instance_name = api_instance_name
                             
-                            # Tentar obter número da instância
-                            phone = inst_data.get('phoneNumber') or inst_data.get('phone') or inst_data.get('number') or inst_data.get('phoneNumber')
-                            if phone and not instance.phone_number:
-                                instance.phone_number = str(phone)
-                                logger.info(f"Número da instância {instance.name} obtido: {phone}")
+                            # Tentar obter número da instância de múltiplos campos
+                            phone = (
+                                inst_data.get('phoneNumber') or 
+                                inst_data.get('phone') or 
+                                inst_data.get('number') or
+                                inst_data.get('phone_number') or
+                                inst_data.get('jid')  # JID pode conter o número
+                            )
+                            
+                            # Se phone é um JID, extrair o número
+                            if phone and '@' in str(phone):
+                                phone = str(phone).split('@')[0]
+                            
+                            if phone:
+                                phone_str = str(phone).strip()
+                                if phone_str and not instance.phone_number:
+                                    instance.phone_number = phone_str
+                                    logger.info(f"Número da instância {instance.name} obtido: {phone_str}")
+                                elif phone_str and instance.phone_number != phone_str:
+                                    # Atualizar se mudou
+                                    instance.phone_number = phone_str
+                                    logger.debug(f"Número da instância {instance.name} atualizado: {phone_str}")
                             
                             match_type = "exata" if exact_match else ("sem hífen" if no_dash_match else "parcial")
-                            logger.info(f"✅ Instância '{instance.name}' encontrada na API como '{api_instance_name}' (match: {match_type}, estado: {state})")
+                            logger.info(f"✅ Instância '{instance.name}' encontrada na API como '{api_instance_name}' (match: {match_type}, estado: {state}, telefone: {phone or 'não informado'})")
                             break  # Encontrou, pode sair do loop
                 
                 # Se encontrou a instância, processar o estado
@@ -354,16 +371,71 @@ class InstanceManager:
                             logger.info(f"✅ Instância {instance.name} com estado unknown mas funcionou recentemente (envios hoje: {instance.messages_sent_today}) - marcada como ACTIVE")
                             return True
                         
+                        # Método 3: Verificar se houve envios recentes (últimas 24h)
+                        if instance.messages_sent_today > 0 or (instance.last_message_time and 
+                            (datetime.now() - instance.last_message_time).total_seconds() < 86400):
+                            instance.status = InstanceStatus.ACTIVE
+                            instance.error_count = 0
+                            instance.last_check = datetime.now()
+                            logger.info(f"✅ Instância {instance.name} com estado unknown mas funcionou recentemente (envios hoje: {instance.messages_sent_today}) - marcada como ACTIVE")
+                            return True
+                        
                         # Método 4: Se a instância tem número de telefone, provavelmente está conectada
                         if instance.phone_number:
                             logger.info(f"Instância {instance.name} tem número de telefone ({instance.phone_number}), provavelmente está conectada")
-                            # Tentar fazer um teste de envio ou verificação
-                            # Por enquanto, marcar como ACTIVE se tem número
                             instance.status = InstanceStatus.ACTIVE
                             instance.error_count = 0
                             instance.last_check = datetime.now()
                             logger.info(f"✅ Instância {instance.name} marcada como ACTIVE (tem número de telefone, provavelmente conectada)")
                             return True
+                        
+                        # Método 5: Tentar buscar número de telefone diretamente da Evolution API
+                        try:
+                            api_name = getattr(instance, 'api_instance_name', None) or instance.name
+                            # Tentar buscar informações detalhadas da instância
+                            detail_urls = [
+                                f"{instance.api_url}/instance/fetchInstance/{api_name}",
+                                f"{instance.api_url}/instance/{api_name}",
+                            ]
+                            
+                            for detail_url in detail_urls:
+                                try:
+                                    detail_response = requests.get(detail_url, headers=headers, timeout=5)
+                                    if detail_response.status_code == 200:
+                                        detail_data = detail_response.json()
+                                        if isinstance(detail_data, list) and len(detail_data) > 0:
+                                            detail_data = detail_data[0]
+                                        
+                                        # Tentar obter número de telefone
+                                        detail_phone = (
+                                            detail_data.get('phoneNumber') or
+                                            detail_data.get('phone') or
+                                            detail_data.get('number') or
+                                            detail_data.get('jid', '').split('@')[0] if detail_data.get('jid') else None
+                                        )
+                                        
+                                        if detail_phone:
+                                            phone_str = str(detail_phone).strip()
+                                            if phone_str and len(phone_str) > 5:  # Número válido
+                                                instance.phone_number = phone_str
+                                                instance.status = InstanceStatus.ACTIVE
+                                                instance.error_count = 0
+                                                instance.last_check = datetime.now()
+                                                logger.info(f"✅ Instância {instance.name} marcada como ACTIVE (número obtido via fetchInstance: {phone_str})")
+                                                return True
+                                        
+                                        # Verificar se tem outros indicadores de conexão
+                                        if detail_data.get('state', '').lower() in ['open', 'connected', 'ready']:
+                                            instance.status = InstanceStatus.ACTIVE
+                                            instance.error_count = 0
+                                            instance.last_check = datetime.now()
+                                            logger.info(f"✅ Instância {instance.name} marcada como ACTIVE (estado via fetchInstance: {detail_data.get('state')})")
+                                            return True
+                                except Exception as e:
+                                    logger.debug(f"Erro ao buscar detalhes de {detail_url}: {e}")
+                                    continue
+                        except Exception as e:
+                            logger.debug(f"Erro ao buscar número de telefone: {e}")
                         
                         # Se nenhum método funcionou, marcar como INACTIVE mas permitir uso
                         instance.status = InstanceStatus.INACTIVE
