@@ -145,18 +145,10 @@ class InstanceManager:
                     logger.info(f"Verificando saúde da instância {inst.name}...")
                     self.check_instance_health(inst)
         
-        # Filtrar instâncias ativas e habilitadas
-        available = [
-            inst for inst in self.instances
-            if inst.enabled 
-            and inst.status == InstanceStatus.ACTIVE
-            and inst.messages_sent_today < inst.max_messages_per_day
-            and inst.messages_sent_this_hour < inst.max_messages_per_hour
-        ]
-        
-        # Se não houver instâncias ACTIVE, tentar usar INACTIVE (pode estar apenas não verificada)
-        if not available:
-            logger.warning("Nenhuma instância ACTIVE disponível, tentando instâncias INACTIVE...")
+        # Para distribuição por ID, considerar TODAS as instâncias habilitadas (não apenas ACTIVE)
+        # Isso garante que a distribuição funcione mesmo se algumas instâncias estiverem INACTIVE
+        if strategy == "contact_id" and contact_id is not None:
+            # Para distribuição por ID, usar todas as instâncias habilitadas (exceto ERROR/BLOCKED)
             available = [
                 inst for inst in self.instances
                 if inst.enabled 
@@ -165,6 +157,29 @@ class InstanceManager:
                 and inst.messages_sent_today < inst.max_messages_per_day
                 and inst.messages_sent_this_hour < inst.max_messages_per_hour
             ]
+            logger.info(f"📊 Distribuição por ID: {len(available)} instâncias disponíveis de {len(self.instances)} total. Status: {[(i.name, i.status.value) for i in available]}")
+        else:
+            # Para outras estratégias, priorizar apenas ACTIVE
+            # Filtrar instâncias ativas e habilitadas
+            available = [
+                inst for inst in self.instances
+                if inst.enabled 
+                and inst.status == InstanceStatus.ACTIVE
+                and inst.messages_sent_today < inst.max_messages_per_day
+                and inst.messages_sent_this_hour < inst.max_messages_per_hour
+            ]
+            
+            # Se não houver instâncias ACTIVE, tentar usar INACTIVE (pode estar apenas não verificada)
+            if not available:
+                logger.warning("Nenhuma instância ACTIVE disponível, tentando instâncias INACTIVE...")
+                available = [
+                    inst for inst in self.instances
+                    if inst.enabled 
+                    and inst.status != InstanceStatus.ERROR
+                    and inst.status != InstanceStatus.BLOCKED
+                    and inst.messages_sent_today < inst.max_messages_per_day
+                    and inst.messages_sent_this_hour < inst.max_messages_per_hour
+                ]
         
         if not available:
             logger.warning(f"Nenhuma instância disponível. Status das instâncias: {[(i.name, i.status.value, i.last_error) for i in self.instances]}")
