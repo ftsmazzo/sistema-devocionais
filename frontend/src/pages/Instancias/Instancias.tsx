@@ -46,13 +46,10 @@ export default function Instancias() {
   const [creating, setCreating] = useState(false)
   const [newInstance, setNewInstance] = useState({
     name: '',
-    api_url: 'https://imobmiq-evolution-api.90qhxz.easypanel.host',
-    api_key: '429683C4C977415CAAFCCE10F7D57E11',
     display_name: 'Devocional Diário',
     max_messages_per_hour: 20,
     max_messages_per_day: 200,
-    priority: 1,
-    enabled: true
+    priority: 1
   })
 
   useEffect(() => {
@@ -144,13 +141,10 @@ export default function Instancias() {
       // Reset form
       setNewInstance({
         name: '',
-        api_url: 'https://imobmiq-evolution-api.90qhxz.easypanel.host',
-        api_key: '429683C4C977415CAAFCCE10F7D57E11',
         display_name: 'Devocional Diário',
         max_messages_per_hour: 20,
         max_messages_per_day: 200,
-        priority: 1,
-        enabled: true
+        priority: 1
       })
       // Recarregar lista com sincronização para mostrar a nova instância
       setTimeout(() => loadInstances(true), 2000)
@@ -297,24 +291,7 @@ export default function Instancias() {
                   placeholder="Ex: Devocional-1"
                   style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #e5e7eb' }}
                 />
-              </div>
-              <div>
-                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 600 }}>URL da API *</label>
-                <input
-                  type="text"
-                  value={newInstance.api_url}
-                  onChange={(e) => setNewInstance({ ...newInstance, api_url: e.target.value })}
-                  style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #e5e7eb' }}
-                />
-              </div>
-              <div>
-                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 600 }}>API Key *</label>
-                <input
-                  type="text"
-                  value={newInstance.api_key}
-                  onChange={(e) => setNewInstance({ ...newInstance, api_key: e.target.value })}
-                  style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #e5e7eb' }}
-                />
+                <small style={{ color: '#64748b', fontSize: '0.75rem' }}>URL e API Key vêm do .env automaticamente</small>
               </div>
               <div>
                 <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 600 }}>Nome de Exibição *</label>
@@ -351,7 +328,7 @@ export default function Instancias() {
               <button
                 className="btn-primary-modern"
                 onClick={handleCreateInstance}
-                disabled={creating || !newInstance.name || !newInstance.api_url || !newInstance.api_key}
+                disabled={creating || !newInstance.name || !newInstance.display_name}
                 style={{ flex: 1 }}
               >
                 {creating ? (

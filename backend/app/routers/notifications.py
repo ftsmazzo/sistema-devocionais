@@ -233,41 +233,7 @@ async def get_instances_status(db: Session = Depends(get_db)):
 
 
 @router.post("/instances/{instance_name}/setup-profile")
-async def setup_instance_profile(instance_name: str):
-    """Configura o perfil (nome) de uma instância específica"""
-    try:
-        devocional_service = get_devocional_service(db)
-        instance = devocional_service.instance_manager.get_instance_by_name(instance_name)
-        if not instance:
-            raise HTTPException(status_code=404, detail=f"Instância {instance_name} não encontrada")
-        
-        success = devocional_service.instance_manager.set_instance_profile(
-            instance,
-            instance.display_name,
-            "Devocional Diário - Mensagens de fé e esperança"
-        )
-        
-        if success:
-            return {
-                "success": True,
-                "message": f"Perfil da instância {instance_name} configurado com sucesso",
-                "display_name": instance.display_name
-            }
-        else:
-            return {
-                "success": False,
-                "message": f"Erro ao configurar perfil da instância {instance_name}",
-                "error": instance.last_error
-            }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Erro ao configurar perfil: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Erro: {str(e)}")
-
-
-@router.post("/instances/{instance_name}/setup-profile")
-async def setup_instance_profile(instance_name: str):
+async def setup_instance_profile(instance_name: str, db: Session = Depends(get_db)):
     """Configura o perfil (nome) de uma instância específica"""
     try:
         devocional_service = get_devocional_service(db)

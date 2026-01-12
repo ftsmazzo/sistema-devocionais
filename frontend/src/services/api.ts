@@ -220,22 +220,21 @@ export const configApi = {
 // ============================================
 
 export const instancesApi = {
-  list: async (sync: boolean = false) => {
+  list: async (sync: boolean = true) => {
+    // Nova API sempre sincroniza por padrão
     const response = await api.get('/instances/', {
       params: { sync }
     })
-    return response.data
+    return { instances: response.data }  // Nova API retorna lista direta
   },
   create: async (instanceData: {
     name: string
-    api_url: string
-    api_key: string
     display_name: string
     max_messages_per_hour?: number
     max_messages_per_day?: number
     priority?: number
-    enabled?: boolean
   }) => {
+    // Nova API não precisa de api_url e api_key (vem do .env)
     const response = await api.post('/instances/create', instanceData)
     return response.data
   },
