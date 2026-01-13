@@ -1,7 +1,7 @@
 """
 Endpoints para envio de devocionais
 """
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Header
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Header, UploadFile, File
 from sqlalchemy.orm import Session
 from typing import List, Dict, Optional
 from pydantic import BaseModel, Field
@@ -13,6 +13,9 @@ from app.config import settings
 from datetime import datetime
 import logging
 import json
+import csv
+import io
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -492,6 +495,188 @@ async def delete_contato(
         logger.error(f"Erro ao remover contato: {e}", exc_info=True)
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Erro: {str(e)}")
+
+
+def sanitize_phone(phone: str) -> Optional[str]:
+    """
+    Sanitiza e valida um número de telefone.
+    Remove caracteres não numéricos e valida formato básico.
+    """
+    if not phone:
+        return None
+    
+    # Remover todos os caracteres não numéricos
+    phone_clean = re.sub(r'[^\d]', '', str(phone).strip())
+    
+    # Validar: deve ter pelo menos 10 dígitos (formato mínimo)
+    if len(phone_clean) < 10:
+        return None
+    
+    # Se não começar com código do país, assumir Brasil (55)
+    if len(phone_clean) == 10 or len(phone_clean) == 11:
+        # Formato brasileiro sem código do país: adicionar 55
+        phone_clean = '55' + phone_clean
+    
+    return phone_clean
+
+
+def sanitize_name(name: str) -> Optional[str]:
+    """
+    Sanitiza um nome, removendo espaços extras e caracteres inválidos.
+    """
+    if not name:
+        return None
+    
+    # Remover espaços extras e caracteres de controle
+    name_clean = ' '.join(str(name).strip().split())
+    
+    # Limitar tamanho
+    if len(name_clean) > 200:
+        name_clean = name_clean[:200]
+    
+    return name_clean if name_clean else None
+
+
+@router.post("/contatos/import-csv")
+async def import_contatos_csv(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db)
+):
+    """
+    Importa contatos de um arquivo CSV.
+    
+    O CSV pode ter campos extras que serão ignorados.
+    Apenas os campos 'phone' (ou 'telefone') e 'name' (ou 'nome') são processados.
+    
+    Formato esperado:
+    - Primeira linha pode ser header (será ignorada se contiver 'phone', 'telefone', 'name', 'nome')
+    - Colunas: telefone (obrigatório), nome (opcional)
+    - Campos extras são ignorados automaticamente
+    """
+    try:
+        # Verificar se é CSV
+        if not file.filename.endswith('.csv'):
+            raise HTTPException(status_code=400, detail="Arquivo deve ser CSV (.csv)")
+        
+        # Ler conteúdo do arquivo
+        contents = await file.read()
+        text = contents.decode('utf-8-sig')  # utf-8-sig remove BOM se existir
+        
+        # Processar CSV
+        csv_reader = csv.reader(io.StringIO(text))
+        rows = list(csv_reader)
+        
+        if not rows:
+            raise HTTPException(status_code=400, detail="Arquivo CSV vazio")
+        
+        # Detectar header (primeira linha pode ser header)
+        header_row = rows[0]
+        has_header = any(
+            col.lower() in ['phone', 'telefone', 'name', 'nome', 'nome_completo', 'nome completo']
+            for col in header_row
+        )
+        
+        # Determinar índices das colunas
+        phone_idx = None
+        name_idx = None
+        
+        if has_header:
+            # Procurar colunas no header
+            for idx, col in enumerate(header_row):
+                col_lower = col.lower().strip()
+                if col_lower in ['phone', 'telefone', 'celular', 'whatsapp']:
+                    phone_idx = idx
+                elif col_lower in ['name', 'nome', 'nome_completo', 'nome completo']:
+                    name_idx = idx
+            
+            # Se não encontrou no header, assumir primeira coluna = phone, segunda = name
+            if phone_idx is None:
+                phone_idx = 0
+            if name_idx is None:
+                name_idx = 1 if len(header_row) > 1 else None
+            
+            # Pular header
+            data_rows = rows[1:]
+        else:
+            # Sem header: primeira coluna = phone, segunda = name
+            phone_idx = 0
+            name_idx = 1 if len(rows[0]) > 1 else None
+            data_rows = rows
+        
+        if phone_idx is None:
+            raise HTTPException(status_code=400, detail="Não foi possível identificar a coluna de telefone no CSV")
+        
+        # Processar linhas
+        imported = 0
+        skipped = 0
+        errors = []
+        
+        for row_idx, row in enumerate(data_rows, start=2 if has_header else 1):
+            try:
+                # Extrair phone e name (ignorar outros campos)
+                phone_raw = row[phone_idx] if phone_idx < len(row) else None
+                name_raw = row[name_idx] if name_idx is not None and name_idx < len(row) else None
+                
+                # Sanitizar
+                phone = sanitize_phone(phone_raw) if phone_raw else None
+                name = sanitize_name(name_raw) if name_raw else None
+                
+                # Validar phone obrigatório
+                if not phone:
+                    skipped += 1
+                    errors.append(f"Linha {row_idx}: Telefone inválido ou ausente")
+                    continue
+                
+                # Verificar se já existe
+                existing = db.query(DevocionalContato).filter(
+                    DevocionalContato.phone == phone
+                ).first()
+                
+                if existing:
+                    # Atualizar nome se fornecido e diferente
+                    if name and name != existing.name:
+                        existing.name = name
+                        db.commit()
+                    skipped += 1
+                    continue
+                
+                # Criar novo contato
+                db_contato = DevocionalContato(
+                    phone=phone,
+                    name=name,
+                    active=True
+                )
+                db.add(db_contato)
+                imported += 1
+                
+            except Exception as e:
+                skipped += 1
+                errors.append(f"Linha {row_idx}: {str(e)}")
+                logger.warning(f"Erro ao processar linha {row_idx} do CSV: {e}")
+                continue
+        
+        # Commit em lote
+        try:
+            db.commit()
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Erro ao salvar contatos importados: {e}", exc_info=True)
+            raise HTTPException(status_code=500, detail=f"Erro ao salvar contatos: {str(e)}")
+        
+        logger.info(f"✅ Importação CSV concluída: {imported} importados, {skipped} ignorados")
+        
+        return {
+            "imported": imported,
+            "skipped": skipped,
+            "errors": errors[:50]  # Limitar a 50 erros para não sobrecarregar resposta
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao importar CSV: {e}", exc_info=True)
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Erro ao processar CSV: {str(e)}")
 
 
 @router.get("/envios")

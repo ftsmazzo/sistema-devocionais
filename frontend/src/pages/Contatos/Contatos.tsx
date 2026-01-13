@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { contatoApi } from '../../services/api'
 import type { Contato } from '../../types'
-import { Plus, Search, Edit, Trash2, UserCheck, UserX, Phone } from 'lucide-react'
+import { Plus, Search, Edit, Trash2, UserCheck, UserX, Phone, Upload, Power, PowerOff } from 'lucide-react'
 import './Contatos.css'
 
 export default function Contatos() {
@@ -10,8 +10,12 @@ export default function Contatos() {
   const [error, setError] = useState<string | null>(null)
   const [searchTerm, setSearchTerm] = useState('')
   const [showModal, setShowModal] = useState(false)
+  const [showCsvModal, setShowCsvModal] = useState(false)
   const [editingContato, setEditingContato] = useState<Contato | null>(null)
   const [formData, setFormData] = useState({ phone: '', name: '' })
+  const [csvFile, setCsvFile] = useState<File | null>(null)
+  const [csvPreview, setCsvPreview] = useState<Array<{ phone: string; name: string }>>([])
+  const [csvLoading, setCsvLoading] = useState(false)
 
   useEffect(() => {
     loadContatos()
@@ -114,6 +118,95 @@ export default function Contatos() {
     }
   }
 
+  const handleCsvFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    if (!file.name.endsWith('.csv')) {
+      alert('Por favor, selecione um arquivo CSV')
+      return
+    }
+
+    setCsvFile(file)
+    
+    // Ler e fazer preview do CSV
+    const reader = new FileReader()
+    reader.onload = (event) => {
+      try {
+        const text = event.target?.result as string
+        const lines = text.split('\n').filter(line => line.trim())
+        
+        if (lines.length === 0) {
+          setCsvPreview([])
+          return
+        }
+        
+        // Detectar se primeira linha é header
+        const firstLine = lines[0].toLowerCase()
+        const hasHeader = firstLine.includes('phone') || firstLine.includes('telefone') || 
+                         firstLine.includes('name') || firstLine.includes('nome')
+        
+        // Determinar índices
+        let phoneIdx = 0
+        let nameIdx = 1
+        
+        if (hasHeader) {
+          const headerParts = lines[0].split(',').map(p => p.trim().replace(/^"|"$/g, '').toLowerCase())
+          for (let i = 0; i < headerParts.length; i++) {
+            const col = headerParts[i]
+            if (col.includes('phone') || col.includes('telefone') || col.includes('celular') || col.includes('whatsapp')) {
+              phoneIdx = i
+            } else if (col.includes('name') || col.includes('nome')) {
+              nameIdx = i
+            }
+          }
+        }
+        
+        // Processar linhas de dados
+        const dataLines = hasHeader ? lines.slice(1) : lines
+        const preview: Array<{ phone: string; name: string }> = []
+        
+        for (const line of dataLines.slice(0, 10)) { // Preview das primeiras 10 linhas
+          const parts = line.split(',').map(p => p.trim().replace(/^"|"$/g, ''))
+          if (parts.length > phoneIdx) {
+            const phone = parts[phoneIdx] || ''
+            const name = parts[nameIdx] || ''
+            if (phone) {
+              preview.push({ phone, name })
+            }
+          }
+        }
+        
+        setCsvPreview(preview)
+      } catch (err) {
+        console.error('Erro ao processar preview do CSV:', err)
+        setCsvPreview([])
+      }
+    }
+    reader.readAsText(file, 'utf-8')
+  }
+
+  const handleCsvImport = async () => {
+    if (!csvFile) {
+      alert('Por favor, selecione um arquivo CSV')
+      return
+    }
+
+    setCsvLoading(true)
+    try {
+      await contatoApi.importCsv(csvFile)
+      setShowCsvModal(false)
+      setCsvFile(null)
+      setCsvPreview([])
+      loadContatos(true)
+      alert('Contatos importados com sucesso!')
+    } catch (err: any) {
+      alert(err.response?.data?.detail || 'Erro ao importar CSV')
+    } finally {
+      setCsvLoading(false)
+    }
+  }
+
   const filteredContatos = contatos.filter(
     (contato) =>
       contato.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -159,6 +252,10 @@ export default function Contatos() {
               onChange={(e) => setSearchTerm(e.target.value)}
             />
           </div>
+          <button className="btn-secondary" onClick={() => setShowCsvModal(true)}>
+            <Upload size={18} />
+            <span>Importar CSV</span>
+          </button>
           <button className="btn-primary" onClick={handleCreate}>
             <Plus size={18} />
             <span>Adicionar Contato</span>
@@ -183,14 +280,13 @@ export default function Contatos() {
               <th>Score</th>
               <th>Total Enviados</th>
               <th>Último Envio</th>
-              <th>Instância</th>
               <th>Ações</th>
             </tr>
           </thead>
           <tbody>
             {filteredContatos.length === 0 ? (
               <tr>
-                <td colSpan={8} className="empty-state">
+                <td colSpan={7} className="empty-state">
                   {searchTerm ? 'Nenhum contato encontrado' : 'Nenhum contato cadastrado'}
                 </td>
               </tr>
@@ -207,11 +303,7 @@ export default function Contatos() {
                   </td>
                   <td className="phone-cell">{contato.phone}</td>
                   <td>
-                    <span
-                      className={`status-badge ${contato.active ? 'active' : 'inactive'}`}
-                      onClick={() => handleToggle(contato.id)}
-                      style={{ cursor: 'pointer' }}
-                    >
+                    <span className={`status-badge ${contato.active ? 'active' : 'inactive'}`}>
                       {contato.active ? 'Ativo' : 'Inativo'}
                     </span>
                   </td>
@@ -241,11 +333,15 @@ export default function Contatos() {
                       ? new Date(contato.last_sent).toLocaleDateString('pt-BR')
                       : 'Nunca'}
                   </td>
-                  <td className="instance-cell">
-                    {contato.instance_name || '-'}
-                  </td>
                   <td>
                     <div className="action-buttons">
+                      <button
+                        className={`btn-icon ${contato.active ? 'warning' : 'success'}`}
+                        onClick={() => handleToggle(contato.id)}
+                        title={contato.active ? 'Desativar' : 'Ativar'}
+                      >
+                        {contato.active ? <PowerOff size={16} /> : <Power size={16} />}
+                      </button>
                       <button
                         className="btn-icon"
                         onClick={() => handleEdit(contato)}
@@ -298,6 +394,73 @@ export default function Contatos() {
               </button>
               <button className="btn-primary" onClick={handleSave}>
                 Salvar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showCsvModal && (
+        <div className="modal-overlay" onClick={() => !csvLoading && setShowCsvModal(false)}>
+          <div className="modal-content csv-modal" onClick={(e) => e.stopPropagation()}>
+            <h2>Importar Contatos via CSV</h2>
+            <p className="csv-info">
+              O arquivo CSV deve conter pelo menos a coluna de telefone. 
+              Campos extras serão ignorados automaticamente.
+            </p>
+            <div className="form-group">
+              <label>Arquivo CSV *</label>
+              <input
+                type="file"
+                accept=".csv"
+                onChange={handleCsvFileChange}
+                disabled={csvLoading}
+              />
+              <small>Formato esperado: telefone (obrigatório), nome (opcional)</small>
+            </div>
+            
+            {csvPreview.length > 0 && (
+              <div className="csv-preview">
+                <h3>Preview (primeiras {csvPreview.length} linhas):</h3>
+                <div className="csv-preview-table">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Telefone</th>
+                        <th>Nome</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {csvPreview.map((row, idx) => (
+                        <tr key={idx}>
+                          <td>{row.phone}</td>
+                          <td>{row.name || '-'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            <div className="modal-actions">
+              <button 
+                className="btn-secondary" 
+                onClick={() => {
+                  setShowCsvModal(false)
+                  setCsvFile(null)
+                  setCsvPreview([])
+                }}
+                disabled={csvLoading}
+              >
+                Cancelar
+              </button>
+              <button 
+                className="btn-primary" 
+                onClick={handleCsvImport}
+                disabled={!csvFile || csvLoading}
+              >
+                {csvLoading ? 'Importando...' : 'Importar'}
               </button>
             </div>
           </div>

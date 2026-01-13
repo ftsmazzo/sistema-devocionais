@@ -142,6 +142,21 @@ export const contatoApi = {
   delete: async (id: number): Promise<void> => {
     await api.delete(`/devocional/contatos/${id}`)
   },
+
+  importCsv: async (file: File): Promise<{ imported: number; skipped: number; errors: string[] }> => {
+    const formData = new FormData()
+    formData.append('file', file)
+    const response = await api.post<{ imported: number; skipped: number; errors: string[] }>(
+      '/devocional/contatos/import-csv',
+      formData,
+      {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      }
+    )
+    return response.data
+  },
 }
 
 // ============================================
