@@ -305,13 +305,18 @@
 .card-content {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 0;
 }
 
 .config-item {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 0;
+  margin-bottom: 20px;
+}
+
+.config-item:last-child {
+  margin-bottom: 0;
 }
 
 .config-item.large {
@@ -321,21 +326,33 @@
 .config-label {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   font-size: 14px;
   font-weight: 600;
   color: #374151;
-  flex-wrap: wrap;
-  word-wrap: break-word;
-  overflow-wrap: break-word;
+  line-height: 1.5;
+  margin-bottom: 8px;
 }
 
 .config-label > span:first-child {
   flex: 1;
-  min-width: 0;
-  word-wrap: break-word;
-  overflow-wrap: break-word;
-  hyphens: auto;
+  min-width: 120px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Quebra inteligente apenas quando necessário */
+@media (max-width: 600px) {
+  .config-label {
+    flex-wrap: wrap;
+  }
+  
+  .config-label > span:first-child {
+    white-space: normal;
+    min-width: 100%;
+    margin-bottom: 4px;
+  }
 }
 
 .config-label > span:last-child {
@@ -367,21 +384,23 @@
   left: 50%;
   transform: translateX(-50%);
   margin-bottom: 8px;
-  padding: 8px 12px;
+  padding: 10px 14px;
   background: #1f2937;
   color: white;
   font-size: 12px;
   font-weight: 400;
   white-space: normal;
-  max-width: 250px;
+  max-width: 280px;
+  min-width: 200px;
   word-wrap: break-word;
   overflow-wrap: break-word;
   text-align: left;
-  border-radius: 6px;
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
   z-index: 1000;
   pointer-events: none;
-  line-height: 1.4;
+  line-height: 1.5;
+  letter-spacing: 0.01em;
 }
 
 .config-label > span[title]:hover::before {
@@ -451,11 +470,13 @@
 }
 
 .slider-value {
-  min-width: 50px;
+  min-width: 45px;
   text-align: right;
   font-weight: 600;
   font-size: 14px;
   color: #3b82f6;
+  flex-shrink: 0;
+  line-height: 1.5;
 }
 
 /* Input Group */
@@ -477,6 +498,7 @@
   transition: all 0.2s;
   box-sizing: border-box;
   width: 100%;
+  line-height: 1.5;
 }
 
 .input-group input:focus {
@@ -498,10 +520,12 @@
   grid-template-columns: 1fr 1fr;
   gap: 16px;
   width: 100%;
+  margin-bottom: 20px;
 }
 
 .config-row .config-item {
-  min-width: 0; /* Permite que os itens encolham */
+  min-width: 0;
+  margin-bottom: 0;
 }
 
 /* Time Input */
@@ -537,13 +561,14 @@
 }
 
 .config-hint {
-  margin: 0;
+  margin: 8px 0 0 0;
   font-size: 12px;
   color: #6b7280;
   font-style: italic;
   word-wrap: break-word;
   overflow-wrap: break-word;
-  line-height: 1.5;
+  line-height: 1.6;
+  letter-spacing: 0.01em;
 }
 
 /* Checkboxes */
@@ -560,9 +585,14 @@
   align-items: center;
   gap: 10px;
   cursor: pointer;
-  padding: 8px;
+  padding: 10px 8px;
   border-radius: 6px;
   transition: background 0.2s;
+  margin-bottom: 8px;
+}
+
+.checkbox-item:last-child {
+  margin-bottom: 0;
 }
 
 .checkbox-item:hover {
@@ -574,6 +604,7 @@
   height: 18px;
   cursor: pointer;
   accent-color: #3b82f6;
+  flex-shrink: 0;
 }
 
 .checkbox-item span {
@@ -581,9 +612,10 @@
   font-size: 14px;
   font-weight: 500;
   color: #374151;
-  word-wrap: break-word;
-  overflow-wrap: break-word;
-  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.5;
 }
 
 .checkbox-item .info-icon {
@@ -603,21 +635,23 @@
   bottom: 100%;
   right: 0;
   margin-bottom: 8px;
-  padding: 8px 12px;
+  padding: 10px 14px;
   background: #1f2937;
   color: white;
   font-size: 12px;
   font-weight: 400;
   white-space: normal;
-  max-width: 250px;
+  max-width: 280px;
+  min-width: 200px;
   word-wrap: break-word;
   overflow-wrap: break-word;
   text-align: left;
-  border-radius: 6px;
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
   z-index: 1000;
   pointer-events: none;
-  line-height: 1.4;
+  line-height: 1.5;
+  letter-spacing: 0.01em;
 }
 
 .checkbox-item > span[title]:hover::before {
