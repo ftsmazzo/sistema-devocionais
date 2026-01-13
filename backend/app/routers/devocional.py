@@ -304,10 +304,14 @@ async def send_custom_message(
         media_base64 = None
         media_mimetype = None
         
+        logger.info(f"📎 Processando mídia: media_file={media_file is not None}, media_type={media_type}")
+        
         if media_file:
             # Validar tipo de arquivo
             file_content = await media_file.read()
             file_size = len(file_content)
+            
+            logger.info(f"📎 Arquivo recebido: nome={media_file.filename}, tamanho={file_size} bytes, content_type={media_file.content_type}, media_type={media_type}")
             
             # Limite de tamanho: 16MB para imagens, 64MB para vídeos, 16MB para áudios
             if media_type == 'image' and file_size > 16 * 1024 * 1024:
@@ -319,6 +323,7 @@ async def send_custom_message(
             
             # Converter para base64
             media_base64 = base64.b64encode(file_content).decode('utf-8')
+            logger.info(f"✅ Mídia convertida para base64: tamanho={len(media_base64)} caracteres")
             
             # Determinar mimetype baseado no tipo de mídia
             if media_type == 'audio':

@@ -229,9 +229,20 @@ export default function Mensagens() {
       const formData = new FormData()
       formData.append('message', message || '')
       
+      console.log('📤 Preparando envio:', { 
+        hasMediaFile: !!mediaFile, 
+        mediaType, 
+        fileName: mediaFile?.name,
+        fileSize: mediaFile?.size,
+        fileType: mediaFile?.type
+      })
+      
       if (mediaFile && mediaType) {
         formData.append('media_file', mediaFile)
         formData.append('media_type', mediaType)
+        console.log('✅ Arquivo de mídia adicionado ao FormData')
+      } else {
+        console.warn('⚠️ Nenhum arquivo de mídia para enviar')
       }
 
       // Se contatos selecionados, enviar apenas para eles; senão, enviar para todos
