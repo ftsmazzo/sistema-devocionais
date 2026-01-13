@@ -439,12 +439,24 @@ async def send_custom_message(
                     # Usar "audio" para áudio (não "ptt")
                     payload_mediatype = media_type  # Já está correto: "audio", "image" ou "video"
                     
-                    payload = {
-                        "number": phone_clean,
-                        "mediatype": payload_mediatype,
-                        "media": media_base64,
-                        "mimetype": media_mimetype,
-                    }
+                    # Para áudio, usar formato data URL (como n8n faz)
+                    # Formato: data:audio/ogg;base64,<base64_string>
+                    if media_type == "audio":
+                        media_data_url = f"data:{media_mimetype};base64,{media_base64}"
+                        payload = {
+                            "number": phone_clean,
+                            "mediatype": payload_mediatype,
+                            "media": media_data_url,
+                            "mimetype": media_mimetype,
+                        }
+                    else:
+                        # Para imagem e vídeo, usar base64 direto
+                        payload = {
+                            "number": phone_clean,
+                            "mediatype": payload_mediatype,
+                            "media": media_base64,
+                            "mimetype": media_mimetype,
+                        }
                     
                     # Adicionar caption apenas se houver mensagem e não for áudio
                     if personalized_message and media_type != "audio":
