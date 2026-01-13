@@ -3,6 +3,7 @@ Endpoints para envio de devocionais
 """
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Header, UploadFile, File
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 from typing import List, Dict, Optional
 from pydantic import BaseModel, Field
 from datetime import datetime
@@ -610,6 +611,7 @@ async def import_contatos_csv(
         imported = 0
         skipped = 0
         errors = []
+        processed_phones = set()  # Rastrear telefones já processados neste CSV
         
         for row_idx, row in enumerate(data_rows, start=2 if has_header else 1):
             try:
@@ -627,7 +629,15 @@ async def import_contatos_csv(
                     errors.append(f"Linha {row_idx}: Telefone inválido ou ausente")
                     continue
                 
-                # Verificar se já existe
+                # Verificar duplicata no próprio CSV
+                if phone in processed_phones:
+                    skipped += 1
+                    errors.append(f"Linha {row_idx}: Telefone {phone} duplicado no CSV")
+                    continue
+                
+                processed_phones.add(phone)
+                
+                # Verificar se já existe no banco
                 existing = db.query(DevocionalContato).filter(
                     DevocionalContato.phone == phone
                 ).first()
@@ -636,7 +646,11 @@ async def import_contatos_csv(
                     # Atualizar nome se fornecido e diferente
                     if name and name != existing.name:
                         existing.name = name
-                        db.commit()
+                        try:
+                            db.commit()
+                        except Exception as e:
+                            db.rollback()
+                            logger.warning(f"Erro ao atualizar nome do contato {phone}: {e}")
                     skipped += 1
                     continue
                 
@@ -647,21 +661,49 @@ async def import_contatos_csv(
                     active=True
                 )
                 db.add(db_contato)
-                imported += 1
+                
+                # Tentar commit individual para detectar duplicatas imediatamente
+                try:
+                    db.commit()
+                    imported += 1
+                except IntegrityError as commit_err:
+                    db.rollback()
+                    # Verificar se é erro de constraint única (duplicata)
+                    error_str = str(commit_err.orig) if hasattr(commit_err, 'orig') else str(commit_err)
+                    if 'UniqueViolation' in error_str or 'duplicate key' in error_str.lower() or 'devocional_contatos_phone_idx' in error_str:
+                        # Contato já existe, pular
+                        db.expunge(db_contato)
+                        skipped += 1
+                        errors.append(f"Linha {row_idx}: Telefone {phone} já existe no banco")
+                        logger.debug(f"Telefone {phone} já existe (detectado no commit): {commit_err}")
+                    else:
+                        # Erro inesperado, re-raise
+                        logger.error(f"Erro de integridade inesperado ao salvar contato {phone}: {commit_err}")
+                        raise
+                except Exception as commit_err:
+                    db.rollback()
+                    logger.error(f"Erro inesperado ao salvar contato {phone}: {commit_err}")
+                    raise
                 
             except Exception as e:
-                skipped += 1
-                errors.append(f"Linha {row_idx}: {str(e)}")
-                logger.warning(f"Erro ao processar linha {row_idx} do CSV: {e}")
+                # Verificar se é erro de constraint única
+                error_str = str(e)
+                if 'UniqueViolation' in error_str or 'duplicate key' in error_str.lower():
+                    skipped += 1
+                    errors.append(f"Linha {row_idx}: Telefone já existe no banco")
+                    logger.warning(f"Telefone duplicado na linha {row_idx}: {e}")
+                    # Rollback apenas desta transação
+                    try:
+                        db.rollback()
+                    except:
+                        pass
+                else:
+                    skipped += 1
+                    errors.append(f"Linha {row_idx}: {str(e)}")
+                    logger.warning(f"Erro ao processar linha {row_idx} do CSV: {e}")
                 continue
         
-        # Commit em lote
-        try:
-            db.commit()
-        except Exception as e:
-            db.rollback()
-            logger.error(f"Erro ao salvar contatos importados: {e}", exc_info=True)
-            raise HTTPException(status_code=500, detail=f"Erro ao salvar contatos: {str(e)}")
+        # Não precisa de commit final pois já fazemos commit individual
         
         logger.info(f"✅ Importação CSV concluída: {imported} importados, {skipped} ignorados")
         
