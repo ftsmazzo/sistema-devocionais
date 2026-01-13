@@ -415,8 +415,9 @@ async def send_custom_message(
                     # Enviar mídia
                     url = f"{instance.api_url}/message/sendMedia/{api_instance_name}"
                     
-                    # Para áudio, usar mediatype "ptt" (push-to-talk) que é o formato de áudio do WhatsApp
-                    payload_mediatype = "ptt" if media_type == "audio" else media_type
+                    # Evolution API aceita apenas: image, document, video, audio
+                    # Usar "audio" para áudio (não "ptt")
+                    payload_mediatype = media_type  # Já está correto: "audio", "image" ou "video"
                     
                     payload = {
                         "number": phone_clean,
@@ -1141,8 +1142,9 @@ async def send_custom_message(
                     # Enviar mídia
                     url = f"{instance.api_url}/message/sendMedia/{api_instance_name}"
                     
-                    # Para áudio, usar mediatype "ptt" (push-to-talk) que é o formato de áudio do WhatsApp
-                    payload_mediatype = "ptt" if media_type == "audio" else media_type
+                    # Evolution API aceita apenas: image, document, video, audio
+                    # Usar "audio" para áudio (não "ptt")
+                    payload_mediatype = media_type  # Já está correto: "audio", "image" ou "video"
                     
                     payload = {
                         "number": phone_clean,
