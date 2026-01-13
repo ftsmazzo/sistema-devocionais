@@ -519,21 +519,6 @@ async def send_custom_message(
                 if media_base64:
                     logger.info(f"📎 Enviando mídia: tipo={media_type}, mimetype={media_mimetype}, tamanho_base64={len(media_base64)} chars")
                     
-                    # Para áudio, enviar mensagem de texto primeiro (se houver)
-                    if personalized_message and media_type == "audio":
-                        logger.info(f"📝 Enviando texto antes do áudio para {phone}")
-                        text_url = f"{instance.api_url}/message/sendText/{api_instance_name}"
-                        text_payload = {
-                            "number": phone_clean,
-                            "text": personalized_message
-                        }
-                        text_response = requests.post(text_url, json=text_payload, headers=headers, timeout=30)
-                        text_sent = text_response.status_code in [200, 201]
-                        if not text_sent:
-                            logger.warning(f"⚠️ Falha ao enviar texto antes do áudio para {phone}: {text_response.text[:200]}")
-                        else:
-                            logger.info(f"✅ Texto enviado com sucesso para {phone}")
-                    
                     # Enviar mídia
                     url = f"{instance.api_url}/message/sendMedia/{api_instance_name}"
                     
@@ -560,11 +545,25 @@ async def send_custom_message(
                     
                     # Para áudio, adicionar fileName se disponível
                     if media_type == "audio" and media_file and media_file.filename:
-                        payload["fileName"] = media_file.filename
+                        # Atualizar extensão do fileName se foi convertido
+                        if media_mimetype == "audio/amr":
+                            payload["fileName"] = media_file.filename.replace(".ogg", ".amr").replace(".webm", ".amr")
+                        elif media_mimetype == "audio/mpeg":
+                            payload["fileName"] = media_file.filename.replace(".ogg", ".mp3").replace(".webm", ".mp3")
+                        else:
+                            payload["fileName"] = media_file.filename
                     
-                    # Adicionar caption apenas se houver mensagem e não for áudio
-                    if personalized_message and media_type != "audio":
-                        payload["caption"] = personalized_message
+                    # Para áudio, NÃO enviar texto separado - enviar tudo junto
+                    # Se houver mensagem, adicionar como caption (mesmo para áudio)
+                    # Algumas versões da Evolution API podem aceitar caption em áudio
+                    if personalized_message:
+                        if media_type == "audio":
+                            # Tentar enviar texto e áudio juntos primeiro
+                            # Se não funcionar, enviar texto depois
+                            payload["caption"] = personalized_message
+                            logger.info(f"📝 Enviando áudio com caption (texto incluído)")
+                        else:
+                            payload["caption"] = personalized_message
                     
                     logger.info(f"📤 Enviando mídia ({media_type}) para {phone}: mediatype={payload_mediatype}, mimetype={media_mimetype}, base64_length={len(media_base64_final)}")
                     logger.info(f"   Payload keys: {list(payload.keys())}, fileName={payload.get('fileName', 'N/A')}")
@@ -589,15 +588,24 @@ async def send_custom_message(
                             logger.info(f"   Response text: {response.text[:500]}")
                     
                     # Se for áudio, considerar sucesso apenas se o áudio foi enviado
-                    # Se o texto também foi enviado, ambos devem ter sucesso
+                    # Se o caption foi incluído, verificar se foi aceito
                     if media_type == "audio":
-                        if personalized_message:
-                            success = text_sent and audio_sent
-                            if not success:
-                                error_msg = f"Texto: {'OK' if text_sent else 'Falhou'}, Áudio: {'OK' if audio_sent else 'Falhou'}"
-                                logger.error(f"❌ Envio parcial para {phone}: {error_msg}")
-                        else:
-                            success = audio_sent
+                        success = audio_sent
+                        if personalized_message and not audio_sent:
+                            # Se falhou e tinha caption, tentar enviar texto separado como fallback
+                            logger.warning(f"⚠️ Áudio com caption falhou, tentando enviar texto separado...")
+                            try:
+                                text_url = f"{instance.api_url}/message/sendText/{api_instance_name}"
+                                text_payload = {
+                                    "number": phone_clean,
+                                    "text": personalized_message
+                                }
+                                text_response = requests.post(text_url, json=text_payload, headers=headers, timeout=30)
+                                text_sent = text_response.status_code in [200, 201]
+                                if text_sent:
+                                    logger.info(f"✅ Texto enviado separadamente após falha do áudio")
+                            except Exception as e:
+                                logger.error(f"❌ Erro ao enviar texto separado: {e}")
                     else:
                         success = audio_sent
                 else:
