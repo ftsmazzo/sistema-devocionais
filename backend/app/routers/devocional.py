@@ -322,21 +322,29 @@ async def send_custom_message(
             
             # Determinar mimetype baseado no tipo de mídia
             if media_type == 'audio':
-                # WhatsApp/Evolution API aceita vários formatos de áudio
-                # Se for WebM, converter mimetype para ogg/opus (formato preferido)
-                content_type = media_file.content_type or ''
-                if 'webm' in content_type.lower() or 'webm' in media_file.filename.lower():
-                    # WebM com codec opus pode ser tratado como ogg/opus pela Evolution API
-                    media_mimetype = 'audio/ogg; codecs=opus'
-                elif 'ogg' in content_type.lower() or 'opus' in content_type.lower():
-                    media_mimetype = 'audio/ogg; codecs=opus'
-                elif 'mp3' in content_type.lower() or 'mpeg' in content_type.lower():
+                # WhatsApp/Evolution API aceita: audio/ogg;codecs=opus, audio/mpeg, audio/mp4, audio/amr, audio/aac
+                # Formato preferido: audio/ogg;codecs=opus
+                content_type = (media_file.content_type or '').lower()
+                filename = (media_file.filename or '').lower()
+                
+                # Detectar formato pelo content_type ou filename
+                if 'ogg' in content_type or 'opus' in content_type or 'ogg' in filename or 'opus' in filename:
+                    media_mimetype = 'audio/ogg;codecs=opus'
+                elif 'mp3' in content_type or 'mpeg' in content_type or 'mp3' in filename:
                     media_mimetype = 'audio/mpeg'
-                elif 'mp4' in content_type.lower():
+                elif 'mp4' in content_type or 'mp4' in filename or 'm4a' in filename:
                     media_mimetype = 'audio/mp4'
+                elif 'amr' in content_type or 'amr' in filename:
+                    media_mimetype = 'audio/amr'
+                elif 'aac' in content_type or 'aac' in filename:
+                    media_mimetype = 'audio/aac'
+                elif 'webm' in content_type or 'webm' in filename:
+                    # WebM com opus: tentar usar como ogg/opus (mesmo codec)
+                    # Se não funcionar, Evolution API pode rejeitar
+                    media_mimetype = 'audio/ogg;codecs=opus'
                 else:
-                    # Padrão: ogg/opus (formato preferido do WhatsApp)
-                    media_mimetype = 'audio/ogg; codecs=opus'
+                    # Padrão: ogg/opus (formato preferido e mais compatível do WhatsApp)
+                    media_mimetype = 'audio/ogg;codecs=opus'
             elif media_type == 'image':
                 media_mimetype = media_file.content_type or 'image/jpeg'
             else:  # video

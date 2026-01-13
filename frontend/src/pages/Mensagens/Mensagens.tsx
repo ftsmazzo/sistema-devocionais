@@ -68,9 +68,36 @@ export default function Mensagens() {
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      const recorder = new MediaRecorder(stream, {
-        mimeType: 'audio/webm;codecs=opus'
-      })
+      
+      // Tentar usar o melhor formato suportado pelo navegador
+      // WhatsApp prefere: audio/ogg;codecs=opus, audio/mpeg, audio/mp4
+      let mimeType = 'audio/webm;codecs=opus' // Fallback padrão
+      let finalType = 'audio/ogg;codecs=opus'
+      let finalExtension = 'ogg'
+      
+      // Verificar formatos suportados em ordem de preferência
+      const supportedTypes = [
+        'audio/ogg;codecs=opus',
+        'audio/opus',
+        'audio/webm;codecs=opus',
+        'audio/webm'
+      ]
+      
+      for (const type of supportedTypes) {
+        if (MediaRecorder.isTypeSupported(type)) {
+          mimeType = type
+          if (type.includes('ogg') || type.includes('opus')) {
+            finalType = 'audio/ogg;codecs=opus'
+            finalExtension = 'ogg'
+          } else {
+            finalType = type
+            finalExtension = 'webm'
+          }
+          break
+        }
+      }
+      
+      const recorder = new MediaRecorder(stream, { mimeType })
       
       const chunks: Blob[] = []
       
@@ -81,32 +108,11 @@ export default function Mensagens() {
       }
       
       recorder.onstop = async () => {
-        const audioBlob = new Blob(chunks, { type: 'audio/webm;codecs=opus' })
+        const audioBlob = new Blob(chunks, { type: mimeType })
         
-        // Tentar converter WebM para OGG/Opus se possível (formato preferido pelo WhatsApp)
-        // Se não conseguir, usar WebM mesmo
-        let finalBlob = audioBlob
-        let finalType = 'audio/webm;codecs=opus'
-        let finalExtension = 'webm'
-        
-        // WhatsApp/Evolution API prefere audio/ogg;codecs=opus
-        // Mas aceita audio/webm também em algumas versões
-        // Vamos tentar usar o formato que o MediaRecorder suporta melhor
-        try {
-          // Verificar se o navegador suporta OGG
-          if (MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')) {
-            // Se suportar, manter WebM mas mudar o mimetype para ogg
-            finalType = 'audio/ogg;codecs=opus'
-            finalExtension = 'ogg'
-          } else if (MediaRecorder.isTypeSupported('audio/opus')) {
-            finalType = 'audio/opus'
-            finalExtension = 'opus'
-          }
-        } catch (e) {
-          console.warn('Não foi possível verificar suporte a formatos de áudio:', e)
-        }
-        
-        const audioFile = new File([finalBlob], `audio-${Date.now()}.${finalExtension}`, {
+        // Criar arquivo com o tipo correto para WhatsApp
+        // WhatsApp prefere OGG/Opus, mas aceita WebM se necessário
+        const audioFile = new File([audioBlob], `audio-${Date.now()}.${finalExtension}`, {
           type: finalType
         })
         
