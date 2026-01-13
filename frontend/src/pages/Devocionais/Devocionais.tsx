@@ -85,9 +85,19 @@ export default function Devocionais() {
               </span>
             </div>
             <div className="devocional-text">
-              {selectedDevocional.content.split('\n').map((paragraph, idx) => (
-                <p key={idx}>{paragraph || '\u00A0'}</p>
-              ))}
+              <pre style={{ 
+                whiteSpace: 'pre-wrap', 
+                wordWrap: 'break-word', 
+                fontFamily: 'inherit',
+                fontSize: 'inherit',
+                lineHeight: 'inherit',
+                margin: 0,
+                padding: 0,
+                background: 'transparent',
+                border: 'none'
+              }}>
+                {selectedDevocional.content}
+              </pre>
             </div>
           </div>
         </div>
