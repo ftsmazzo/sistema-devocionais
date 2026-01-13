@@ -321,6 +321,42 @@ async def send_custom_message(
             if media_type == 'audio' and file_size > 16 * 1024 * 1024:
                 raise HTTPException(status_code=400, detail="Áudio muito grande. Máximo: 16MB")
             
+            # Para áudio gravado no navegador (OGG/Opus), converter para MP3
+            if media_type == 'audio':
+                filename_lower = (media_file.filename or '').lower()
+                content_type_lower = (media_file.content_type or '').lower()
+                
+                # Verificar se é áudio gravado no navegador (OGG/WebM)
+                is_recorded_audio = (
+                    'audio-' in filename_lower and filename_lower.startswith('audio-') or
+                    'ogg' in content_type_lower or 'opus' in content_type_lower or
+                    'webm' in content_type_lower or 'webm' in filename_lower
+                )
+                
+                if is_recorded_audio:
+                    try:
+                        from pydub import AudioSegment
+                        import io
+                        
+                        logger.info(f"🔄 Convertendo áudio OGG/WebM para MP3 para melhor compatibilidade...")
+                        
+                        # Carregar áudio do conteúdo do arquivo
+                        audio_io = io.BytesIO(file_content)
+                        audio = AudioSegment.from_file(audio_io, format="ogg" if "ogg" in content_type_lower or "ogg" in filename_lower else "webm")
+                        
+                        # Converter para MP3
+                        mp3_io = io.BytesIO()
+                        audio.export(mp3_io, format="mp3", bitrate="128k")
+                        mp3_io.seek(0)
+                        file_content = mp3_io.read()
+                        file_size = len(file_content)
+                        
+                        logger.info(f"✅ Áudio convertido para MP3: novo tamanho={file_size} bytes")
+                    except ImportError:
+                        logger.warning(f"⚠️ pydub não instalado, pulando conversão. Instale: pip install pydub")
+                    except Exception as e:
+                        logger.warning(f"⚠️ Erro ao converter áudio para MP3: {e}. Enviando formato original.")
+            
             # Converter para base64 (string pura, sem prefixo data:)
             # Evolution API espera apenas a string base64, sem espaços ou quebras
             media_base64 = base64.b64encode(file_content).decode('utf-8')

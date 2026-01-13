@@ -29,6 +29,7 @@ RUN apt-get update && apt-get install -y \
     postgresql-client \
     libpq-dev \
     python3-dev \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # Copiar requirements
