@@ -177,7 +177,9 @@ export default function Configuracoes() {
             <div className="config-item">
               <div className="config-label">
                 <span>Variação de Delay</span>
-                <Info size={14} className="info-icon" title="Varia o tempo entre mensagens para parecer mais natural" />
+                <span title="Varia o tempo entre mensagens para parecer mais natural">
+                  <Info size={14} className="info-icon" />
+                </span>
               </div>
               <div className="slider-container">
                 <input
@@ -196,7 +198,9 @@ export default function Configuracoes() {
             <div className="config-item">
               <div className="config-label">
                 <span>Pausa a cada</span>
-                <Info size={14} className="info-icon" title="Quantas mensagens enviar antes de fazer uma pausa" />
+                <span title="Quantas mensagens enviar antes de fazer uma pausa">
+                  <Info size={14} className="info-icon" />
+                </span>
               </div>
               <div className="input-group">
                 <input
@@ -214,7 +218,9 @@ export default function Configuracoes() {
               <div className="config-item">
                 <div className="config-label">
                   <span>Pausa Mínima</span>
-                  <Info size={14} className="info-icon" title="Tempo mínimo de pausa em segundos" />
+                  <span title="Tempo mínimo de pausa em segundos">
+                    <Info size={14} className="info-icon" />
+                  </span>
                 </div>
                 <div className="input-group">
                   <input
@@ -232,7 +238,9 @@ export default function Configuracoes() {
               <div className="config-item">
                 <div className="config-label">
                   <span>Pausa Máxima</span>
-                  <Info size={14} className="info-icon" title="Tempo máximo de pausa em segundos" />
+                  <span title="Tempo máximo de pausa em segundos">
+                    <Info size={14} className="info-icon" />
+                  </span>
                 </div>
                 <div className="input-group">
                   <input
@@ -251,7 +259,9 @@ export default function Configuracoes() {
             <div className="config-item">
               <div className="config-label">
                 <span>Score Mínimo de Engajamento</span>
-                <Info size={14} className="info-icon" title="Apenas contatos com este score mínimo receberão mensagens" />
+                <span title="Apenas contatos com este score mínimo receberão mensagens">
+                  <Info size={14} className="info-icon" />
+                </span>
               </div>
               <div className="slider-container">
                 <input
@@ -278,7 +288,9 @@ export default function Configuracoes() {
                   }}
                 />
                 <span>Limites Adaptativos</span>
-                <Info size={14} className="info-icon" title="Ajusta automaticamente os limites baseado no comportamento" />
+                <span title="Ajusta automaticamente os limites baseado no comportamento">
+                  <Info size={14} className="info-icon" />
+                </span>
               </label>
 
               <label className="checkbox-item">
@@ -291,7 +303,9 @@ export default function Configuracoes() {
                   }}
                 />
                 <span>Detecção de Bloqueios</span>
-                <Info size={14} className="info-icon" title="Detecta quando você foi bloqueado e pausa os envios" />
+                <span title="Detecta quando você foi bloqueado e pausa os envios">
+                  <Info size={14} className="info-icon" />
+                </span>
               </label>
             </div>
           </div>
@@ -313,7 +327,9 @@ export default function Configuracoes() {
             <div className="config-item">
               <div className="config-label">
                 <span>Delay entre Mensagens</span>
-                <Info size={14} className="info-icon" title="Tempo de espera entre cada mensagem enviada" />
+                <span title="Tempo de espera entre cada mensagem enviada">
+                  <Info size={14} className="info-icon" />
+                </span>
               </div>
               <div className="input-group">
                 <input
@@ -332,7 +348,9 @@ export default function Configuracoes() {
               <div className="config-item">
                 <div className="config-label">
                   <span>Máx. por Hora</span>
-                  <Info size={14} className="info-icon" title="Número máximo de mensagens que podem ser enviadas em uma hora" />
+                  <span title="Número máximo de mensagens que podem ser enviadas em uma hora">
+                    <Info size={14} className="info-icon" />
+                  </span>
                 </div>
                 <div className="input-group">
                   <input
@@ -349,7 +367,9 @@ export default function Configuracoes() {
               <div className="config-item">
                 <div className="config-label">
                   <span>Máx. por Dia</span>
-                  <Info size={14} className="info-icon" title="Número máximo de mensagens que podem ser enviadas em um dia" />
+                  <span title="Número máximo de mensagens que podem ser enviadas em um dia">
+                    <Info size={14} className="info-icon" />
+                  </span>
                 </div>
                 <div className="input-group">
                   <input
@@ -368,7 +388,9 @@ export default function Configuracoes() {
               <div className="config-item">
                 <div className="config-label">
                   <span>Máx. Tentativas</span>
-                  <Info size={14} className="info-icon" title="Quantas vezes tentar reenviar uma mensagem que falhou" />
+                  <span title="Quantas vezes tentar reenviar uma mensagem que falhou">
+                    <Info size={14} className="info-icon" />
+                  </span>
                 </div>
                 <div className="input-group">
                   <input
@@ -385,7 +407,9 @@ export default function Configuracoes() {
               <div className="config-item">
                 <div className="config-label">
                   <span>Delay entre Tentativas</span>
-                  <Info size={14} className="info-icon" title="Tempo de espera antes de tentar reenviar" />
+                  <span title="Tempo de espera antes de tentar reenviar">
+                    <Info size={14} className="info-icon" />
+                  </span>
                 </div>
                 <div className="input-group">
                   <input
@@ -419,7 +443,9 @@ export default function Configuracoes() {
             <div className="config-item large">
               <div className="config-label">
                 <span>Horário de Envio</span>
-                <Info size={14} className="info-icon" title="O devocional será enviado automaticamente neste horário todos os dias" />
+                <span title="O devocional será enviado automaticamente neste horário todos os dias">
+                  <Info size={14} className="info-icon" />
+                </span>
               </div>
               <div className="time-input-container">
                 <Clock size={20} />
