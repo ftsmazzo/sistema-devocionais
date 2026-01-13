@@ -354,6 +354,21 @@ async def send_custom_message(
                         
                         logger.info(f"🔄 Formato detectado: {audio_format}, tentando converter para MP3...")
                         
+                        # Verificar assinatura do arquivo para confirmar formato
+                        file_signature = file_content[:4]
+                        logger.info(f"🔍 Assinatura do arquivo (hex): {file_signature.hex()}")
+                        
+                        # WebM começa com: 1A 45 DF A3 (hex) ou "GkXfo" (base64)
+                        # OGG começa com: 4F 67 67 53 (hex) ou "OggS" (ascii)
+                        if file_signature[:3] == b'\x1a\x45\xdf' or file_content[:4] == b'\x1a\x45\xdf\xa3':
+                            audio_format = "webm"
+                            logger.info(f"✅ Confirmado: arquivo é WebM pela assinatura")
+                        elif file_signature == b'OggS':
+                            audio_format = "ogg"
+                            logger.info(f"✅ Confirmado: arquivo é OGG pela assinatura")
+                        else:
+                            logger.warning(f"⚠️ Assinatura desconhecida, tentando como {audio_format}")
+                        
                         # Carregar áudio do conteúdo do arquivo
                         audio_io = io.BytesIO(file_content)
                         audio = AudioSegment.from_file(audio_io, format=audio_format)
