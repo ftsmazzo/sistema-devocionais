@@ -1037,15 +1037,7 @@ async def import_contatos_csv(
         raise HTTPException(status_code=500, detail=f"Erro ao processar CSV: {str(e)}")
 
 
-@router.post("/send-custom")
-async def send_custom_message(
-    message: str = Form(...),
-    media_file: Optional[UploadFile] = File(None),
-    media_type: Optional[str] = Form(None),  # 'image' ou 'video'
-    contacts: Optional[str] = Form(None),  # JSON string de contatos
-    delay: Optional[float] = Form(None),
-    db: Session = Depends(get_db)
-):
+@router.get("/envios")
     """
     Envia mensagem personalizada (texto + opcionalmente imagem/vídeo) para contatos
     
