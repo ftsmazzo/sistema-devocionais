@@ -321,9 +321,9 @@ async def send_custom_message(
                 'image/jpeg' if media_type == 'image' else 'video/mp4'
             )
         
-        # Obter instância para envio
-        devocional_service = DevocionalService()
-        instance_manager = devocional_service.instance_manager
+        # Obter instância para envio usando InstanceManager com banco de dados
+        from app.instance_manager import InstanceManager
+        instance_manager = InstanceManager(db=db)
         
         if not instance_manager.instances:
             raise HTTPException(
