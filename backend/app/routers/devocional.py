@@ -170,8 +170,8 @@ async def send_devocional(
                 status=result.status.value,
                 message_id=result.message_id,
                 error_message=result.error,
-                retry_count=result.retry_count,
-                message_type="devocional_manual"
+                retry_count=result.retry_count
+                # message_type="devocional_manual"  # Descomentar após executar migrate_add_message_type.sql
             )
             db.add(envio)
             

@@ -37,71 +37,12 @@ class MessageStatusSync:
             # Buscar mensagens que ainda não foram lidas das últimas X horas
             cutoff_time = now_brazil_naive() - timedelta(hours=hours_back)
             
-            # Query que não depende de message_type (campo pode não existir ainda)
-            # Usar load_only para especificar apenas colunas que existem
-            from sqlalchemy.orm import load_only
-            try:
-                messages_to_check = self.db.query(DevocionalEnvio).options(
-                    load_only(
-                        DevocionalEnvio.id,
-                        DevocionalEnvio.devocional_id,
-                        DevocionalEnvio.recipient_phone,
-                        DevocionalEnvio.recipient_name,
-                        DevocionalEnvio.message_text,
-                        DevocionalEnvio.status,
-                        DevocionalEnvio.message_id,
-                        DevocionalEnvio.error_message,
-                        DevocionalEnvio.retry_count,
-                        DevocionalEnvio.message_status,
-                        DevocionalEnvio.delivered_at,
-                        DevocionalEnvio.read_at,
-                        DevocionalEnvio.instance_name,
-                        DevocionalEnvio.sent_at,
-                        DevocionalEnvio.scheduled_for,
-                        DevocionalEnvio.created_at
-                    )
-                ).filter(
-                    DevocionalEnvio.message_status.in_(["pending", "sent", "delivered"]),
-                    DevocionalEnvio.sent_at >= cutoff_time,
-                    DevocionalEnvio.message_id.isnot(None)
-                ).all()
-            except Exception as db_error:
-                # Se ainda assim der erro (coluna message_type no SELECT implícito), usar query SQL direta
-                if "message_type" in str(db_error):
-                    logger.warning("⚠️ Coluna message_type não existe ainda. Executando query SQL direta...")
-                    from sqlalchemy import text
-                    result = self.db.execute(text("""
-                        SELECT id, devocional_id, recipient_phone, recipient_name, message_text, 
-                               status, message_id, error_message, retry_count, message_status, 
-                               delivered_at, read_at, instance_name, sent_at, scheduled_for, created_at
-                        FROM devocional_envios
-                        WHERE message_status IN ('pending', 'sent', 'delivered')
-                          AND sent_at >= :cutoff_time
-                          AND message_id IS NOT NULL
-                    """), {"cutoff_time": cutoff_time})
-                    messages_to_check = []
-                    for row in result:
-                        # Criar objeto DevocionalEnvio manualmente
-                        envio = DevocionalEnvio()
-                        envio.id = row[0]
-                        envio.devocional_id = row[1]
-                        envio.recipient_phone = row[2]
-                        envio.recipient_name = row[3]
-                        envio.message_text = row[4]
-                        envio.status = row[5]
-                        envio.message_id = row[6]
-                        envio.error_message = row[7]
-                        envio.retry_count = row[8]
-                        envio.message_status = row[9]
-                        envio.delivered_at = row[10]
-                        envio.read_at = row[11]
-                        envio.instance_name = row[12]
-                        envio.sent_at = row[13]
-                        envio.scheduled_for = row[14]
-                        envio.created_at = row[15]
-                        messages_to_check.append(envio)
-                else:
-                    raise
+            # Query normal - campo message_type foi removido temporariamente do modelo
+            messages_to_check = self.db.query(DevocionalEnvio).filter(
+                DevocionalEnvio.message_status.in_(["pending", "sent", "delivered"]),
+                DevocionalEnvio.sent_at >= cutoff_time,
+                DevocionalEnvio.message_id.isnot(None)
+            ).all()
             
             logger.info(f"🔄 Sincronizando {len(messages_to_check)} mensagens com Evolution API")
             

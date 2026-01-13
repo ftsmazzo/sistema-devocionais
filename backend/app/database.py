@@ -49,8 +49,8 @@ class DevocionalEnvio(Base):
     # Instância que enviou (para multi-instância)
     instance_name = Column(String(100))  # Nome da instância Evolution API que enviou
     
-    # Tipo de mensagem (opcional - requer migração do banco)
-    message_type = Column(String(20), default="devocional_agendado", nullable=True)  # devocional_agendado, devocional_manual, mensagem_personalizada
+    # Tipo de mensagem (TEMPORARIAMENTE COMENTADO - descomentar após executar migrate_add_message_type.sql)
+    # message_type = Column(String(20), default="devocional_agendado", nullable=True)  # devocional_agendado, devocional_manual, mensagem_personalizada
     
     # Timestamps (sempre em horário de Brasília)
     sent_at = Column(DateTime, default=now_brazil, index=True)
