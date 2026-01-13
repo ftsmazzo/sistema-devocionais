@@ -30,7 +30,7 @@ export default function Mensagens() {
   const [videoRecorder, setVideoRecorder] = useState<MediaRecorder | null>(null)
   const [videoChunks, setVideoChunks] = useState<Blob[]>([])
   const [videoStream, setVideoStream] = useState<MediaStream | null>(null)
-  const [facingMode, setFacingMode] = useState<'user' | 'environment'>('environment') // 'user' = frente, 'environment' = trás
+  const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user') // 'user' = frente, 'environment' = trás
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
