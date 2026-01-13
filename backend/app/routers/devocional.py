@@ -529,22 +529,24 @@ async def send_custom_message(
                     if not re.match(r'^[A-Za-z0-9+/]*={0,2}$', media_base64_final):
                         logger.error(f"❌ Base64 inválido detectado! Primeiros 100 chars: {media_base64_final[:100]}")
                     
-                    # Para áudio, usar endpoint específico /message/sendAudio
+                    # Usar /message/sendMedia para todos os tipos
+                    # Para áudio, usar campo "audio" em vez de "media" (conforme documentação Postman)
+                    url = f"{instance.api_url}/message/sendMedia/{api_instance_name}"
+                    
                     if media_type == "audio":
-                        url = f"{instance.api_url}/message/sendAudio/{api_instance_name}"
+                        # Para áudio, usar campo "audio" em vez de "media"
                         payload = {
                             "number": phone_clean,
-                            "audio": media_base64_final,  # Campo específico para áudio
+                            "audio": media_base64_final,  # Campo específico para áudio (base64 ou URL)
                         }
                         
                         # Adicionar delay se configurado
                         if delay and delay > 0:
                             payload["delay"] = int(delay * 1000)  # Converter segundos para milissegundos
                         
-                        logger.info(f"🎵 Usando endpoint específico /sendAudio para áudio")
+                        logger.info(f"🎵 Enviando áudio com campo 'audio' no payload")
                     else:
-                        # Para imagem e vídeo, usar /message/sendMedia
-                        url = f"{instance.api_url}/message/sendMedia/{api_instance_name}"
+                        # Para imagem e vídeo, usar campos padrão
                         payload = {
                             "number": phone_clean,
                             "mediatype": media_type,  # "image" ou "video"
