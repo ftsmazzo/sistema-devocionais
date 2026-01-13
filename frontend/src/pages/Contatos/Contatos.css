@@ -340,151 +340,83 @@
   background: #f9fafb;
 }
 
-
-/* Paginação */
-.pagination-container {
-  margin-top: 24px;
-  padding: 20px;
-  background: white;
-  border-radius: 8px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 16px;
+.btn-icon.warning:hover {
+  background: #fef3c7;
+  color: #92400e;
 }
 
-.pagination-info {
-  display: flex;
-  align-items: center;
-  gap: 20px;
+.btn-icon.success:hover {
+  background: #d1fae5;
+  color: #065f46;
+}
+
+/* CSV Modal */
+.csv-modal {
+  max-width: 700px;
+}
+
+.csv-info {
+  margin: 0 0 20px 0;
+  padding: 12px;
+  background: #eff6ff;
+  border-left: 4px solid #3b82f6;
+  border-radius: 4px;
   font-size: 14px;
+  color: #1e40af;
+}
+
+.csv-preview {
+  margin: 20px 0;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.csv-preview h3 {
+  margin: 0 0 12px 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: #374151;
+}
+
+.csv-preview-table {
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.csv-preview-table table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.csv-preview-table thead {
+  background: #f9fafb;
+}
+
+.csv-preview-table th {
+  padding: 8px 12px;
+  text-align: left;
+  font-size: 12px;
+  font-weight: 600;
   color: #6b7280;
+  border-bottom: 1px solid #e5e7eb;
 }
 
-.items-per-page {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+.csv-preview-table td {
+  padding: 8px 12px;
+  font-size: 12px;
+  border-bottom: 1px solid #f3f4f6;
 }
 
-.items-per-page label {
-  font-size: 14px;
-  color: #374151;
-  font-weight: 500;
+.csv-preview-table tbody tr:last-child td {
+  border-bottom: none;
 }
 
-.items-per-page select {
-  padding: 6px 12px;
+.form-group input[type="file"] {
+  padding: 8px;
   border: 1px solid #d1d5db;
   border-radius: 6px;
   font-size: 14px;
-  background: white;
-  color: #374151;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.items-per-page select:hover {
-  border-color: #3b82f6;
-}
-
-.items-per-page select:focus {
-  outline: none;
-  border-color: #3b82f6;
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
-}
-
-.pagination-controls {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.pagination-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  padding: 0;
-  border: 1px solid #d1d5db;
-  border-radius: 6px;
-  background: white;
-  color: #374151;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.pagination-btn:hover:not(:disabled) {
-  background: #f9fafb;
-  border-color: #3b82f6;
-  color: #3b82f6;
-}
-
-.pagination-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.pagination-pages {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.pagination-page {
-  min-width: 36px;
-  height: 36px;
-  padding: 0 12px;
-  border: 1px solid #d1d5db;
-  border-radius: 6px;
-  background: white;
-  color: #374151;
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.pagination-page:hover {
-  background: #f9fafb;
-  border-color: #3b82f6;
-  color: #3b82f6;
-}
-
-.pagination-page.active {
-  background: #3b82f6;
-  border-color: #3b82f6;
-  color: white;
-}
-
-.pagination-page.active:hover {
-  background: #2563eb;
-  border-color: #2563eb;
-}
-
-.pagination-ellipsis {
-  padding: 0 8px;
-  color: #9ca3af;
-  font-size: 14px;
-  user-select: none;
-}
-
-@media (max-width: 768px) {
-  .pagination-container {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .pagination-info {
-    justify-content: space-between;
-    width: 100%;
-  }
-
-  .pagination-controls {
-    justify-content: center;
-    width: 100%;
-  }
+  width: 100%;
+  box-sizing: border-box;
 }

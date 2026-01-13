@@ -10,6 +10,7 @@ import Devocionais from './pages/Devocionais/Devocionais'
 import Envios from './pages/Envios/Envios'
 import Configuracoes from './pages/Configuracoes/Configuracoes'
 import Instancias from './pages/Instancias/Instancias'
+import Mensagens from './pages/Mensagens/Mensagens'
 import './App.css'
 
 function App() {
@@ -79,6 +80,16 @@ function App() {
             <ProtectedRoute>
               <Layout>
                 <Instancias />
+              </Layout>
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/mensagens"
+          element={
+            <ProtectedRoute>
+              <Layout>
+                <Mensagens />
               </Layout>
             </ProtectedRoute>
           }

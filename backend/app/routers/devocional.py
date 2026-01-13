@@ -1,7 +1,7 @@
 """
 Endpoints para envio de devocionais
 """
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Header, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Header, UploadFile, File, Form
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from typing import List, Dict, Optional
@@ -17,6 +17,11 @@ import json
 import csv
 import io
 import re
+import base64
+import requests
+import asyncio
+from app.instance_manager import EvolutionInstance, InstanceStatus
+from app.message_result import MessageResult, MessageStatus
 
 logger = logging.getLogger(__name__)
 
@@ -258,6 +263,219 @@ async def send_single_devocional(
         logger.error(f"Erro ao enviar devocional único: {e}", exc_info=True)
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Erro: {str(e)}")
+
+
+@router.post("/send-custom")
+async def send_custom_message(
+    message: str = Form(...),
+    media_file: Optional[UploadFile] = File(None),
+    media_type: Optional[str] = Form(None),  # 'image' ou 'video'
+    contacts: Optional[str] = Form(None),  # JSON string de contatos
+    delay: Optional[float] = Form(None),
+    db: Session = Depends(get_db)
+):
+    """
+    Envia mensagem personalizada (texto + opcionalmente imagem/vídeo) para contatos
+    """
+    try:
+        # Obter lista de contatos
+        if contacts:
+            try:
+                contacts_list = json.loads(contacts)
+            except:
+                raise HTTPException(status_code=400, detail="Formato inválido de contatos")
+        else:
+            # Buscar contatos ativos do banco
+            db_contacts = db.query(DevocionalContato).filter(
+                DevocionalContato.active == True
+            ).all()
+            
+            if not db_contacts:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Nenhum contato ativo encontrado. Adicione contatos primeiro."
+                )
+            
+            contacts_list = [
+                {"id": c.id, "phone": c.phone, "name": c.name}
+                for c in db_contacts
+            ]
+        
+        # Processar mídia se fornecida
+        media_base64 = None
+        media_mimetype = None
+        
+        if media_file:
+            # Validar tipo de arquivo
+            file_content = await media_file.read()
+            file_size = len(file_content)
+            
+            # Limite de tamanho: 16MB para imagens, 64MB para vídeos
+            if media_type == 'image' and file_size > 16 * 1024 * 1024:
+                raise HTTPException(status_code=400, detail="Imagem muito grande. Máximo: 16MB")
+            if media_type == 'video' and file_size > 64 * 1024 * 1024:
+                raise HTTPException(status_code=400, detail="Vídeo muito grande. Máximo: 64MB")
+            
+            # Converter para base64
+            media_base64 = base64.b64encode(file_content).decode('utf-8')
+            media_mimetype = media_file.content_type or (
+                'image/jpeg' if media_type == 'image' else 'video/mp4'
+            )
+        
+        # Obter instância para envio
+        devocional_service = DevocionalService()
+        instance_manager = devocional_service.instance_manager
+        
+        if not instance_manager.instances:
+            raise HTTPException(
+                status_code=400,
+                detail="Nenhuma instância disponível. Configure instâncias primeiro."
+            )
+        
+        # Selecionar instância (usar a primeira ativa)
+        instance = None
+        for inst in instance_manager.instances:
+            if inst.enabled and inst.status == InstanceStatus.ACTIVE:
+                instance = inst
+                break
+        
+        if not instance:
+            raise HTTPException(
+                status_code=400,
+                detail="Nenhuma instância ativa e conectada disponível"
+            )
+        
+        # Enviar mensagens
+        from app.timezone_utils import now_brazil_naive
+        sent_count = 0
+        failed_count = 0
+        results_data = []
+        
+        for contact in contacts_list:
+            try:
+                phone = contact.get('phone', '')
+                name = contact.get('name')
+                
+                # Formatar telefone
+                phone_clean = ''.join(filter(str.isdigit, phone))
+                if not phone_clean.startswith('55') and len(phone_clean) == 11:
+                    phone_clean = '55' + phone_clean
+                
+                # Personalizar mensagem
+                personalized_message = message
+                if name:
+                    personalized_message = f"Olá {name}! 👋\n\n{message}"
+                
+                # Headers
+                headers = {
+                    "Content-Type": "application/json",
+                    "apikey": instance.api_key
+                }
+                
+                api_instance_name = getattr(instance, 'api_instance_name', None) or instance.name
+                
+                # Enviar com ou sem mídia
+                if media_base64:
+                    # Enviar mídia
+                    url = f"{instance.api_url}/message/sendMedia/{api_instance_name}"
+                    payload = {
+                        "number": phone_clean,
+                        "mediatype": media_type,
+                        "media": media_base64,
+                        "mimetype": media_mimetype,
+                        "caption": personalized_message
+                    }
+                else:
+                    # Enviar apenas texto
+                    url = f"{instance.api_url}/message/sendText/{api_instance_name}"
+                    payload = {
+                        "number": phone_clean,
+                        "text": personalized_message
+                    }
+                
+                response = requests.post(url, json=payload, headers=headers, timeout=60)
+                
+                success = response.status_code in [200, 201]
+                result_data = {
+                    "phone": phone,
+                    "name": name,
+                    "success": success,
+                    "status": "sent" if success else "failed",
+                    "error": None if success else response.text[:200],
+                    "message_id": None
+                }
+                
+                if success:
+                    try:
+                        response_json = response.json()
+                        result_data["message_id"] = response_json.get("key", {}).get("id") if isinstance(response_json, dict) else None
+                    except:
+                        pass
+                    sent_count += 1
+                else:
+                    failed_count += 1
+                
+                results_data.append(result_data)
+                
+                # Registrar no banco
+                timestamp_naive = now_brazil_naive()
+                envio = DevocionalEnvio(
+                    recipient_phone=phone,
+                    recipient_name=name,
+                    message_text=personalized_message,
+                    sent_at=timestamp_naive,
+                    status=result_data["status"],
+                    message_id=result_data.get("message_id"),
+                    error_message=result_data.get("error"),
+                    retry_count=0
+                )
+                db.add(envio)
+                
+                # Atualizar contato
+                if success:
+                    db_contact = db.query(DevocionalContato).filter(
+                        DevocionalContato.phone == phone
+                    ).first()
+                    
+                    if db_contact:
+                        db_contact.last_sent = timestamp_naive
+                        db_contact.total_sent = (db_contact.total_sent or 0) + 1
+                
+                # Delay entre mensagens
+                if delay and delay > 0:
+                    await asyncio.sleep(delay)
+                elif not delay:
+                    # Usar delay padrão
+                    await asyncio.sleep(settings.DELAY_BETWEEN_MESSAGES or 3.0)
+                
+            except Exception as e:
+                logger.error(f"Erro ao enviar mensagem para {contact.get('phone')}: {e}", exc_info=True)
+                failed_count += 1
+                results_data.append({
+                    "phone": contact.get('phone', ''),
+                    "name": contact.get('name'),
+                    "success": False,
+                    "status": "failed",
+                    "error": str(e)[:200],
+                    "message_id": None
+                })
+        
+        db.commit()
+        
+        return {
+            "success": sent_count > 0,
+            "total": len(contacts_list),
+            "sent": sent_count,
+            "failed": failed_count,
+            "results": results_data
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao enviar mensagem personalizada: {e}", exc_info=True)
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Erro ao enviar mensagem: {str(e)}")
 
 
 @router.get("/stats", response_model=StatsResponse)
@@ -719,6 +937,228 @@ async def import_contatos_csv(
         logger.error(f"Erro ao importar CSV: {e}", exc_info=True)
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Erro ao processar CSV: {str(e)}")
+
+
+@router.post("/send-custom")
+async def send_custom_message(
+    message: str = Form(...),
+    media_file: Optional[UploadFile] = File(None),
+    media_type: Optional[str] = Form(None),  # 'image' ou 'video'
+    contacts: Optional[str] = Form(None),  # JSON string de contatos
+    delay: Optional[float] = Form(None),
+    db: Session = Depends(get_db)
+):
+    """
+    Envia mensagem personalizada (texto + opcionalmente imagem/vídeo) para contatos
+    
+    Args:
+        message: Texto da mensagem
+        media_file: Arquivo de imagem ou vídeo (opcional)
+        media_type: Tipo de mídia ('image' ou 'video')
+        contacts: JSON string com lista de contatos (opcional, usa todos ativos se não fornecido)
+        delay: Delay entre mensagens em segundos
+    """
+    try:
+        # Obter lista de contatos
+        if contacts:
+            try:
+                contacts_list = json.loads(contacts)
+            except:
+                raise HTTPException(status_code=400, detail="Formato inválido de contatos")
+        else:
+            # Buscar contatos ativos do banco
+            db_contacts = db.query(DevocionalContato).filter(
+                DevocionalContato.active == True
+            ).all()
+            
+            if not db_contacts:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Nenhum contato ativo encontrado. Adicione contatos primeiro."
+                )
+            
+            contacts_list = [
+                {"id": c.id, "phone": c.phone, "name": c.name}
+                for c in db_contacts
+            ]
+        
+        # Processar mídia se fornecida
+        media_base64 = None
+        media_mimetype = None
+        
+        if media_file:
+            # Validar tipo de arquivo
+            file_content = await media_file.read()
+            file_size = len(file_content)
+            
+            # Limite de tamanho: 16MB para imagens, 64MB para vídeos
+            if media_type == 'image' and file_size > 16 * 1024 * 1024:
+                raise HTTPException(status_code=400, detail="Imagem muito grande. Máximo: 16MB")
+            if media_type == 'video' and file_size > 64 * 1024 * 1024:
+                raise HTTPException(status_code=400, detail="Vídeo muito grande. Máximo: 64MB")
+            
+            # Converter para base64
+            media_base64 = base64.b64encode(file_content).decode('utf-8')
+            media_mimetype = media_file.content_type or (
+                'image/jpeg' if media_type == 'image' else 'video/mp4'
+            )
+        
+        # Obter instância para envio
+        devocional_service = DevocionalService()
+        instance_manager = devocional_service.instance_manager
+        
+        if not instance_manager.instances:
+            raise HTTPException(
+                status_code=400,
+                detail="Nenhuma instância disponível. Configure instâncias primeiro."
+            )
+        
+        # Selecionar instância (usar a primeira ativa)
+        instance = None
+        for inst in instance_manager.instances:
+            if inst.enabled and inst.status == InstanceStatus.ACTIVE:
+                instance = inst
+                break
+        
+        if not instance:
+            raise HTTPException(
+                status_code=400,
+                detail="Nenhuma instância ativa e conectada disponível"
+            )
+        
+        # Enviar mensagens
+        from app.timezone_utils import now_brazil_naive
+        sent_count = 0
+        failed_count = 0
+        results_data = []
+        
+        for contact in contacts_list:
+            try:
+                phone = contact.get('phone', '')
+                name = contact.get('name')
+                
+                # Formatar telefone
+                phone_clean = ''.join(filter(str.isdigit, phone))
+                if not phone_clean.startswith('55') and len(phone_clean) == 11:
+                    phone_clean = '55' + phone_clean
+                
+                # Personalizar mensagem
+                personalized_message = message
+                if name:
+                    personalized_message = f"Olá {name}! 👋\n\n{message}"
+                
+                # Headers
+                headers = {
+                    "Content-Type": "application/json",
+                    "apikey": instance.api_key
+                }
+                
+                api_instance_name = getattr(instance, 'api_instance_name', None) or instance.name
+                
+                # Enviar com ou sem mídia
+                if media_base64:
+                    # Enviar mídia
+                    url = f"{instance.api_url}/message/sendMedia/{api_instance_name}"
+                    payload = {
+                        "number": phone_clean,
+                        "mediatype": media_type,
+                        "media": media_base64,
+                        "mimetype": media_mimetype,
+                        "caption": personalized_message
+                    }
+                else:
+                    # Enviar apenas texto
+                    url = f"{instance.api_url}/message/sendText/{api_instance_name}"
+                    payload = {
+                        "number": phone_clean,
+                        "text": personalized_message
+                    }
+                
+                response = requests.post(url, json=payload, headers=headers, timeout=60)
+                
+                success = response.status_code in [200, 201]
+                result_data = {
+                    "phone": phone,
+                    "name": name,
+                    "success": success,
+                    "status": "sent" if success else "failed",
+                    "error": None if success else response.text[:200],
+                    "message_id": None
+                }
+                
+                if success:
+                    try:
+                        response_json = response.json()
+                        result_data["message_id"] = response_json.get("key", {}).get("id") if isinstance(response_json, dict) else None
+                    except:
+                        pass
+                    sent_count += 1
+                else:
+                    failed_count += 1
+                
+                results_data.append(result_data)
+                
+                # Registrar no banco
+                timestamp_naive = now_brazil_naive()
+                envio = DevocionalEnvio(
+                    recipient_phone=phone,
+                    recipient_name=name,
+                    message_text=personalized_message,
+                    sent_at=timestamp_naive,
+                    status=result_data["status"],
+                    message_id=result_data.get("message_id"),
+                    error_message=result_data.get("error"),
+                    retry_count=0
+                )
+                db.add(envio)
+                
+                # Atualizar contato
+                if success:
+                    db_contact = db.query(DevocionalContato).filter(
+                        DevocionalContato.phone == phone
+                    ).first()
+                    
+                    if db_contact:
+                        db_contact.last_sent = timestamp_naive
+                        db_contact.total_sent = (db_contact.total_sent or 0) + 1
+                
+                # Delay entre mensagens
+                if delay and delay > 0:
+                    import asyncio
+                    await asyncio.sleep(delay)
+                elif not delay:
+                    # Usar delay padrão
+                    import asyncio
+                    await asyncio.sleep(settings.DELAY_BETWEEN_MESSAGES or 3.0)
+                
+            except Exception as e:
+                logger.error(f"Erro ao enviar mensagem para {contact.get('phone')}: {e}", exc_info=True)
+                failed_count += 1
+                results_data.append({
+                    "phone": contact.get('phone', ''),
+                    "name": contact.get('name'),
+                    "success": False,
+                    "status": "failed",
+                    "error": str(e)[:200],
+                    "message_id": None
+                })
+        
+        db.commit()
+        
+        return {
+            "success": sent_count > 0,
+            "total": len(contacts_list),
+            "sent": sent_count,
+            "failed": failed_count,
+            "results": results_data
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao enviar mensagem personalizada: {e}", exc_info=True)
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Erro ao enviar mensagem: {str(e)}")
 
 
 @router.get("/envios")

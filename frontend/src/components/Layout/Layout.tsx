@@ -1,7 +1,7 @@
 import { ReactNode } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../../store/authStore'
-import { LogOut, Home, BookOpen, Users, Send, Settings, BarChart3, Server } from 'lucide-react'
+import { LogOut, Home, BookOpen, Users, Send, Settings, BarChart3, Server, MessageSquare } from 'lucide-react'
 import './Layout.css'
 
 interface LayoutProps {
@@ -50,6 +50,14 @@ export default function Layout({ children }: LayoutProps) {
           >
             <Users size={20} />
             <span>Contatos</span>
+          </Link>
+
+          <Link
+            to="/mensagens"
+            className={`nav-item ${isActive('/mensagens') ? 'active' : ''}`}
+          >
+            <MessageSquare size={20} />
+            <span>Mensagens</span>
           </Link>
 
           <Link
@@ -109,6 +117,7 @@ export default function Layout({ children }: LayoutProps) {
               {location.pathname === '/dashboard' && 'Dashboard'}
               {location.pathname === '/devocionais' && 'Devocionais'}
               {location.pathname === '/contatos' && 'Contatos'}
+              {location.pathname === '/mensagens' && 'Mensagens'}
               {location.pathname === '/envios' && 'Envios'}
               {location.pathname === '/relatorios' && 'Relatórios'}
               {location.pathname === '/instancias' && 'Instâncias'}
