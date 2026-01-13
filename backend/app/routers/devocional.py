@@ -326,12 +326,17 @@ async def send_custom_message(
                 filename_lower = (media_file.filename or '').lower()
                 content_type_lower = (media_file.content_type or '').lower()
                 
+                logger.info(f"🔍 Verificando áudio: filename={filename_lower}, content_type={content_type_lower}")
+                
                 # Verificar se é áudio gravado no navegador (OGG/WebM)
                 is_recorded_audio = (
-                    'audio-' in filename_lower and filename_lower.startswith('audio-') or
+                    ('audio-' in filename_lower and filename_lower.startswith('audio-')) or
                     'ogg' in content_type_lower or 'opus' in content_type_lower or
-                    'webm' in content_type_lower or 'webm' in filename_lower
+                    'webm' in content_type_lower or 'webm' in filename_lower or
+                    'ogg' in filename_lower
                 )
+                
+                logger.info(f"🔍 is_recorded_audio={is_recorded_audio}")
                 
                 if is_recorded_audio:
                     try:
@@ -340,9 +345,20 @@ async def send_custom_message(
                         
                         logger.info(f"🔄 Convertendo áudio OGG/WebM para MP3 para melhor compatibilidade...")
                         
+                        # Determinar formato do arquivo
+                        audio_format = "ogg"
+                        if "webm" in content_type_lower or "webm" in filename_lower:
+                            audio_format = "webm"
+                        elif "ogg" in content_type_lower or "ogg" in filename_lower:
+                            audio_format = "ogg"
+                        
+                        logger.info(f"🔄 Formato detectado: {audio_format}, tentando converter para MP3...")
+                        
                         # Carregar áudio do conteúdo do arquivo
                         audio_io = io.BytesIO(file_content)
-                        audio = AudioSegment.from_file(audio_io, format="ogg" if "ogg" in content_type_lower or "ogg" in filename_lower else "webm")
+                        audio = AudioSegment.from_file(audio_io, format=audio_format)
+                        
+                        logger.info(f"🔄 Áudio carregado: duração={len(audio)}ms, canais={audio.channels}, sample_rate={audio.frame_rate}")
                         
                         # Converter para MP3
                         mp3_io = io.BytesIO()
@@ -351,11 +367,12 @@ async def send_custom_message(
                         file_content = mp3_io.read()
                         file_size = len(file_content)
                         
-                        logger.info(f"✅ Áudio convertido para MP3: novo tamanho={file_size} bytes")
-                    except ImportError:
-                        logger.warning(f"⚠️ pydub não instalado, pulando conversão. Instale: pip install pydub")
+                        logger.info(f"✅ Áudio convertido para MP3: novo tamanho={file_size} bytes (antes: {len(audio_io.getvalue())} bytes)")
+                    except ImportError as e:
+                        logger.error(f"❌ pydub não instalado: {e}. Instale: pip install pydub. E certifique-se de que ffmpeg está instalado.")
                     except Exception as e:
-                        logger.warning(f"⚠️ Erro ao converter áudio para MP3: {e}. Enviando formato original.")
+                        logger.error(f"❌ Erro ao converter áudio para MP3: {e}", exc_info=True)
+                        logger.warning(f"⚠️ Enviando formato original (OGG/WebM)")
             
             # Converter para base64 (string pura, sem prefixo data:)
             # Evolution API espera apenas a string base64, sem espaços ou quebras
