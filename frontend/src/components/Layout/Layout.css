@@ -148,9 +148,11 @@
 
 .page-title {
   margin: 0;
-  font-size: 1.5rem;
+  font-size: clamp(1.125rem, 4vw, 1.5rem);
   font-weight: 600;
   color: #1e293b;
+  word-wrap: break-word;
+  line-height: 1.2;
 }
 
 .content-wrapper {
