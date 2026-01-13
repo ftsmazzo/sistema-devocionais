@@ -375,14 +375,31 @@ async def send_custom_message(
                         
                         logger.info(f"🔄 Áudio carregado: duração={len(audio)}ms, canais={audio.channels}, sample_rate={audio.frame_rate}")
                         
-                        # Converter para MP3
-                        mp3_io = io.BytesIO()
-                        audio.export(mp3_io, format="mp3", bitrate="128k")
-                        mp3_io.seek(0)
-                        file_content = mp3_io.read()
-                        file_size = len(file_content)
-                        
-                        logger.info(f"✅ Áudio convertido para MP3: novo tamanho={file_size} bytes (antes: {len(audio_io.getvalue())} bytes)")
+                        # Tentar converter para AMR primeiro (formato nativo do WhatsApp para voz)
+                        # Se falhar, usar MP3 como fallback
+                        converted = False
+                        try:
+                            logger.info(f"🔄 Tentando converter para AMR (formato nativo WhatsApp)...")
+                            amr_io = io.BytesIO()
+                            audio.export(amr_io, format="amr", bitrate="12.2k")
+                            amr_io.seek(0)
+                            file_content = amr_io.read()
+                            file_size = len(file_content)
+                            converted = True
+                            logger.info(f"✅ Áudio convertido para AMR: novo tamanho={file_size} bytes (antes: {len(audio_io.getvalue())} bytes)")
+                        except Exception as e:
+                            logger.warning(f"⚠️ Falha ao converter para AMR: {e}. Tentando MP3...")
+                            try:
+                                mp3_io = io.BytesIO()
+                                audio.export(mp3_io, format="mp3", bitrate="128k")
+                                mp3_io.seek(0)
+                                file_content = mp3_io.read()
+                                file_size = len(file_content)
+                                converted = True
+                                logger.info(f"✅ Áudio convertido para MP3: novo tamanho={file_size} bytes (antes: {len(audio_io.getvalue())} bytes)")
+                            except Exception as e2:
+                                logger.error(f"❌ Falha ao converter para MP3 também: {e2}")
+                                raise
                     except ImportError as e:
                         logger.error(f"❌ pydub não instalado: {e}. Instale: pip install pydub. E certifique-se de que ffmpeg está instalado.")
                     except Exception as e:
