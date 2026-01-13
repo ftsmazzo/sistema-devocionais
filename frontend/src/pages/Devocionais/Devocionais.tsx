@@ -86,7 +86,7 @@ export default function Devocionais() {
             </div>
             <div className="devocional-text">
               {selectedDevocional.content.split('\n').map((paragraph, idx) => (
-                <p key={idx}>{paragraph}</p>
+                <p key={idx}>{paragraph || '\u00A0'}</p>
               ))}
             </div>
           </div>

@@ -140,6 +140,8 @@
   border-radius: 8px;
   padding: 24px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  max-width: 100%;
+  overflow: visible;
 }
 
 .back-button {
@@ -158,10 +160,16 @@
   background: #e5e7eb;
 }
 
+.devocional-content {
+  max-width: 100%;
+  overflow: visible;
+}
+
 .devocional-content h1 {
   margin: 0 0 16px 0;
   font-size: 28px;
   font-weight: 700;
+  word-wrap: break-word;
 }
 
 .devocional-meta {
@@ -181,10 +189,16 @@
 .devocional-text {
   line-height: 1.8;
   color: #1f2937;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  max-width: 100%;
 }
 
 .devocional-text p {
   margin: 0 0 16px 0;
+  white-space: pre-wrap;
+  word-wrap: break-word;
 }
 
 .empty-state {
