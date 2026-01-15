@@ -13,7 +13,11 @@ import {
   Phone,
   Clock,
   TrendingUp,
-  Plus
+  Plus,
+  Trash2,
+  Webhook,
+  Settings,
+  Info
 } from 'lucide-react'
 import './Instancias.css'
 
@@ -44,6 +48,10 @@ export default function Instancias() {
   const [checkingConnection, setCheckingConnection] = useState<string | null>(null)
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [creating, setCreating] = useState(false)
+  const [configuringWebhook, setConfiguringWebhook] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState<string | null>(null)
+  const [webhookStatus, setWebhookStatus] = useState<Record<string, any>>({})
+  const [showWebhookInfo, setShowWebhookInfo] = useState<string | null>(null)
   const [newInstance, setNewInstance] = useState({
     name: '',
     display_name: 'Devocional Diário',
@@ -152,6 +160,58 @@ export default function Instancias() {
       setError(err.message || 'Erro ao criar instância')
     } finally {
       setCreating(false)
+    }
+  }
+
+  const handleConfigureWebhook = async (instanceName: string) => {
+    try {
+      setConfiguringWebhook(instanceName)
+      setError(null)
+      setSuccess(null)
+      const data = await instancesApi.configureWebhook(instanceName)
+      setSuccess(`Webhooks configurados: ${data.events_configured}/${data.total_events} eventos para ${instanceName}`)
+      // Verificar status após configurar
+      await handleCheckWebhookStatus(instanceName)
+      await loadInstances(true)
+    } catch (err: any) {
+      setError(err.message || 'Erro ao configurar webhook')
+    } finally {
+      setConfiguringWebhook(null)
+    }
+  }
+
+  const handleCheckWebhookStatus = async (instanceName: string) => {
+    try {
+      const data = await instancesApi.getWebhookStatus(instanceName)
+      setWebhookStatus(prev => ({ ...prev, [instanceName]: data }))
+    } catch (err: any) {
+      console.error('Erro ao verificar webhook:', err)
+    }
+  }
+
+  const handleDeleteInstance = async (instanceName: string, fromEvolution: boolean = false) => {
+    if (!confirm(`Tem certeza que deseja ${fromEvolution ? 'deletar' : 'remover'} a instância ${instanceName}?`)) {
+      return
+    }
+
+    try {
+      setDeleting(instanceName)
+      setError(null)
+      setSuccess(null)
+      
+      if (fromEvolution) {
+        await instancesApi.deleteFromEvolution(instanceName)
+        setSuccess(`Instância ${instanceName} deletada da Evolution API e do banco de dados`)
+      } else {
+        await instancesApi.delete(instanceName)
+        setSuccess(`Configuração da instância ${instanceName} removida do banco de dados`)
+      }
+      
+      await loadInstances(true)
+    } catch (err: any) {
+      setError(err.message || 'Erro ao deletar instância')
+    } finally {
+      setDeleting(null)
     }
   }
 
@@ -439,6 +499,7 @@ export default function Instancias() {
                   className="btn-action-modern btn-primary"
                   onClick={() => handleRefresh(instance.name)}
                   disabled={refreshing === instance.name}
+                  title="Atualizar status da instância"
                 >
                   {refreshing === instance.name ? (
                     <Loader size={16} className="spinning" />
@@ -451,6 +512,7 @@ export default function Instancias() {
                   <button
                     className="btn-action-modern btn-secondary"
                     onClick={() => handleGenerateQR(instance.name)}
+                    title="Gerar QR code para conectar"
                   >
                     <QrCode size={16} />
                     <span>Conectar</span>
@@ -460,6 +522,7 @@ export default function Instancias() {
                   className="btn-action-modern btn-success"
                   onClick={() => handleConnect(instance.name)}
                   disabled={checkingConnection === instance.name}
+                  title="Verificar status de conexão"
                 >
                   {checkingConnection === instance.name ? (
                     <Loader size={16} className="spinning" />
@@ -468,7 +531,83 @@ export default function Instancias() {
                   )}
                   <span>Verificar</span>
                 </button>
+                <button
+                  className="btn-action-modern"
+                  onClick={() => handleConfigureWebhook(instance.name)}
+                  disabled={configuringWebhook === instance.name}
+                  title="Configurar webhooks automaticamente"
+                  style={{ background: 'linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)' }}
+                >
+                  {configuringWebhook === instance.name ? (
+                    <Loader size={16} className="spinning" />
+                  ) : (
+                    <Webhook size={16} />
+                  )}
+                  <span>Webhook</span>
+                </button>
+                <button
+                  className="btn-action-modern"
+                  onClick={() => setShowWebhookInfo(showWebhookInfo === instance.name ? null : instance.name)}
+                  title="Ver status dos webhooks"
+                  style={{ background: 'linear-gradient(135deg, #06b6d4 0%, #0891b2 100%)' }}
+                  onMouseEnter={() => {
+                    if (!webhookStatus[instance.name]) {
+                      handleCheckWebhookStatus(instance.name)
+                    }
+                  }}
+                >
+                  <Info size={16} />
+                  <span>Info</span>
+                </button>
+                <button
+                  className="btn-action-modern"
+                  onClick={() => handleDeleteInstance(instance.name, true)}
+                  disabled={deleting === instance.name}
+                  title="Deletar instância da Evolution API e do banco"
+                  style={{ background: 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)' }}
+                >
+                  {deleting === instance.name ? (
+                    <Loader size={16} className="spinning" />
+                  ) : (
+                    <Trash2 size={16} />
+                  )}
+                  <span>Deletar</span>
+                </button>
               </div>
+
+              {showWebhookInfo === instance.name && webhookStatus[instance.name] && (
+                <div className="webhook-info-modern" style={{
+                  marginTop: '1rem',
+                  padding: '1rem',
+                  background: '#f8fafc',
+                  borderRadius: '8px',
+                  border: '1px solid #e2e8f0'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                    <Webhook size={18} />
+                    <strong>Status dos Webhooks</strong>
+                  </div>
+                  {webhookStatus[instance.name].webhook_configured ? (
+                    <div>
+                      <div style={{ color: '#10b981', marginBottom: '0.5rem' }}>
+                        ✅ Webhooks configurados
+                      </div>
+                      {webhookStatus[instance.name].webhook_info && (
+                        <div style={{ fontSize: '0.875rem', color: '#64748b' }}>
+                          <div>URL: {webhookStatus[instance.name].webhook_info.url || 'N/A'}</div>
+                          {webhookStatus[instance.name].webhook_info.events && (
+                            <div>Eventos: {webhookStatus[instance.name].webhook_info.events.join(', ')}</div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div style={{ color: '#f59e0b' }}>
+                      ⚠️ Webhooks não configurados. Clique em "Webhook" para configurar.
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           ))
         )}

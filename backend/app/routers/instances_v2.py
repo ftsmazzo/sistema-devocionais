@@ -404,3 +404,231 @@ async def delete_instance(
     except Exception as e:
         logger.error(f"Erro ao deletar instância: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Erro: {str(e)}")
+
+
+@router.post("/{instance_name}/delete-from-evolution")
+async def delete_instance_from_evolution(
+    instance_name: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Deleta instância da Evolution API e do banco de dados
+    """
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Apenas administradores podem deletar instâncias")
+    
+    try:
+        service = InstanceService(db)
+        
+        # Verificar se existe no banco
+        instance = service.get_instance_by_name(instance_name)
+        if not instance:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Instância {instance_name} não encontrada"
+            )
+        
+        # Deletar da Evolution API
+        from app.config import settings
+        headers = {"apikey": settings.EVOLUTION_API_KEY}
+        delete_url = f"{settings.EVOLUTION_API_URL}/instance/delete/{instance_name}"
+        
+        import requests
+        delete_response = requests.delete(delete_url, headers=headers, timeout=30)
+        
+        if delete_response.status_code not in [200, 204]:
+            error_text = delete_response.text[:500]
+            logger.warning(f"Erro ao deletar instância na Evolution API: HTTP {delete_response.status_code} - {error_text}")
+            # Continuar mesmo se falhar na Evolution API
+        
+        # Deletar do banco
+        deleted = service.delete_instance_config(instance_name)
+        
+        if not deleted:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Erro ao remover instância do banco de dados"
+            )
+        
+        return {
+            "message": f"Instância {instance_name} deletada da Evolution API e do banco de dados",
+            "deleted_from_evolution": delete_response.status_code in [200, 204]
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao deletar instância: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Erro: {str(e)}")
+
+
+@router.post("/{instance_name}/configure-webhook")
+async def configure_webhook(
+    instance_name: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Configura webhook automaticamente para uma instância
+    Configura todos os eventos necessários: message.ack, messages.upsert, qrcode.updated, etc.
+    """
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Apenas administradores podem configurar webhooks")
+    
+    try:
+        service = InstanceService(db)
+        
+        # Verificar se existe no banco
+        instance = service.get_instance_by_name(instance_name)
+        if not instance:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Instância {instance_name} não encontrada"
+            )
+        
+        # Obter URL do webhook do .env ou construir
+        from app.config import settings
+        import os
+        
+        # Tentar obter do .env, senão construir baseado na URL atual
+        webhook_url = os.getenv("WEBHOOK_URL") or os.getenv("EVOLUTION_WEBHOOK_URL")
+        
+        if not webhook_url:
+            # Construir URL baseado no host atual (se disponível)
+            # Em produção, isso deve vir do .env
+            logger.warning("WEBHOOK_URL não configurado no .env. Usando URL padrão.")
+            webhook_url = "http://localhost:8000/webhook/evolution/message-status"
+        
+        # Eventos que queremos receber
+        events = [
+            "message.ack",  # Status de mensagens (sent, delivered, read)
+            "messages.upsert",  # Mensagens recebidas
+            "qrcode.updated",  # Atualização de QR code
+            "connection.update",  # Atualização de conexão
+        ]
+        
+        headers = {
+            "apikey": settings.EVOLUTION_API_KEY,
+            "Content-Type": "application/json"
+        }
+        
+        results = []
+        import requests
+        
+        for event in events:
+            try:
+                # Endpoint para configurar webhook
+                webhook_url_full = f"{settings.EVOLUTION_API_URL}/webhook/set/{instance_name}"
+                
+                payload = {
+                    "url": webhook_url,
+                    "webhook_by_events": True,
+                    "events": [event],
+                    "webhook_base64": False,
+                    "webhook_media_upload": False
+                }
+                
+                logger.info(f"Configurando webhook para {instance_name}: evento {event}")
+                response = requests.post(webhook_url_full, json=payload, headers=headers, timeout=30)
+                
+                if response.status_code in [200, 201]:
+                    results.append({
+                        "event": event,
+                        "status": "success",
+                        "message": "Webhook configurado com sucesso"
+                    })
+                else:
+                    error_text = response.text[:200]
+                    results.append({
+                        "event": event,
+                        "status": "error",
+                        "message": f"HTTP {response.status_code}: {error_text}"
+                    })
+                    logger.warning(f"Erro ao configurar webhook {event} para {instance_name}: {error_text}")
+            
+            except Exception as e:
+                logger.error(f"Erro ao configurar webhook {event} para {instance_name}: {e}", exc_info=True)
+                results.append({
+                    "event": event,
+                    "status": "error",
+                    "message": str(e)
+                })
+        
+        # Verificar webhooks configurados
+        try:
+            check_url = f"{settings.EVOLUTION_API_URL}/webhook/find/{instance_name}"
+            check_response = requests.get(check_url, headers=headers, timeout=10)
+            
+            webhook_info = None
+            if check_response.status_code == 200:
+                webhook_info = check_response.json()
+        except Exception as e:
+            logger.warning(f"Erro ao verificar webhooks configurados: {e}")
+            webhook_info = None
+        
+        success_count = sum(1 for r in results if r["status"] == "success")
+        
+        return {
+            "instance_name": instance_name,
+            "webhook_url": webhook_url,
+            "events_configured": success_count,
+            "total_events": len(events),
+            "results": results,
+            "webhook_info": webhook_info,
+            "message": f"Webhooks configurados: {success_count}/{len(events)} eventos"
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao configurar webhook: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Erro: {str(e)}")
+
+
+@router.get("/{instance_name}/webhook-status")
+async def get_webhook_status(
+    instance_name: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Verifica status dos webhooks configurados para uma instância
+    """
+    try:
+        service = InstanceService(db)
+        
+        # Verificar se existe no banco
+        instance = service.get_instance_by_name(instance_name)
+        if not instance:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Instância {instance_name} não encontrada"
+            )
+        
+        from app.config import settings
+        headers = {"apikey": settings.EVOLUTION_API_KEY}
+        
+        import requests
+        check_url = f"{settings.EVOLUTION_API_URL}/webhook/find/{instance_name}"
+        check_response = requests.get(check_url, headers=headers, timeout=10)
+        
+        if check_response.status_code == 200:
+            webhook_info = check_response.json()
+            return {
+                "instance_name": instance_name,
+                "webhook_configured": True,
+                "webhook_info": webhook_info
+            }
+        else:
+            return {
+                "instance_name": instance_name,
+                "webhook_configured": False,
+                "message": f"Não foi possível verificar webhook (HTTP {check_response.status_code})"
+            }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao verificar webhook: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Erro: {str(e)}")

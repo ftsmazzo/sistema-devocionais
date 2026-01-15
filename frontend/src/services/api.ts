@@ -269,6 +269,22 @@ export const instancesApi = {
     const response = await api.post(`/instances/${instanceName}/refresh`)
     return response.data
   },
+  delete: async (instanceName: string) => {
+    const response = await api.delete(`/instances/${instanceName}`)
+    return response.data
+  },
+  deleteFromEvolution: async (instanceName: string) => {
+    const response = await api.post(`/instances/${instanceName}/delete-from-evolution`)
+    return response.data
+  },
+  configureWebhook: async (instanceName: string) => {
+    const response = await api.post(`/instances/${instanceName}/configure-webhook`)
+    return response.data
+  },
+  getWebhookStatus: async (instanceName: string) => {
+    const response = await api.get(`/instances/${instanceName}/webhook-status`)
+    return response.data
+  },
 }
 
 // ============================================
