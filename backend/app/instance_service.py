@@ -132,26 +132,43 @@ class InstanceService:
                 (api_inst.get('jid', '').split('@')[0] if api_inst.get('jid') else None)
             )
             
-            # Determinar status baseado no estado e número
-            # Se tem número de telefone, provavelmente está conectada (mesmo que state seja unknown)
-            if phone:
-                # Tem número = está conectada (mesmo que state seja unknown)
-                db_instance.status = "active"
-                db_instance.phone_number = str(phone).strip()
-                logger.info(f"✅ {instance_name}: Tem número {phone} -> ACTIVE")
+            # Log detalhado para debug
+            logger.info(f"🔍 {instance_name}: state='{state}', phone={phone}, qrcode={bool(api_inst.get('qrcode'))}")
+            
+            # PRIORIDADE 1: Verificar estado primeiro (mais confiável)
+            if state in ['close', 'disconnected', 'logout']:
+                # Estado explícito de desconectado - mesmo que tenha número, está desconectada
+                db_instance.status = "inactive"
+                # Manter número se existir (pode ser histórico)
+                if phone:
+                    db_instance.phone_number = str(phone).strip()
+                else:
+                    db_instance.phone_number = None
+                logger.info(f"⚠️ {instance_name}: Estado '{state}' -> INACTIVE (mesmo com número)")
             elif state in ['open', 'connected', 'ready']:
                 # Estado explícito de conectado
                 db_instance.status = "active"
-                db_instance.phone_number = None
+                if phone:
+                    db_instance.phone_number = str(phone).strip()
+                else:
+                    db_instance.phone_number = None
                 logger.info(f"✅ {instance_name}: Estado '{state}' -> ACTIVE")
-            elif state in ['close', 'disconnected', 'logout']:
-                # Estado explícito de desconectado
-                db_instance.status = "inactive"
-                db_instance.phone_number = None
-                logger.info(f"⚠️ {instance_name}: Estado '{state}' -> INACTIVE")
+            elif phone:
+                # PRIORIDADE 2: Se tem número mas estado não é explícito, verificar mais
+                # Se tem número E não está explicitamente desconectado, provavelmente está conectada
+                has_qrcode = bool(api_inst.get('qrcode'))
+                if has_qrcode:
+                    # Tem QR code = está desconectada (precisa escanear)
+                    db_instance.status = "inactive"
+                    db_instance.phone_number = str(phone).strip()  # Manter número histórico
+                    logger.info(f"⚠️ {instance_name}: Tem número {phone} mas tem QR code -> INACTIVE")
+                else:
+                    # Tem número e não tem QR code = provavelmente conectada
+                    db_instance.status = "active"
+                    db_instance.phone_number = str(phone).strip()
+                    logger.info(f"✅ {instance_name}: Tem número {phone} sem QR code -> ACTIVE")
             elif state == 'unknown' or not state:
-                # Estado unknown sem número = provavelmente desconectada
-                # Mas verificar se tem QR code (se tem, está desconectada)
+                # Estado unknown sem número = verificar QR code
                 has_qrcode = bool(api_inst.get('qrcode'))
                 if has_qrcode:
                     db_instance.status = "inactive"
