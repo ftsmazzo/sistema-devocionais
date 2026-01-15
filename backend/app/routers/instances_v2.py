@@ -495,10 +495,23 @@ async def configure_webhook(
         webhook_url = os.getenv("WEBHOOK_URL") or os.getenv("EVOLUTION_WEBHOOK_URL")
         
         if not webhook_url:
-            # Construir URL baseado no host atual (se disponível)
-            # Em produção, isso deve vir do .env
-            logger.warning("WEBHOOK_URL não configurado no .env. Usando URL padrão.")
-            webhook_url = "http://localhost:8000/webhook/evolution/message-status"
+            # Construir URL baseado na URL da API
+            # Se a API está em https://api.exemplo.com, o webhook será https://api.exemplo.com/api/webhook/evolution/message-status
+            api_url = settings.EVOLUTION_API_URL
+            if api_url:
+                # Extrair domínio base (sem /instance, etc)
+                if "://" in api_url:
+                    parts = api_url.split("://")
+                    domain = parts[1].split("/")[0]  # Pega apenas o domínio
+                    protocol = parts[0]
+                    # Construir URL do webhook (assumindo que está no mesmo servidor)
+                    webhook_url = f"{protocol}://{domain}/api/webhook/evolution/message-status"
+                else:
+                    webhook_url = f"{api_url}/api/webhook/evolution/message-status"
+            else:
+                # Fallback
+                logger.warning("WEBHOOK_URL não configurado no .env e não foi possível construir automaticamente. Usando URL padrão.")
+                webhook_url = "http://localhost:8000/api/webhook/evolution/message-status"
         
         # Eventos que queremos receber
         events = [
