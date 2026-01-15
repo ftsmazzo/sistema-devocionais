@@ -1,0 +1,80 @@
+import { Pool, PoolClient } from 'pg';
+import bcrypt from 'bcryptjs';
+import dotenv from 'dotenv';
+
+dotenv.config();
+
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+});
+
+export async function initializeDatabase() {
+  const client = await pool.connect();
+  
+  try {
+    // Criar tabela de usuários
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        email VARCHAR(255) UNIQUE NOT NULL,
+        password VARCHAR(255) NOT NULL,
+        name VARCHAR(255) NOT NULL,
+        role VARCHAR(50) DEFAULT 'admin',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // Criar tabela de instâncias
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS instances (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        api_key VARCHAR(255) NOT NULL,
+        api_url VARCHAR(500) NOT NULL,
+        instance_name VARCHAR(255) NOT NULL,
+        status VARCHAR(50) DEFAULT 'disconnected',
+        qr_code TEXT,
+        last_connection TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // Criar índice para busca
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_instances_status ON instances(status)
+    `);
+
+    // Criar usuário admin padrão se não existir
+    const adminCheck = await client.query('SELECT id FROM users WHERE email = $1', [
+      process.env.ADMIN_EMAIL || 'admin@example.com'
+    ]);
+
+    if (adminCheck.rows.length === 0) {
+      const hashedPassword = await bcrypt.hash(
+        process.env.ADMIN_PASSWORD || 'admin123',
+        10
+      );
+      
+      await client.query(
+        'INSERT INTO users (email, password, name, role) VALUES ($1, $2, $3, $4)',
+        [
+          process.env.ADMIN_EMAIL || 'admin@example.com',
+          hashedPassword,
+          'Administrador',
+          'admin'
+        ]
+      );
+      console.log('👤 Usuário admin criado');
+    }
+
+    console.log('✅ Tabelas criadas/verificadas');
+  } finally {
+    client.release();
+  }
+}
+
+export { pool };
+export default pool;

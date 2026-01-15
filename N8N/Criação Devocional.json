@@ -28,30 +28,11 @@
       "type": "n8n-nodes-base.dateTimeTool",
       "typeVersion": 2,
       "position": [
-        1312,
-        112
+        1296,
+        96
       ],
       "id": "36dc4387-4a92-48bb-869f-a4c3a6ba19b1",
       "name": "Data"
-    },
-    {
-      "parameters": {
-        "options": {}
-      },
-      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
-      "typeVersion": 1,
-      "position": [
-        992,
-        96
-      ],
-      "id": "731e6d63-9b53-4012-9464-82bebb31ca27",
-      "name": "Google Gemini Chat Model",
-      "credentials": {
-        "googlePalmApi": {
-          "id": "aySuiq5yavDaRHby",
-          "name": "Devocional"
-        }
-      }
     },
     {
       "parameters": {
@@ -74,8 +55,8 @@
       "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
       "typeVersion": 1,
       "position": [
-        496,
-        80
+        432,
+        64
       ],
       "id": "fa892dc2-c72a-4b67-a9e2-3f6b1a94ae08",
       "name": "Gemini Analista",
@@ -171,7 +152,26 @@
         -128
       ],
       "id": "38f50475-2542-42dc-ad21-71dbfadfcc94",
-      "name": "Code in JavaScript"
+      "name": "Formata Saida"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        992,
+        96
+      ],
+      "id": "731e6d63-9b53-4012-9464-82bebb31ca27",
+      "name": "Gemini Criador",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "aySuiq5yavDaRHby",
+          "name": "Devocional"
+        }
+      }
     }
   ],
   "pinData": {},
@@ -193,17 +193,6 @@
           {
             "node": "Gerar Devocional",
             "type": "ai_tool",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Google Gemini Chat Model": {
-      "ai_languageModel": [
-        [
-          {
-            "node": "Gerar Devocional",
-            "type": "ai_languageModel",
             "index": 0
           }
         ]
@@ -235,7 +224,7 @@
       "main": [
         [
           {
-            "node": "Code in JavaScript",
+            "node": "Formata Saida",
             "type": "main",
             "index": 0
           }
@@ -264,12 +253,23 @@
         ]
       ]
     },
-    "Code in JavaScript": {
+    "Formata Saida": {
       "main": [
         [
           {
             "node": "Gerar Devocional",
             "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini Criador": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Gerar Devocional",
+            "type": "ai_languageModel",
             "index": 0
           }
         ]
@@ -280,7 +280,7 @@
   "settings": {
     "executionOrder": "v1"
   },
-  "versionId": "ad326b58-7e45-4427-bf98-a3be62379ec0",
+  "versionId": "4f9a7057-0682-44a7-8797-a1038068696e",
   "meta": {
     "templateCredsSetupCompleted": true,
     "instanceId": "f8cd840289dc44c3d827f2addf0c554765cb2bcf76dab1c5879f9cbf18361b8a"
