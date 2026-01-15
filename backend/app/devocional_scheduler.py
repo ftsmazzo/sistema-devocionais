@@ -80,7 +80,7 @@ def send_daily_devocional():
             # O modelo AgendamentoEnvio só armazena informações básicas do agendamento
             scheduled_time = now_brazil_naive()
             
-            # Tentar criar agendamento - se falhar por falta de coluna, tentar criar a coluna
+            # Tentar criar agendamento - se falhar por falta de coluna ou constraint, tentar corrigir
             try:
                 agendamento = AgendamentoEnvio(
                     devocional_id=devocional_id,
@@ -113,6 +113,32 @@ def send_daily_devocional():
                         logger.info(f"✅ Agendamento criado no banco de dados (devocional_id={devocional_id}, scheduled_for={scheduled_time})")
                     except Exception as create_error:
                         logger.error(f"❌ Erro ao criar coluna 'sent': {create_error}", exc_info=True)
+                        db.rollback()
+                        # Continuar mesmo sem agendamento (não bloquear envio)
+                        agendamento = None
+                        logger.warning(f"⚠️ Continuando envio sem registro de agendamento")
+                # Se o erro for por recipient_phone NOT NULL, tentar tornar nullable
+                elif "null value in column \"recipient_phone\"" in error_str or "recipient_phone.*not-null" in error_str.lower():
+                    logger.warning(f"⚠️ Campo 'recipient_phone' é NOT NULL mas agendamento geral não precisa. Tentando tornar nullable...")
+                    try:
+                        # Tentar tornar nullable via SQL direto
+                        from sqlalchemy import text
+                        db.execute(text("ALTER TABLE agendamento_envios ALTER COLUMN recipient_phone DROP NOT NULL"))
+                        db.commit()
+                        logger.info(f"✅ Campo 'recipient_phone' tornou-se nullable. Tentando criar agendamento novamente...")
+                        
+                        # Tentar novamente
+                        agendamento = AgendamentoEnvio(
+                            devocional_id=devocional_id,
+                            scheduled_for=scheduled_time,
+                            sent=False
+                        )
+                        db.add(agendamento)
+                        db.commit()
+                        logger.info(f"✅ Agendamento criado no banco de dados (devocional_id={devocional_id}, scheduled_for={scheduled_time})")
+                    except Exception as alter_error:
+                        logger.error(f"❌ Erro ao tornar recipient_phone nullable: {alter_error}", exc_info=True)
+                        logger.error(f"💡 Execute o script: database/migrate_agendamento_recipient_phone_nullable.sql")
                         db.rollback()
                         # Continuar mesmo sem agendamento (não bloquear envio)
                         agendamento = None

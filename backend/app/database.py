@@ -221,11 +221,22 @@ class AgendamentoEnvio(Base):
     
     # Relacionamento
     devocional_id = Column(Integer, nullable=True, index=True)  # FK para devocionais
+    contato_id = Column(Integer, nullable=True, index=True)  # FK para contatos (opcional - para agendamentos individuais)
     
     # Agendamento
     scheduled_for = Column(DateTime, nullable=False, index=True)  # Quando deve ser enviado
     sent = Column(Boolean, default=False, index=True)  # Se já foi enviado
     sent_at = Column(DateTime, nullable=True)  # Quando foi enviado
+    status = Column(String(20), default="pending", index=True)  # pending, sent, failed
+    
+    # Informações do destinatário (opcional - para agendamentos individuais)
+    recipient_phone = Column(String(20), nullable=True, index=True)  # Telefone (nullable para agendamentos gerais)
+    recipient_name = Column(String(100), nullable=True)  # Nome do destinatário
+    message_text = Column(Text, nullable=True)  # Texto da mensagem
+    instance_name = Column(String(100), nullable=True)  # Instância que deve enviar
+    agendamento_type = Column(String(20), default="automatico")  # automatico, manual
+    error_message = Column(Text, nullable=True)  # Mensagem de erro se falhar
+    metadata_json = Column(Text, nullable=True)  # Metadados extras em JSON
     
     # Timestamps
     created_at = Column(DateTime, default=now_brazil)
