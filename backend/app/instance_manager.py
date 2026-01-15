@@ -137,13 +137,27 @@ class InstanceManager:
             EvolutionInstance disponível ou None
         """
         # Primeiro, tentar verificar saúde de instâncias que não foram verificadas recentemente
+        # IMPORTANTE: Verificar especialmente instâncias INACTIVE, pois podem estar funcionando
         now = now_brazil()
         for inst in self.instances:
             if inst.enabled:
-                # Se nunca foi verificada ou foi há mais de 5 minutos, verificar agora
-                if not inst.last_check or (now - inst.last_check).total_seconds() > 300:
-                    logger.info(f"Verificando saúde da instância {inst.name}...")
+                # Se nunca foi verificada, foi há mais de 5 minutos, ou está INACTIVE, verificar agora
+                should_check = (
+                    not inst.last_check 
+                    or (now - inst.last_check).total_seconds() > 300
+                    or inst.status == InstanceStatus.INACTIVE
+                )
+                if should_check:
+                    logger.info(f"🔍 Verificando saúde da instância {inst.name} (status atual: {inst.status.value})...")
+                    was_inactive = inst.status == InstanceStatus.INACTIVE
                     self.check_instance_health(inst)
+                    if was_inactive and inst.status == InstanceStatus.ACTIVE:
+                        logger.info(f"✅ Instância {inst.name} estava INACTIVE e agora está ACTIVE!")
+        
+        # Log detalhado de TODAS as instâncias antes de filtrar
+        logger.info(f"🔍 Todas as instâncias carregadas ({len(self.instances)}):")
+        for inst in self.instances:
+            logger.info(f"   - {inst.name}: enabled={inst.enabled}, status={inst.status.value}, today={inst.messages_sent_today}/{inst.max_messages_per_day}, hour={inst.messages_sent_this_hour}/{inst.max_messages_per_hour}")
         
         # Para distribuição por ID, considerar TODAS as instâncias habilitadas (não apenas ACTIVE)
         # Isso garante que a distribuição funcione mesmo se algumas instâncias estiverem INACTIVE
@@ -157,6 +171,28 @@ class InstanceManager:
                 and inst.messages_sent_today < inst.max_messages_per_day
                 and inst.messages_sent_this_hour < inst.max_messages_per_hour
             ]
+            
+            # Log detalhado das instâncias excluídas e motivo
+            excluded = [
+                inst for inst in self.instances
+                if inst not in available
+            ]
+            if excluded:
+                logger.warning(f"⚠️ Instâncias excluídas da distribuição ({len(excluded)}):")
+                for inst in excluded:
+                    reasons = []
+                    if not inst.enabled:
+                        reasons.append("disabled")
+                    if inst.status == InstanceStatus.ERROR:
+                        reasons.append(f"status=ERROR")
+                    if inst.status == InstanceStatus.BLOCKED:
+                        reasons.append(f"status=BLOCKED")
+                    if inst.messages_sent_today >= inst.max_messages_per_day:
+                        reasons.append(f"daily_limit ({inst.messages_sent_today}/{inst.max_messages_per_day})")
+                    if inst.messages_sent_this_hour >= inst.max_messages_per_hour:
+                        reasons.append(f"hourly_limit ({inst.messages_sent_this_hour}/{inst.max_messages_per_hour})")
+                    logger.warning(f"   - {inst.name}: {', '.join(reasons) if reasons else 'desconhecido'}")
+            
             logger.info(f"📊 Distribuição por ID: {len(available)} instâncias disponíveis de {len(self.instances)} total. Status: {[(i.name, i.status.value) for i in available]}")
         else:
             # Para outras estratégias, priorizar apenas ACTIVE
@@ -171,7 +207,7 @@ class InstanceManager:
             
             # Se não houver instâncias ACTIVE, tentar usar INACTIVE (pode estar apenas não verificada)
             if not available:
-                logger.warning("Nenhuma instância ACTIVE disponível, tentando instâncias INACTIVE...")
+                logger.warning("⚠️ Nenhuma instância ACTIVE disponível, tentando instâncias INACTIVE/UNKNOWN...")
                 available = [
                     inst for inst in self.instances
                     if inst.enabled 
@@ -180,9 +216,47 @@ class InstanceManager:
                     and inst.messages_sent_today < inst.max_messages_per_day
                     and inst.messages_sent_this_hour < inst.max_messages_per_hour
                 ]
+                if available:
+                    logger.info(f"✅ Encontradas {len(available)} instâncias INACTIVE/UNKNOWN que podem ser usadas: {[i.name for i in available]}")
         
         if not available:
-            logger.warning(f"Nenhuma instância disponível. Status das instâncias: {[(i.name, i.status.value, i.last_error) for i in self.instances]}")
+            logger.error(f"❌ Nenhuma instância disponível!")
+            logger.error(f"📋 Status detalhado de TODAS as instâncias:")
+            for inst in self.instances:
+                reasons = []
+                if not inst.enabled:
+                    reasons.append("❌ DISABLED")
+                if inst.status == InstanceStatus.ERROR:
+                    reasons.append(f"❌ ERROR: {inst.last_error}")
+                if inst.status == InstanceStatus.BLOCKED:
+                    reasons.append("❌ BLOCKED")
+                if inst.messages_sent_today >= inst.max_messages_per_day:
+                    reasons.append(f"⚠️ Daily limit: {inst.messages_sent_today}/{inst.max_messages_per_day}")
+                if inst.messages_sent_this_hour >= inst.max_messages_per_hour:
+                    reasons.append(f"⚠️ Hourly limit: {inst.messages_sent_this_hour}/{inst.max_messages_per_hour}")
+                if inst.status == InstanceStatus.INACTIVE:
+                    reasons.append("⚠️ INACTIVE (pode precisar de health check)")
+                if inst.status == InstanceStatus.ACTIVE:
+                    reasons.append("✅ ACTIVE mas excluída por outro motivo")
+                
+                status_msg = f"   - {inst.name}: status={inst.status.value}"
+                if reasons:
+                    status_msg += f" | {', '.join(reasons)}"
+                logger.error(status_msg)
+            
+            # Tentar uma última verificação de health check em instâncias INACTIVE antes de desistir
+            logger.warning("🔄 Tentando verificar health de instâncias INACTIVE uma última vez...")
+            for inst in self.instances:
+                if inst.enabled and inst.status == InstanceStatus.INACTIVE:
+                    logger.info(f"   Verificando {inst.name}...")
+                    self.check_instance_health(inst)
+                    if inst.status == InstanceStatus.ACTIVE:
+                        logger.info(f"   ✅ {inst.name} agora está ACTIVE!")
+                        # Tentar novamente com esta instância
+                        if inst.messages_sent_today < inst.max_messages_per_day and inst.messages_sent_this_hour < inst.max_messages_per_hour:
+                            logger.info(f"   ✅ {inst.name} pode ser usada agora!")
+                            return inst
+            
             return None
         
         # Aplicar estratégia
