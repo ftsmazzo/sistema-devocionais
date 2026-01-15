@@ -540,6 +540,59 @@ class DevocionalServiceV2:
             
             logger.info(f"Processando contato {i}/{len(contacts)}: {name or phone} (ID: {contact_id})")
             
+            # Verificar se já recebeu hoje ANTES de enviar
+            try:
+                from app.database import SessionLocal, DevocionalContato, DevocionalEnvio
+                from app.timezone_utils import now_brazil_naive
+                from datetime import date
+                
+                db_check = SessionLocal()
+                try:
+                    # Verificar se já recebeu hoje usando last_sent ou devocional_envios
+                    db_contact = db_check.query(DevocionalContato).filter(
+                        DevocionalContato.phone == phone
+                    ).first()
+                    
+                    already_sent_today = False
+                    if db_contact and db_contact.last_sent:
+                        # Verificar se last_sent é hoje
+                        last_sent_date = db_contact.last_sent.date() if hasattr(db_contact.last_sent, 'date') else db_contact.last_sent
+                        today = now_brazil_naive().date()
+                        if last_sent_date == today:
+                            already_sent_today = True
+                            logger.info(f"⏭️ Contato {phone} já recebeu hoje (last_sent: {db_contact.last_sent}). Pulando...")
+                    
+                    # Se não encontrou pelo last_sent, verificar na tabela de envios
+                    if not already_sent_today:
+                        today_start = now_brazil_naive().replace(hour=0, minute=0, second=0, microsecond=0)
+                        today_end = now_brazil_naive().replace(hour=23, minute=59, second=59, microsecond=999999)
+                        
+                        envio_today = db_check.query(DevocionalEnvio).filter(
+                            DevocionalEnvio.recipient_phone == phone,
+                            DevocionalEnvio.sent_at >= today_start,
+                            DevocionalEnvio.sent_at <= today_end,
+                            DevocionalEnvio.status.in_(["sent", "delivered", "read", "pending"])
+                        ).first()
+                        
+                        if envio_today:
+                            already_sent_today = True
+                            logger.info(f"⏭️ Contato {phone} já recebeu hoje (envio encontrado às {envio_today.sent_at}). Pulando...")
+                    
+                    if already_sent_today:
+                        results.append(MessageResult(
+                            success=False,
+                            status=MessageStatus.FAILED,
+                            error="Já recebeu mensagem hoje",
+                            instance_name=None
+                        ))
+                        db_check.close()
+                        continue
+                finally:
+                    db_check.close()
+            except Exception as e:
+                logger.warning(f"Erro ao verificar se já recebeu hoje: {e}")
+                # Continuar mesmo com erro (não bloquear envio)
+            
             # Verificar consentimento ANTES de enviar
             try:
                 from app.consent_service import ConsentService
@@ -589,7 +642,10 @@ class DevocionalServiceV2:
                 logger.warning(f"⚠️ Contato {phone} não tem ID, usando estratégia padrão: {self.distribution_strategy}")
             
             if not instance:
-                logger.warning("Nenhuma instância disponível. Parando envio.")
+                logger.error(f"❌ Nenhuma instância disponível para contato {i}/{len(contacts)} ({phone}). Parando envio.")
+                logger.error(f"📊 Status das instâncias:")
+                for inst in self.instance_manager.instances:
+                    logger.error(f"   - {inst.name}: enabled={inst.enabled}, status={inst.status}, messages_today={inst.messages_sent_today}/{inst.max_messages_per_day}, messages_hour={inst.messages_sent_this_hour}/{inst.max_messages_per_hour}")
                 result = MessageResult(
                     success=False,
                     status=MessageStatus.BLOCKED,
@@ -741,16 +797,32 @@ class DevocionalServiceV2:
             if i < len(contacts) and delay_time > 0:
                 if self.shield:
                     randomized_delay = self.shield.get_randomized_delay(delay_time)
-                    logger.debug(f"Aguardando {randomized_delay:.2f}s (randomizado de {delay_time}s) antes da próxima mensagem...")
+                    logger.info(f"⏱️ Aguardando {randomized_delay:.2f}s (randomizado de {delay_time}s) antes da próxima mensagem...")
                     time.sleep(randomized_delay)
                 else:
-                    logger.debug(f"Aguardando {delay_time}s antes da próxima mensagem...")
+                    logger.info(f"⏱️ Aguardando {delay_time}s antes da próxima mensagem...")
                     time.sleep(delay_time)
         
-        # Log resumo
+        # Log resumo detalhado
         sent = sum(1 for r in results if r.success)
         failed = sum(1 for r in results if not r.success)
-        logger.info(f"Envio em massa concluído: {sent} enviadas, {failed} falharam")
+        skipped_today = sum(1 for r in results if r.error and "Já recebeu mensagem hoje" in r.error)
+        skipped_consent = sum(1 for r in results if r.error and ("consentimento" in r.error.lower() or "consent" in r.error.lower()))
+        skipped_engagement = sum(1 for r in results if r.error and "engajamento" in r.error.lower())
+        blocked = sum(1 for r in results if r.status == MessageStatus.BLOCKED)
+        
+        logger.info(f"📊 Envio em massa concluído:")
+        logger.info(f"   ✅ Enviadas com sucesso: {sent}")
+        logger.info(f"   ❌ Falharam: {failed}")
+        logger.info(f"   ⏭️ Pulados (já receberam hoje): {skipped_today}")
+        logger.info(f"   ⏭️ Pulados (consentimento): {skipped_consent}")
+        logger.info(f"   ⏭️ Pulados (engajamento): {skipped_engagement}")
+        logger.info(f"   🚫 Bloqueados: {blocked}")
+        logger.info(f"   📈 Total processado: {len(results)}/{len(contacts)}")
+        
+        if len(results) < len(contacts):
+            logger.warning(f"⚠️ ATENÇÃO: Envio parou antes de processar todos os contatos!")
+            logger.warning(f"   Processados: {len(results)}, Total: {len(contacts)}, Faltam: {len(contacts) - len(results)}")
         
         return results
     
