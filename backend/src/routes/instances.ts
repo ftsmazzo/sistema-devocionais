@@ -565,6 +565,8 @@ async function configureWebhook(instance: any, instanceId: number) {
       }
     );
 
+    console.log(`   Resposta da Evolution API:`, JSON.stringify(webhookResponse.data, null, 2));
+
     if (webhookResponse.status === 200 || webhookResponse.status === 201) {
       console.log(`   ✅ Webhook configurado com sucesso`);
       
@@ -580,17 +582,12 @@ async function configureWebhook(instance: any, instanceId: number) {
         [
           instanceId,
           webhookUrl,
-          [
-            'APPLICATION_STARTUP',
-            'QRCODE_UPDATED',
-            'MESSAGES_UPSERT',
-            'MESSAGES_UPDATE',
-            'CONNECTION_UPDATE',
-          ],
+          webhookPayload.webhook.events,
         ]
       );
     } else {
-      console.log(`   ⚠️ Erro ao configurar webhook:`, webhookResponse.data);
+      console.error(`   ❌ Erro ao configurar webhook (${webhookResponse.status}):`, webhookResponse.data);
+      // Não falhar a conexão se o webhook falhar, mas logar o erro
     }
   } catch (error: any) {
     console.error(`   ❌ Erro ao configurar webhook:`, error.message);
