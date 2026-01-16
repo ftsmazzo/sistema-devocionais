@@ -23,16 +23,31 @@ router.get('/rules', async (req: AuthRequest, res) => {
         i.instance_name as instance_identifier
       FROM blindage_rules br
       LEFT JOIN instances i ON br.instance_id = i.id
-      WHERE 1=1
+      WHERE br.enabled = TRUE
+        AND (
+          br.instance_id IS NULL 
+          OR br.instance_id = $1
+        )
     `;
     const params: any[] = [];
 
     if (instanceId) {
-      query += ` AND br.instance_id = $1`;
       params.push(instanceId);
+    } else {
+      // Se não há instanceId, buscar apenas regras globais
+      query = `
+        SELECT 
+          br.*,
+          i.name as instance_name,
+          i.instance_name as instance_identifier
+        FROM blindage_rules br
+        LEFT JOIN instances i ON br.instance_id = i.id
+        WHERE br.enabled = TRUE
+          AND br.instance_id IS NULL
+      `;
     }
 
-    query += ` ORDER BY br.instance_id, br.rule_type, br.id`;
+    query += ` ORDER BY br.instance_id NULLS FIRST, br.rule_type, br.id`;
 
     const result = await pool.query(query, params);
 
