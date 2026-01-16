@@ -11,7 +11,6 @@ import {
   Power,
   PowerOff,
   RefreshCw,
-  LogOut,
   MessageSquare,
   CheckCircle2,
   XCircle,
@@ -44,7 +43,6 @@ export default function Instances() {
   });
   const [refreshing, setRefreshing] = useState<number | null>(null);
   const navigate = useNavigate();
-  const { user, logout } = useAuthStore();
 
   useEffect(() => {
     if (!user) {
@@ -170,28 +168,9 @@ export default function Instances() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
-      {/* Header */}
-      <header className="bg-white shadow-sm border-b">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-          <div className="flex justify-between items-center">
-            <div className="flex items-center gap-3">
-              <MessageSquare className="h-8 w-8 text-primary" />
-              <h1 className="text-2xl font-bold">Evolution Manager</h1>
-            </div>
-            <div className="flex items-center gap-4">
-              <span className="text-sm text-muted-foreground">{user?.name}</span>
-              <Button variant="outline" size="sm" onClick={logout}>
-                <LogOut className="h-4 w-4 mr-2" />
-                Sair
-              </Button>
-            </div>
-          </div>
-        </div>
-      </header>
-
+    <div>
       {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <div>
         <div className="flex justify-between items-center mb-6">
           <div>
             <h2 className="text-3xl font-bold text-gray-900">Instâncias</h2>
