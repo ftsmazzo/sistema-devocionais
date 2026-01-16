@@ -28,29 +28,30 @@ export interface BlindageResult {
  */
 export async function getActiveRules(instanceId?: number): Promise<BlindageRule[]> {
   try {
-    // Buscar regras globais (instance_id IS NULL) e regras específicas da instância
-    let query = `
-      SELECT * FROM blindage_rules 
-      WHERE enabled = TRUE
-        AND (
-          instance_id IS NULL 
-          OR instance_id = $1
-        )
-    `;
+    let query: string;
     const params: any[] = [];
 
     if (instanceId) {
-      params.push(instanceId);
-    } else {
-      // Se não há instanceId, buscar apenas regras globais
+      // Buscar regras globais (instance_id IS NULL) e regras específicas da instância
       query = `
         SELECT * FROM blindage_rules 
         WHERE enabled = TRUE
-          AND instance_id IS NULL
+          AND (
+            instance_id IS NULL 
+            OR instance_id = $1
+          )
+        ORDER BY instance_id NULLS FIRST, rule_type, id
+      `;
+      params.push(instanceId);
+    } else {
+      // Se não há instanceId, buscar TODAS as regras (globais e de todas as instâncias)
+      // Isso permite que o sistema funcione mesmo sem instanceId específico
+      query = `
+        SELECT * FROM blindage_rules 
+        WHERE enabled = TRUE
+        ORDER BY instance_id NULLS FIRST, rule_type, id
       `;
     }
-
-    query += ` ORDER BY rule_type, id`;
 
     const result = await pool.query(query, params);
     return result.rows;
