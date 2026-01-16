@@ -135,36 +135,25 @@ router.post('/:id/connect', async (req, res) => {
       qrcode: true,
     };
 
-    // Tentar primeiro com apikey no header
-    let evolutionResponse;
-    try {
-      evolutionResponse = await axios.post(
-        evolutionUrl,
-        requestBody,
-        {
-          headers: {
-            'apikey': instance.api_key,
-            'Content-Type': 'application/json',
-          },
-        }
-      );
-    } catch (error: any) {
-      // Se falhar com apikey, tentar com Authorization Bearer
-      if (error.response?.status === 400 || error.response?.status === 401) {
-        console.log('   Tentando com Authorization Bearer...');
-        evolutionResponse = await axios.post(
-          evolutionUrl,
-          requestBody,
-          {
-            headers: {
-              'Authorization': `Bearer ${instance.api_key}`,
-              'Content-Type': 'application/json',
-            },
-          }
-        );
-      } else {
-        throw error;
+    // Evolution API geralmente usa 'apikey' no header (não Authorization Bearer)
+    // O erro "Invalid integration" pode significar que a API key está incorreta
+    // ou que precisa de campos adicionais no body
+    const evolutionResponse = await axios.post(
+      evolutionUrl,
+      requestBody,
+      {
+        headers: {
+          'apikey': instance.api_key,
+          'Content-Type': 'application/json',
+        },
+        validateStatus: () => true, // Não lançar erro automaticamente
       }
+    );
+
+    // Verificar se a resposta foi bem-sucedida
+    if (evolutionResponse.status >= 400) {
+      console.error(`   Erro da Evolution API (${evolutionResponse.status}):`, evolutionResponse.data);
+      throw new Error(`Evolution API retornou erro: ${JSON.stringify(evolutionResponse.data)}`);
     }
 
     console.log(`✅ Resposta da Evolution API:`, JSON.stringify(evolutionResponse.data, null, 2));

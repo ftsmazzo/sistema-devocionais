@@ -24,7 +24,9 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
+    // Só redireciona para login se o erro 401 vier do nosso backend (não de APIs externas)
+    // APIs externas podem retornar 401, mas não devemos deslogar o usuário por isso
+    if (error.response?.status === 401 && error.config?.url?.startsWith('/api/auth')) {
       localStorage.removeItem('token');
       localStorage.removeItem('user');
       window.location.href = '/login';
