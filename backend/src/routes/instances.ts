@@ -173,60 +173,33 @@ router.post('/:id/connect', async (req, res) => {
     }
 
     // Criar instância no Evolution API
-    // Tentar diferentes formatos de body
-    const requestBodies = [
-      // Formato 1: padrão
-      {
-        instanceName: instance.instance_name,
-        qrcode: true,
-      },
-      // Formato 2: com token no body
-      {
-        instanceName: instance.instance_name,
-        token: instance.api_key,
-        qrcode: true,
-      },
-      // Formato 3: apenas instanceName
-      {
-        instanceName: instance.instance_name,
-      },
-    ];
+    // Segundo a documentação: https://www.postman.com/agenciadgcode/evolution-api/collection/nm0wqgt/evolution-api-v2-3
+    // O campo 'integration' é obrigatório: WHATSAPP-BAILEYS | WHATSAPP-BUSINESS | EVOLUTION
+    const requestBody = {
+      instanceName: instance.instance_name,
+      qrcode: true,
+      integration: 'WHATSAPP-BAILEYS', // Padrão da Evolution API
+    };
 
-    let evolutionResponse;
-    let lastError;
+    console.log(`   Body:`, JSON.stringify(requestBody));
 
-    for (const requestBody of requestBodies) {
-      try {
-        console.log(`   Tentando formato:`, JSON.stringify(requestBody));
-        evolutionResponse = await axios.post(
-          evolutionUrl,
-          requestBody,
-          {
-            headers: {
-              'apikey': instance.api_key,
-              'Content-Type': 'application/json',
-            },
-            validateStatus: () => true,
-          }
-        );
-
-        if (evolutionResponse.status < 400) {
-          console.log(`   ✅ Sucesso com formato:`, JSON.stringify(requestBody));
-          break;
-        } else {
-          console.log(`   ❌ Erro ${evolutionResponse.status}:`, evolutionResponse.data);
-          lastError = evolutionResponse.data;
-        }
-      } catch (error: any) {
-        console.log(`   ❌ Erro ao tentar formato:`, error.message);
-        lastError = error.response?.data || error.message;
+    // Evolution API requer o campo 'integration' no body
+    const evolutionResponse = await axios.post(
+      evolutionUrl,
+      requestBody,
+      {
+        headers: {
+          'apikey': instance.api_key,
+          'Content-Type': 'application/json',
+        },
+        validateStatus: () => true, // Não lançar erro automaticamente
       }
-    }
+    );
 
-    // Verificar se alguma tentativa foi bem-sucedida
-    if (!evolutionResponse || evolutionResponse.status >= 400) {
-      console.error(`   ❌ Todas as tentativas falharam. Último erro:`, lastError);
-      throw new Error(`Evolution API retornou erro: ${JSON.stringify(lastError)}`);
+    // Verificar se a resposta foi bem-sucedida
+    if (evolutionResponse.status >= 400) {
+      console.error(`   ❌ Erro da Evolution API (${evolutionResponse.status}):`, evolutionResponse.data);
+      throw new Error(`Evolution API retornou erro: ${JSON.stringify(evolutionResponse.data)}`);
     }
 
     console.log(`✅ Resposta da Evolution API:`, JSON.stringify(evolutionResponse.data, null, 2));
