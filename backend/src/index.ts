@@ -36,7 +36,13 @@ app.use(express.urlencoded({ extended: true }));
 // Log de todas as requisições para debug
 app.use((req, res, next) => {
   console.log(`📥 ${req.method} ${req.path} - ${new Date().toISOString()}`);
+  console.log(`   Headers:`, JSON.stringify(req.headers, null, 2));
   next();
+});
+
+// Rota de teste
+app.get('/api/test', (req, res) => {
+  res.json({ message: 'Backend está funcionando!', timestamp: new Date().toISOString() });
 });
 
 // Routes
