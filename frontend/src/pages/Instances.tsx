@@ -21,10 +21,9 @@ import {
 interface Instance {
   id: number;
   name: string;
-  api_key: string;
-  api_url: string;
   instance_name: string;
   status: 'connected' | 'disconnected' | 'connecting';
+  phone_number?: string;
   qr_code?: string;
   last_connection?: string;
   created_at: string;
@@ -40,8 +39,6 @@ export default function Instances() {
   const [editingInstance, setEditingInstance] = useState<Instance | null>(null);
   const [formData, setFormData] = useState({
     name: '',
-    api_key: '',
-    api_url: '',
     instance_name: '',
   });
   const [refreshing, setRefreshing] = useState<number | null>(null);
@@ -77,7 +74,7 @@ export default function Instances() {
       }
       setShowModal(false);
       setEditingInstance(null);
-      setFormData({ name: '', api_key: '', api_url: '', instance_name: '' });
+      setFormData({ name: '', instance_name: '' });
       loadInstances();
     } catch (error: any) {
       alert(error.response?.data?.error || 'Erro ao salvar instância');
@@ -216,103 +213,136 @@ export default function Instances() {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {instances.map((instance) => (
-              <Card key={instance.id} className="hover:shadow-lg transition-shadow">
-                <CardHeader>
+              <Card key={instance.id} className="hover:shadow-xl transition-all duration-300 border-2 hover:border-primary/20 bg-gradient-to-br from-white to-gray-50/50">
+                <CardHeader className="pb-3">
                   <div className="flex justify-between items-start">
-                    <div>
-                      <CardTitle className="text-xl">{instance.name}</CardTitle>
-                      <CardDescription className="mt-1">{instance.instance_name}</CardDescription>
+                    <div className="flex-1">
+                      <CardTitle className="text-xl font-bold text-gray-900 mb-1">
+                        {instance.name}
+                      </CardTitle>
+                      <CardDescription className="text-xs font-mono text-gray-500">
+                        {instance.instance_name}
+                      </CardDescription>
                     </div>
-                    {getStatusIcon(instance.status)}
+                    <div className="ml-2">
+                      {getStatusIcon(instance.status)}
+                    </div>
                   </div>
                 </CardHeader>
-                <CardContent>
-                  <div className="space-y-3">
-                    <div>
-                      <p className="text-xs text-muted-foreground">Status</p>
-                      <p className="font-medium">{getStatusText(instance.status)}</p>
+                <CardContent className="pt-0">
+                  <div className="space-y-4">
+                    {/* Status Badge */}
+                    <div className="flex items-center justify-between p-2 bg-gray-50 rounded-lg">
+                      <span className="text-xs font-medium text-gray-600">Status</span>
+                      <span className={`text-xs font-semibold px-2 py-1 rounded-full ${
+                        instance.status === 'connected' 
+                          ? 'bg-green-100 text-green-700' 
+                          : instance.status === 'connecting'
+                          ? 'bg-yellow-100 text-yellow-700'
+                          : 'bg-gray-100 text-gray-700'
+                      }`}>
+                        {getStatusText(instance.status)}
+                      </span>
                     </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">API URL</p>
-                      <p className="text-sm truncate">{instance.api_url}</p>
-                    </div>
-                    {instance.last_connection && (
-                      <div>
-                        <p className="text-xs text-muted-foreground">Última Conexão</p>
-                        <p className="text-sm">
-                          {new Date(instance.last_connection).toLocaleString('pt-BR')}
-                        </p>
+
+                    {/* Número de Telefone */}
+                    {instance.phone_number ? (
+                      <div className="flex items-center gap-2 p-3 bg-blue-50 rounded-lg border border-blue-100">
+                        <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+                        </svg>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs text-blue-600 font-medium">Telefone</p>
+                          <p className="text-sm font-semibold text-blue-900 truncate">
+                            {instance.phone_number}
+                          </p>
+                        </div>
+                      </div>
+                    ) : instance.status === 'connected' ? (
+                      <div className="p-3 bg-gray-50 rounded-lg border border-gray-200">
+                        <p className="text-xs text-gray-500">Número não disponível</p>
+                      </div>
+                    ) : (
+                      <div className="p-3 bg-yellow-50 rounded-lg border border-yellow-200">
+                        <p className="text-xs text-yellow-700">Conecte para ver o número</p>
                       </div>
                     )}
-                    <div className="flex gap-2 pt-2">
-                      {instance.status === 'disconnected' ? (
-                        <Button
-                          size="sm"
-                          variant="default"
-                          onClick={() => handleConnect(instance.id)}
-                          disabled={refreshing === instance.id}
-                          className="flex-1"
-                        >
-                          {refreshing === instance.id ? (
-                            <RefreshCw className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <>
-                              <Power className="h-4 w-4 mr-2" />
-                              Conectar
-                            </>
-                          )}
-                        </Button>
-                      ) : (
+                    {/* Botões de Ação */}
+                    <div className="flex flex-col gap-2 pt-2 border-t border-gray-200">
+                      <div className="flex gap-2">
+                        {instance.status === 'disconnected' ? (
+                          <Button
+                            size="sm"
+                            variant="default"
+                            onClick={() => handleConnect(instance.id)}
+                            disabled={refreshing === instance.id}
+                            className="flex-1 bg-green-600 hover:bg-green-700"
+                          >
+                            {refreshing === instance.id ? (
+                              <RefreshCw className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <>
+                                <Power className="h-4 w-4 mr-2" />
+                                Conectar
+                              </>
+                            )}
+                          </Button>
+                        ) : (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleDisconnect(instance.id)}
+                            disabled={refreshing === instance.id}
+                            className="flex-1 border-red-300 text-red-700 hover:bg-red-50"
+                          >
+                            {refreshing === instance.id ? (
+                              <RefreshCw className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <>
+                                <PowerOff className="h-4 w-4 mr-2" />
+                                Desconectar
+                              </>
+                            )}
+                          </Button>
+                        )}
                         <Button
                           size="sm"
                           variant="outline"
-                          onClick={() => handleDisconnect(instance.id)}
+                          onClick={() => handleCheckStatus(instance.id)}
                           disabled={refreshing === instance.id}
+                          title="Atualizar status"
+                          className="px-3"
+                        >
+                          <RefreshCw
+                            className={`h-4 w-4 ${refreshing === instance.id ? 'animate-spin' : ''}`}
+                          />
+                        </Button>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            setEditingInstance(instance);
+                            setFormData({
+                              name: instance.name,
+                              instance_name: instance.instance_name,
+                            });
+                            setShowModal(true);
+                          }}
                           className="flex-1"
                         >
-                          {refreshing === instance.id ? (
-                            <RefreshCw className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <>
-                              <PowerOff className="h-4 w-4 mr-2" />
-                              Desconectar
-                            </>
-                          )}
+                          Editar
                         </Button>
-                      )}
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => handleCheckStatus(instance.id)}
-                        disabled={refreshing === instance.id}
-                      >
-                        <RefreshCw
-                          className={`h-4 w-4 ${refreshing === instance.id ? 'animate-spin' : ''}`}
-                        />
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => {
-                          setEditingInstance(instance);
-                          setFormData({
-                            name: instance.name,
-                            api_key: instance.api_key,
-                            api_url: instance.api_url,
-                            instance_name: instance.instance_name,
-                          });
-                          setShowModal(true);
-                        }}
-                      >
-                        Editar
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="destructive"
-                        onClick={() => handleDelete(instance.id)}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          onClick={() => handleDelete(instance.id)}
+                          className="px-3"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
                     </div>
                   </div>
                 </CardContent>
@@ -327,50 +357,50 @@ export default function Instances() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
           <Card className="w-full max-w-md">
             <CardHeader>
-              <CardTitle>{editingInstance ? 'Editar' : 'Nova'} Instância</CardTitle>
-              <CardDescription>Preencha os dados da instância do Evolution API</CardDescription>
+              <CardTitle className="text-2xl">{editingInstance ? 'Editar' : 'Nova'} Instância</CardTitle>
+              <CardDescription>
+                {editingInstance 
+                  ? 'Atualize os dados da instância' 
+                  : 'Crie uma nova instância do Evolution API. API Key e URL são configuradas automaticamente.'}
+              </CardDescription>
             </CardHeader>
             <CardContent>
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div>
-                  <label className="text-sm font-medium mb-2 block">Nome</label>
+                  <label className="text-sm font-medium mb-2 block text-gray-700">
+                    Nome da Instância
+                  </label>
                   <Input
                     value={formData.name}
                     onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFormData({ ...formData, name: e.target.value })}
-                    placeholder="Minha Instância"
+                    placeholder="Ex: Instância Principal"
                     required
+                    className="w-full"
                   />
+                  <p className="text-xs text-gray-500 mt-1">Nome amigável para identificar esta instância</p>
                 </div>
                 <div>
-                  <label className="text-sm font-medium mb-2 block">Instance Name</label>
+                  <label className="text-sm font-medium mb-2 block text-gray-700">
+                    Instance Name
+                  </label>
                   <Input
                     value={formData.instance_name}
                     onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                       setFormData({ ...formData, instance_name: e.target.value })
                     }
-                    placeholder="instance-01"
+                    placeholder="Ex: instance-01"
                     required
+                    className="w-full font-mono"
                   />
+                  <p className="text-xs text-gray-500 mt-1">Nome técnico usado na Evolution API (sem espaços)</p>
                 </div>
-                <div>
-                  <label className="text-sm font-medium mb-2 block">API URL</label>
-                  <Input
-                    value={formData.api_url}
-                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFormData({ ...formData, api_url: e.target.value })}
-                    placeholder="http://localhost:8080"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="text-sm font-medium mb-2 block">API Key</label>
-                  <Input
-                    type="password"
-                    value={formData.api_key}
-                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFormData({ ...formData, api_key: e.target.value })}
-                    placeholder="sua-api-key"
-                    required
-                  />
-                </div>
+                {!editingInstance && (
+                  <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                    <p className="text-xs text-blue-800">
+                      <strong>ℹ️ Nota:</strong> API Key e API URL serão obtidas automaticamente das variáveis de ambiente.
+                    </p>
+                  </div>
+                )}
                 <div className="flex gap-2 pt-4">
                   <Button
                     type="button"
@@ -379,7 +409,7 @@ export default function Instances() {
                     onClick={() => {
                       setShowModal(false);
                       setEditingInstance(null);
-                      setFormData({ name: '', api_key: '', api_url: '', instance_name: '' });
+                      setFormData({ name: '', instance_name: '' });
                     }}
                   >
                     Cancelar

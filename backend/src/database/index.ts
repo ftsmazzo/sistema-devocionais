@@ -35,11 +35,25 @@ export async function initializeDatabase() {
         api_url VARCHAR(500) NOT NULL,
         instance_name VARCHAR(255) NOT NULL,
         status VARCHAR(50) DEFAULT 'disconnected',
+        phone_number VARCHAR(20),
         qr_code TEXT,
         last_connection TIMESTAMP,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
+    `);
+
+    // Adicionar coluna phone_number se não existir (migração)
+    await client.query(`
+      DO $$ 
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns 
+          WHERE table_name = 'instances' AND column_name = 'phone_number'
+        ) THEN
+          ALTER TABLE instances ADD COLUMN phone_number VARCHAR(20);
+        END IF;
+      END $$;
     `);
 
     // Criar índice para busca

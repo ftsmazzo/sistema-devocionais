@@ -12,7 +12,9 @@ router.use(authenticateToken);
 router.get('/', async (req, res) => {
   try {
     const result = await pool.query(
-      'SELECT * FROM instances ORDER BY created_at DESC'
+      `SELECT id, name, instance_name, status, phone_number, qr_code, last_connection, created_at, updated_at
+       FROM instances 
+       ORDER BY created_at DESC`
     );
     res.json({ instances: result.rows });
   } catch (error) {
@@ -25,7 +27,11 @@ router.get('/', async (req, res) => {
 router.get('/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const result = await pool.query('SELECT * FROM instances WHERE id = $1', [id]);
+    const result = await pool.query(
+      `SELECT id, name, instance_name, status, phone_number, qr_code, last_connection, created_at, updated_at
+       FROM instances WHERE id = $1`,
+      [id]
+    );
 
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Instância não encontrada' });
@@ -41,21 +47,32 @@ router.get('/:id', async (req, res) => {
 // Criar nova instância
 router.post('/', async (req, res) => {
   try {
-    const { name, api_key, api_url, instance_name } = req.body;
+    const { name, instance_name } = req.body;
 
-    if (!name || !api_key || !api_url || !instance_name) {
+    if (!name || !instance_name) {
       return res.status(400).json({
-        error: 'Campos obrigatórios: name, api_key, api_url, instance_name',
+        error: 'Campos obrigatórios: name, instance_name',
+      });
+    }
+
+    // Usar variáveis de ambiente para API_KEY e API_URL
+    const api_key = process.env.EVOLUTION_API_KEY;
+    const api_url = process.env.EVOLUTION_API_URL;
+
+    if (!api_key || !api_url) {
+      return res.status(500).json({
+        error: 'EVOLUTION_API_KEY e EVOLUTION_API_URL devem estar configuradas nas variáveis de ambiente',
       });
     }
 
     const result = await pool.query(
       `INSERT INTO instances (name, api_key, api_url, instance_name, status)
        VALUES ($1, $2, $3, $4, 'disconnected')
-       RETURNING *`,
+       RETURNING id, name, instance_name, status, phone_number, qr_code, last_connection, created_at, updated_at`,
       [name, api_key, api_url, instance_name]
     );
 
+    // Não retornar api_key e api_url por segurança
     res.status(201).json({ instance: result.rows[0] });
   } catch (error: any) {
     console.error('Erro ao criar instância:', error);
@@ -70,18 +87,16 @@ router.post('/', async (req, res) => {
 router.put('/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, api_key, api_url, instance_name } = req.body;
+    const { name, instance_name } = req.body;
 
     const result = await pool.query(
       `UPDATE instances 
        SET name = COALESCE($1, name),
-           api_key = COALESCE($2, api_key),
-           api_url = COALESCE($3, api_url),
-           instance_name = COALESCE($4, instance_name),
+           instance_name = COALESCE($2, instance_name),
            updated_at = CURRENT_TIMESTAMP
-       WHERE id = $5
-       RETURNING *`,
-      [name, api_key, api_url, instance_name, id]
+       WHERE id = $3
+       RETURNING id, name, instance_name, status, phone_number, qr_code, last_connection, created_at, updated_at`,
+      [name, instance_name, id]
     );
 
     if (result.rows.length === 0) {
@@ -168,17 +183,25 @@ router.post('/:id/connect', async (req, res) => {
 
         if (existingInstance) {
           console.log(`   ⚠️ Instância já existe na Evolution API`);
-          // Atualizar status e QR code se já existe
+          // Buscar número de telefone se conectado
+          let phoneNumber = null;
+          if (existingInstance.instance?.status === 'open' && existingInstance.instance?.owner) {
+            phoneNumber = existingInstance.instance.owner;
+          }
+
+          // Atualizar status, QR code e número de telefone se já existe
           await pool.query(
             `UPDATE instances 
              SET status = $1,
                  qr_code = $2,
+                 phone_number = COALESCE($3, phone_number),
                  last_connection = CURRENT_TIMESTAMP,
                  updated_at = CURRENT_TIMESTAMP
-             WHERE id = $3`,
+             WHERE id = $4`,
             [
               existingInstance.instance?.status === 'open' ? 'connected' : 'connecting',
               existingInstance.qrcode?.base64 || null,
+              phoneNumber,
               id,
             ]
           );
@@ -227,15 +250,38 @@ router.post('/:id/connect', async (req, res) => {
 
     console.log(`✅ Resposta da Evolution API:`, JSON.stringify(evolutionResponse.data, null, 2));
 
-    // Atualizar status e QR code
+    // Buscar número de telefone se a instância já estiver conectada
+    let phoneNumber = null;
+    if (evolutionResponse.data.instance?.state === 'open') {
+      try {
+        const phoneUrl = `${instance.api_url}/instance/fetchInstances`;
+        const phoneResponse = await axios.get(phoneUrl, {
+          headers: { 'apikey': instance.api_key },
+          validateStatus: () => true,
+        });
+        
+        const foundInstance = phoneResponse.data?.find(
+          (inst: any) => inst.instance?.instanceName === instance.instance_name
+        );
+        
+        if (foundInstance?.instance?.owner) {
+          phoneNumber = foundInstance.instance.owner;
+        }
+      } catch (phoneError) {
+        console.log('   ⚠️ Não foi possível buscar número de telefone:', phoneError);
+      }
+    }
+
+    // Atualizar status, QR code e número de telefone
     await pool.query(
       `UPDATE instances 
        SET status = 'connecting',
            qr_code = $1,
+           phone_number = COALESCE($2, phone_number),
            last_connection = CURRENT_TIMESTAMP,
            updated_at = CURRENT_TIMESTAMP
-       WHERE id = $2`,
-      [evolutionResponse.data.qrcode?.base64 || null, id]
+       WHERE id = $3`,
+      [evolutionResponse.data.qrcode?.base64 || null, phoneNumber, id]
     );
 
     res.json({
@@ -287,11 +333,12 @@ router.post('/:id/disconnect', async (req, res) => {
       validateStatus: () => true, // Não lançar erro automaticamente
     });
 
-    // Atualizar status
+    // Atualizar status e limpar número de telefone
     await pool.query(
       `UPDATE instances 
        SET status = 'disconnected',
        qr_code = NULL,
+       phone_number = NULL,
        updated_at = CURRENT_TIMESTAMP
        WHERE id = $1`,
       [id]
@@ -335,6 +382,7 @@ router.get('/:id/status', async (req, res) => {
 
     let status = 'disconnected';
     let qrCode = instance.qr_code;
+    let phoneNumber: string | null = instance.phone_number || null;
 
     // Verificar se a resposta foi bem-sucedida
     if (evolutionResponse.status === 200 && evolutionResponse.data) {
@@ -350,6 +398,26 @@ router.get('/:id/status', async (req, res) => {
         status = 'connected';
         qrCode = null; // Limpar QR code quando conectado
         console.log(`   ✅ Instância conectada`);
+        
+        // Buscar número de telefone
+        try {
+          const phoneUrl = `${instance.api_url}/instance/fetchInstances`;
+          const phoneResponse = await axios.get(phoneUrl, {
+            headers: { 'apikey': instance.api_key },
+            validateStatus: () => true,
+          });
+          
+          const foundInstance = phoneResponse.data?.find(
+            (inst: any) => inst.instance?.instanceName === instance.instance_name
+          );
+          
+          if (foundInstance?.instance?.owner) {
+            phoneNumber = foundInstance.instance.owner;
+            console.log(`   📱 Número encontrado: ${phoneNumber}`);
+          }
+        } catch (phoneError) {
+          console.log('   ⚠️ Não foi possível buscar número de telefone:', phoneError);
+        }
       } else if (connectionState === 'close' || connectionState === 'connecting') {
         status = 'connecting';
         console.log(`   ⏳ Instância conectando`);
@@ -359,6 +427,7 @@ router.get('/:id/status', async (req, res) => {
         }
       } else {
         status = 'disconnected';
+        phoneNumber = null; // Limpar número quando desconectado
         console.log(`   ❌ Instância desconectada`);
       }
     } else if (evolutionResponse.status === 404) {
@@ -368,14 +437,15 @@ router.get('/:id/status', async (req, res) => {
       console.log(`   ❌ Instância não encontrada na Evolution API`);
     }
 
-    // Atualizar status no banco
+    // Atualizar status, QR code e número de telefone no banco
     await pool.query(
       `UPDATE instances 
        SET status = $1,
            qr_code = $2,
+           phone_number = COALESCE($3, phone_number),
            updated_at = CURRENT_TIMESTAMP
-       WHERE id = $3`,
-      [status, qrCode, id]
+       WHERE id = $4`,
+      [status, qrCode, phoneNumber, id]
     );
 
     res.json({
