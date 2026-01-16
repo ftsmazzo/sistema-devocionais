@@ -980,8 +980,6 @@ export default function Blindage() {
         </div>
       </div>
 
-      </div>
-      
       {/* Toast Notification - Renderizado fora do container */}
       {toast && (
         <Toast
