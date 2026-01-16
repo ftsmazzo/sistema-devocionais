@@ -8,6 +8,8 @@ import Switch from '@/components/ui/Switch';
 import Label from '@/components/ui/Label';
 import Tooltip from '@/components/ui/Tooltip';
 import Toast from '@/components/ui/Toast';
+import Slider from '@/components/ui/Slider';
+import Slider from '@/components/ui/Slider';
 import {
   Shield,
   Clock,
@@ -182,45 +184,46 @@ export default function Blindage() {
     <div className="relative">
       <div className="max-w-7xl mx-auto">
         {/* Header */}
-        <div className="mb-8">
+        <div className="mb-6">
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-3xl font-bold bg-gradient-to-r from-gray-900 to-gray-700 bg-clip-text text-transparent flex items-center gap-3 mb-2">
-                <div className="w-10 h-10 bg-gradient-to-br from-indigo-500 to-purple-500 rounded-xl flex items-center justify-center shadow-md">
-                  <Shield className="h-6 w-6 text-white" />
+              <h1 className="text-2xl font-bold bg-gradient-to-r from-gray-900 to-gray-700 bg-clip-text text-transparent flex items-center gap-2.5 mb-1">
+                <div className="w-8 h-8 bg-gradient-to-br from-indigo-500 to-purple-500 rounded-lg flex items-center justify-center shadow-md">
+                  <Shield className="h-5 w-5 text-white" />
                 </div>
                 Configurações de Blindagem
               </h1>
               {instance && (
-                <p className="text-gray-500 text-sm">
+                <p className="text-gray-500 text-xs ml-10.5">
                   Instância: <span className="font-semibold text-gray-700">{instance.name}</span>
                 </p>
               )}
             </div>
             
             <Button
-              onClick={handleSave}
+              onClick={() => handleSave()}
               disabled={saving || !hasChanges}
-              className={`flex items-center gap-2 rounded-xl px-6 transition-all ${
+              size="sm"
+              className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm transition-all ${
                 hasChanges
-                  ? 'bg-gradient-to-r from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600 text-white shadow-md shadow-indigo-500/30'
+                  ? 'bg-gradient-to-r from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600 text-white shadow-md'
                   : 'bg-gray-200 text-gray-400 cursor-not-allowed'
               }`}
             >
               {saving ? (
                 <>
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                  <div className="animate-spin rounded-full h-3.5 w-3.5 border-b-2 border-white"></div>
                   Salvando...
                 </>
               ) : saved ? (
                 <>
-                  <CheckCircle2 className="h-4 w-4" />
+                  <CheckCircle2 className="h-3.5 w-3.5" />
                   Salvo!
                 </>
               ) : (
                 <>
-                  <Save className="h-4 w-4" />
-                  {hasChanges ? 'Salvar Alterações' : 'Sem alterações'}
+                  <Save className="h-3.5 w-3.5" />
+                  {hasChanges ? 'Salvar Tudo' : 'Sem alterações'}
                 </>
               )}
             </Button>
