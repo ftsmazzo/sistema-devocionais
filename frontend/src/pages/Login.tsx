@@ -21,11 +21,16 @@ export default function Login() {
     setLoading(true);
 
     try {
+      console.log('🔐 Tentando fazer login...', { email, baseURL: import.meta.env.VITE_API_URL || '/api' });
       const response = await api.post('/auth/login', { email, password });
+      console.log('✅ Login bem-sucedido:', response.data);
       setAuth(response.data.user, response.data.token);
       navigate('/');
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Erro ao fazer login');
+      console.error('❌ Erro no login:', err);
+      console.error('   Response:', err.response);
+      console.error('   Message:', err.message);
+      setError(err.response?.data?.error || err.message || 'Erro ao fazer login');
     } finally {
       setLoading(false);
     }
