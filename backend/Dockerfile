@@ -6,8 +6,8 @@ WORKDIR /app
 COPY backend/package*.json ./
 COPY backend/tsconfig.json ./
 
-# Instalar dependências
-RUN npm install
+# Instalar dependências (usando npm install pois não há package-lock.json)
+RUN npm install --production=false
 
 # Copiar código fonte
 COPY backend/src ./src
