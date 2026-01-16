@@ -32,7 +32,8 @@ router.post('/login', async (req, res) => {
     const jwtExpiresIn = process.env.JWT_EXPIRES_IN || '7d';
     
     const payload = { id: user.id, email: user.email, role: user.role };
-    const options: SignOptions = { expiresIn: jwtExpiresIn as string | number };
+    // @ts-expect-error - jsonwebtoken types are strict but string works at runtime
+    const options: SignOptions = { expiresIn: jwtExpiresIn };
     
     const token = jwt.sign(payload, jwtSecret, options);
 
