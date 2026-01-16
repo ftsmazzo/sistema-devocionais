@@ -8,6 +8,7 @@ import Switch from '@/components/ui/Switch';
 import Label from '@/components/ui/Label';
 import Tooltip from '@/components/ui/Tooltip';
 import Toast from '@/components/ui/Toast';
+import Slider from '@/components/ui/Slider';
 import {
   Shield,
   Clock,
@@ -229,32 +230,27 @@ export default function Blindage() {
         </div>
 
         {/* Grupos de Blindagem */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
           {/* 1. Delay Entre Mensagens */}
-          <Card className="border border-gray-200 hover:border-indigo-300 hover:shadow-md transition-all duration-200 rounded-xl overflow-hidden bg-white">
-            <CardHeader className="bg-gradient-to-br from-gray-50 to-white border-b border-gray-100 py-3 px-4">
+          <Card className="border border-gray-200 hover:border-indigo-300 hover:shadow-md transition-all duration-200 rounded-lg overflow-hidden bg-white">
+            <CardHeader className="bg-gradient-to-br from-gray-50 to-white border-b border-gray-100 py-2.5 px-3">
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-7 h-7 bg-gradient-to-br from-blue-500 to-cyan-500 rounded-lg flex items-center justify-center flex-shrink-0">
+                <div className="flex items-center gap-2">
+                  <div className="w-6 h-6 bg-gradient-to-br from-blue-500 to-cyan-500 rounded-lg flex items-center justify-center flex-shrink-0">
                     <Clock className="h-3.5 w-3.5 text-white" />
                   </div>
-                  <div>
-                    <CardTitle className="text-base font-semibold text-gray-900">
-                      Delay Entre Mensagens
-                    </CardTitle>
-                    <CardDescription className="text-xs text-gray-500 mt-0.5">
-                      Intervalo de tempo entre envios
-                    </CardDescription>
-                  </div>
+                  <CardTitle className="text-sm font-semibold text-gray-900">
+                    Delay Entre Mensagens
+                  </CardTitle>
                 </div>
                 <Tooltip content="Controla o tempo mínimo entre o envio de mensagens. O delay progressivo aumenta automaticamente conforme o volume de mensagens enviadas, ajudando a evitar bloqueios." />
               </div>
             </CardHeader>
-            <CardContent className="p-4 space-y-3">
+            <CardContent className="p-3 space-y-2.5">
               {groupedRules.delay ? (
                 <>
-                  <div className="flex items-center justify-between py-1">
-                    <Label className="text-sm mb-0">Habilitar</Label>
+                  <div className="flex items-center justify-between py-0.5">
+                    <Label className="text-xs mb-0">Habilitar</Label>
                     <Switch
                       checked={groupedRules.delay.enabled}
                       onCheckedChange={(checked) => updateRule(groupedRules.delay!.id, { enabled: checked })}
@@ -262,42 +258,42 @@ export default function Blindage() {
                   </div>
                   
                   {groupedRules.delay.enabled && (
-                    <div className="space-y-2.5 pt-2.5 border-t border-gray-100">
-                      <div className="grid grid-cols-2 gap-2.5">
-                        <div>
-                          <Label htmlFor="min_delay" className="text-xs mb-1">
+                    <div className="space-y-2 pt-2 border-t border-gray-100">
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <Label htmlFor="min_delay" className="text-xs">
                             Mínimo (s)
                             <Tooltip content="Tempo mínimo entre mensagens. Recomendado: 3-5s." />
                           </Label>
-                          <Input
-                            id="min_delay"
-                            type="number"
-                            min="1"
-                            max="60"
-                            value={groupedRules.delay.config.min_delay_seconds || 3}
-                            onChange={(e) => updateRuleConfig(groupedRules.delay!.id, 'min_delay_seconds', parseInt(e.target.value))}
-                            className="h-9 text-sm"
-                          />
+                          <span className="text-xs font-semibold text-indigo-600">{groupedRules.delay.config.min_delay_seconds || 3}</span>
                         </div>
-                        
-                        <div>
-                          <Label htmlFor="max_delay" className="text-xs mb-1">
+                        <Slider
+                          value={groupedRules.delay.config.min_delay_seconds || 3}
+                          min={1}
+                          max={60}
+                          step={1}
+                          onChange={(value) => updateRuleConfig(groupedRules.delay!.id, 'min_delay_seconds', value)}
+                        />
+                      </div>
+                      
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <Label htmlFor="max_delay" className="text-xs">
                             Máximo (s)
                             <Tooltip content="Tempo máximo do delay progressivo." />
                           </Label>
-                          <Input
-                            id="max_delay"
-                            type="number"
-                            min="1"
-                            max="300"
-                            value={groupedRules.delay.config.max_delay_seconds || 10}
-                            onChange={(e) => updateRuleConfig(groupedRules.delay!.id, 'max_delay_seconds', parseInt(e.target.value))}
-                            className="h-9 text-sm"
-                          />
+                          <span className="text-xs font-semibold text-indigo-600">{groupedRules.delay.config.max_delay_seconds || 10}</span>
                         </div>
+                        <Slider
+                          value={groupedRules.delay.config.max_delay_seconds || 10}
+                          min={1}
+                          max={300}
+                          step={1}
+                          onChange={(value) => updateRuleConfig(groupedRules.delay!.id, 'max_delay_seconds', value)}
+                        />
                       </div>
                       
-                      <div className="flex items-center justify-between py-1">
+                      <div className="flex items-center justify-between py-0.5">
                         <Label className="text-xs mb-0">Progressivo</Label>
                         <Switch
                           checked={groupedRules.delay.config.progressive !== false}
@@ -306,44 +302,58 @@ export default function Blindage() {
                       </div>
                       
                       {groupedRules.delay.config.progressive !== false && (
-                        <div className="grid grid-cols-2 gap-2.5 pt-2 border-t border-gray-100">
+                        <div className="space-y-2 pt-2 border-t border-gray-100">
                           <div>
-                            <Label htmlFor="base_delay" className="text-xs mb-1">
-                              Base (s)
-                              <Tooltip content="Delay inicial." />
-                            </Label>
-                            <Input
-                              id="base_delay"
-                              type="number"
-                              min="1"
+                            <div className="flex items-center justify-between mb-1">
+                              <Label htmlFor="base_delay" className="text-xs">
+                                Base (s)
+                                <Tooltip content="Delay inicial." />
+                              </Label>
+                              <span className="text-xs font-semibold text-indigo-600">{groupedRules.delay.config.base_delay || 3}</span>
+                            </div>
+                            <Slider
                               value={groupedRules.delay.config.base_delay || 3}
-                              onChange={(e) => updateRuleConfig(groupedRules.delay!.id, 'base_delay', parseFloat(e.target.value))}
-                              className="h-9 text-sm"
+                              min={1}
+                              max={30}
+                              step={0.5}
+                              onChange={(value) => updateRuleConfig(groupedRules.delay!.id, 'base_delay', value)}
                             />
                           </div>
                           
                           <div>
-                            <Label htmlFor="increment" className="text-xs mb-1">
-                              Incremento
-                              <Tooltip content="Segundos adicionados por mensagem." />
-                            </Label>
-                            <Input
-                              id="increment"
-                              type="number"
-                              min="0"
-                              step="0.1"
+                            <div className="flex items-center justify-between mb-1">
+                              <Label htmlFor="increment" className="text-xs">
+                                Incremento
+                                <Tooltip content="Segundos adicionados por mensagem." />
+                              </Label>
+                              <span className="text-xs font-semibold text-indigo-600">{groupedRules.delay.config.increment_per_message || 0.5}</span>
+                            </div>
+                            <Slider
                               value={groupedRules.delay.config.increment_per_message || 0.5}
-                              onChange={(e) => updateRuleConfig(groupedRules.delay!.id, 'increment_per_message', parseFloat(e.target.value))}
-                              className="h-9 text-sm"
+                              min={0}
+                              max={2}
+                              step={0.1}
+                              onChange={(value) => updateRuleConfig(groupedRules.delay!.id, 'increment_per_message', value)}
                             />
                           </div>
                         </div>
                       )}
+                      
+                      <div className="pt-2 border-t border-gray-100">
+                        <Button
+                          size="sm"
+                          onClick={() => handleSave(groupedRules.delay!.id)}
+                          disabled={saving}
+                          className="w-full bg-gradient-to-r from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600 text-white text-xs py-1.5 rounded-lg"
+                        >
+                          {saving ? 'Salvando...' : 'Salvar'}
+                        </Button>
+                      </div>
                     </div>
                   )}
                 </>
               ) : (
-                <p className="text-gray-500 text-sm">Regra não encontrada</p>
+                <p className="text-gray-400 text-xs">Regra não encontrada</p>
               )}
             </CardContent>
           </Card>
@@ -422,30 +432,25 @@ export default function Blindage() {
           </Card>
 
           {/* 3. Rotação de Instâncias */}
-          <Card className="border border-gray-200 hover:border-indigo-300 hover:shadow-md transition-all duration-200 rounded-xl overflow-hidden bg-white">
-            <CardHeader className="bg-gradient-to-br from-gray-50 to-white border-b border-gray-100 py-3 px-4">
+          <Card className="border border-gray-200 hover:border-indigo-300 hover:shadow-md transition-all duration-200 rounded-lg overflow-hidden bg-white">
+            <CardHeader className="bg-gradient-to-br from-gray-50 to-white border-b border-gray-100 py-2.5 px-3">
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-7 h-7 bg-gradient-to-br from-purple-500 to-pink-500 rounded-lg flex items-center justify-center flex-shrink-0">
+                <div className="flex items-center gap-2">
+                  <div className="w-6 h-6 bg-gradient-to-br from-purple-500 to-pink-500 rounded-lg flex items-center justify-center flex-shrink-0">
                     <RotateCcw className="h-3.5 w-3.5 text-white" />
                   </div>
-                  <div>
-                    <CardTitle className="text-base font-semibold text-gray-900">
-                      Rotação de Instâncias
-                    </CardTitle>
-                    <CardDescription className="text-xs text-gray-500 mt-0.5">
-                      Distribuição entre instâncias
-                    </CardDescription>
-                  </div>
+                  <CardTitle className="text-sm font-semibold text-gray-900">
+                    Rotação de Instâncias
+                  </CardTitle>
                 </div>
                 <Tooltip content="Distribui mensagens entre todas as instâncias conectadas, evitando sobrecarga em uma única instância. Funciona em modo round-robin (rodízio)." />
               </div>
             </CardHeader>
-            <CardContent className="p-4 space-y-3">
+            <CardContent className="p-3 space-y-2.5">
               {groupedRules.rotation ? (
                 <>
-                  <div className="flex items-center justify-between py-1">
-                    <Label className="text-sm mb-0">Habilitar</Label>
+                  <div className="flex items-center justify-between py-0.5">
+                    <Label className="text-xs mb-0">Habilitar</Label>
                     <Switch
                       checked={groupedRules.rotation.enabled}
                       onCheckedChange={(checked) => updateRule(groupedRules.rotation!.id, { enabled: checked })}
@@ -453,20 +458,34 @@ export default function Blindage() {
                   </div>
                   
                   {groupedRules.rotation.enabled && (
-                    <div className="pt-2 border-t border-gray-100">
-                      <Label htmlFor="min_delay_instances" className="text-xs mb-1">
-                        Delay Entre Instâncias (s)
-                        <Tooltip content="Tempo mínimo entre usar instâncias diferentes." />
-                      </Label>
-                      <Input
-                        id="min_delay_instances"
-                        type="number"
-                        min="0"
-                        max="60"
-                        value={groupedRules.rotation.config.min_delay_between_instances || 1}
-                        onChange={(e) => updateRuleConfig(groupedRules.rotation!.id, 'min_delay_between_instances', parseInt(e.target.value))}
-                        className="h-9 text-sm"
-                      />
+                    <div className="space-y-2 pt-2 border-t border-gray-100">
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <Label htmlFor="min_delay_instances" className="text-xs">
+                            Delay Entre Instâncias (s)
+                            <Tooltip content="Tempo mínimo entre usar instâncias diferentes." />
+                          </Label>
+                          <span className="text-xs font-semibold text-indigo-600">{groupedRules.rotation.config.min_delay_between_instances || 1}</span>
+                        </div>
+                        <Slider
+                          value={groupedRules.rotation.config.min_delay_between_instances || 1}
+                          min={0}
+                          max={60}
+                          step={1}
+                          onChange={(value) => updateRuleConfig(groupedRules.rotation!.id, 'min_delay_between_instances', value)}
+                        />
+                      </div>
+                      
+                      <div className="pt-2 border-t border-gray-100">
+                        <Button
+                          size="sm"
+                          onClick={() => handleSave(groupedRules.rotation!.id)}
+                          disabled={saving}
+                          className="w-full bg-gradient-to-r from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600 text-white text-xs py-1.5 rounded-lg"
+                        >
+                          {saving ? 'Salvando...' : 'Salvar'}
+                        </Button>
+                      </div>
                     </div>
                   )}
                 </>
@@ -537,30 +556,25 @@ export default function Blindage() {
           </Card>
 
           {/* 5. Health Check */}
-          <Card className="border border-gray-200 hover:border-indigo-300 hover:shadow-md transition-all duration-200 rounded-xl overflow-hidden bg-white">
-            <CardHeader className="bg-gradient-to-br from-gray-50 to-white border-b border-gray-100 py-3 px-4">
+          <Card className="border border-gray-200 hover:border-indigo-300 hover:shadow-md transition-all duration-200 rounded-lg overflow-hidden bg-white">
+            <CardHeader className="bg-gradient-to-br from-gray-50 to-white border-b border-gray-100 py-2.5 px-3">
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-7 h-7 bg-gradient-to-br from-red-500 to-rose-500 rounded-lg flex items-center justify-center flex-shrink-0">
+                <div className="flex items-center gap-2">
+                  <div className="w-6 h-6 bg-gradient-to-br from-red-500 to-rose-500 rounded-lg flex items-center justify-center flex-shrink-0">
                     <Heart className="h-3.5 w-3.5 text-white" />
                   </div>
-                  <div>
-                    <CardTitle className="text-base font-semibold text-gray-900">
-                      Health Check
-                    </CardTitle>
-                    <CardDescription className="text-xs text-gray-500 mt-0.5">
-                      Monitoramento de saúde
-                    </CardDescription>
-                  </div>
+                  <CardTitle className="text-sm font-semibold text-gray-900">
+                    Health Check
+                  </CardTitle>
                 </div>
                 <Tooltip content="Monitora a saúde das instâncias e pausa envios automaticamente se uma instância estiver com problemas (degradada ou down)." />
               </div>
             </CardHeader>
-            <CardContent className="p-4 space-y-3">
+            <CardContent className="p-3 space-y-2.5">
               {groupedRules.health ? (
                 <>
-                  <div className="flex items-center justify-between py-1">
-                    <Label className="text-sm mb-0">Habilitar</Label>
+                  <div className="flex items-center justify-between py-0.5">
+                    <Label className="text-xs mb-0">Habilitar</Label>
                     <Switch
                       checked={groupedRules.health.enabled}
                       onCheckedChange={(checked) => updateRule(groupedRules.health!.id, { enabled: checked })}
@@ -569,7 +583,7 @@ export default function Blindage() {
                   
                   {groupedRules.health.enabled && (
                     <div className="space-y-2 pt-2 border-t border-gray-100">
-                      <div className="flex items-center justify-between py-1">
+                      <div className="flex items-center justify-between py-0.5">
                         <Label className="text-xs mb-0">Pausar se Degradada</Label>
                         <Switch
                           checked={groupedRules.health.config.pause_if_degraded !== false}
@@ -577,12 +591,23 @@ export default function Blindage() {
                         />
                       </div>
                       
-                      <div className="flex items-center justify-between py-1">
+                      <div className="flex items-center justify-between py-0.5">
                         <Label className="text-xs mb-0">Pausar se Down</Label>
                         <Switch
                           checked={groupedRules.health.config.pause_if_down !== false}
                           onCheckedChange={(checked) => updateRuleConfig(groupedRules.health!.id, 'pause_if_down', checked)}
                         />
+                      </div>
+                      
+                      <div className="pt-2 border-t border-gray-100">
+                        <Button
+                          size="sm"
+                          onClick={() => handleSave(groupedRules.health!.id)}
+                          disabled={saving}
+                          className="w-full bg-gradient-to-r from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600 text-white text-xs py-1.5 rounded-lg"
+                        >
+                          {saving ? 'Salvando...' : 'Salvar'}
+                        </Button>
                       </div>
                     </div>
                   )}
@@ -673,24 +698,25 @@ export default function Blindage() {
           </Card>
 
           {/* 7. Validação de Número */}
-          <Card className="border border-gray-200 hover:border-indigo-300 hover:shadow-lg hover:shadow-indigo-500/10 transition-all duration-300 rounded-2xl overflow-hidden bg-white">
-            <CardHeader className="bg-gradient-to-br from-gray-50 to-white border-b border-gray-100">
-              <CardTitle className="flex items-center gap-2.5 text-lg">
-                <div className="w-8 h-8 bg-gradient-to-br from-teal-500 to-cyan-500 rounded-lg flex items-center justify-center">
-                  <Phone className="h-4 w-4 text-white" />
+          <Card className="border border-gray-200 hover:border-indigo-300 hover:shadow-md transition-all duration-200 rounded-lg overflow-hidden bg-white">
+            <CardHeader className="bg-gradient-to-br from-gray-50 to-white border-b border-gray-100 py-2.5 px-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-6 h-6 bg-gradient-to-br from-teal-500 to-cyan-500 rounded-lg flex items-center justify-center flex-shrink-0">
+                    <Phone className="h-3.5 w-3.5 text-white" />
+                  </div>
+                  <CardTitle className="text-sm font-semibold text-gray-900">
+                    Validação de Número
+                  </CardTitle>
                 </div>
-                Validação de Número
                 <Tooltip content="Valida o formato do número de telefone e verifica se está cadastrado no WhatsApp antes de enviar. Usa cache para melhor performance." />
-              </CardTitle>
-              <CardDescription className="text-sm text-gray-500 mt-1">
-                Configure validação de números de telefone
-              </CardDescription>
+              </div>
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className="p-3 space-y-2.5">
               {groupedRules.number ? (
                 <>
-                  <div className="flex items-center justify-between">
-                    <Label>Habilitar Validação</Label>
+                  <div className="flex items-center justify-between py-0.5">
+                    <Label className="text-xs mb-0">Habilitar</Label>
                     <Switch
                       checked={groupedRules.number.enabled}
                       onCheckedChange={(checked) => updateRule(groupedRules.number!.id, { enabled: checked })}
@@ -698,25 +724,25 @@ export default function Blindage() {
                   </div>
                   
                   {groupedRules.number.enabled && (
-                    <div className="space-y-4 pt-4 border-t border-gray-100">
-                      <div className="flex items-center justify-between">
-                        <Label>Validar Formato</Label>
+                    <div className="space-y-2 pt-2 border-t border-gray-100">
+                      <div className="flex items-center justify-between py-0.5">
+                        <Label className="text-xs mb-0">Validar Formato</Label>
                         <Switch
                           checked={groupedRules.number.config.validate_format !== false}
                           onCheckedChange={(checked) => updateRuleConfig(groupedRules.number!.id, 'validate_format', checked)}
                         />
                       </div>
                       
-                      <div className="flex items-center justify-between">
-                        <Label>Verificar WhatsApp</Label>
+                      <div className="flex items-center justify-between py-0.5">
+                        <Label className="text-xs mb-0">Verificar WhatsApp</Label>
                         <Switch
                           checked={groupedRules.number.config.check_whatsapp !== false}
                           onCheckedChange={(checked) => updateRuleConfig(groupedRules.number!.id, 'check_whatsapp', checked)}
                         />
                       </div>
                       
-                      <div className="flex items-center justify-between">
-                        <Label>Verificação Obrigatória</Label>
+                      <div className="flex items-center justify-between py-0.5">
+                        <Label className="text-xs mb-0">Verificação Obrigatória</Label>
                         <Switch
                           checked={groupedRules.number.config.require_whatsapp_check === true}
                           onCheckedChange={(checked) => updateRuleConfig(groupedRules.number!.id, 'require_whatsapp_check', checked)}
@@ -724,24 +750,37 @@ export default function Blindage() {
                       </div>
                       
                       <div>
-                        <Label htmlFor="cache_hours">
-                          Cache (horas)
-                          <Tooltip content="Tempo que o resultado da verificação fica em cache. Números verificados não serão verificados novamente durante este período." />
-                        </Label>
-                        <Input
-                          id="cache_hours"
-                          type="number"
-                          min="1"
-                          max="168"
+                        <div className="flex items-center justify-between mb-1">
+                          <Label htmlFor="cache_hours" className="text-xs">
+                            Cache (horas)
+                            <Tooltip content="Tempo que o resultado da verificação fica em cache." />
+                          </Label>
+                          <span className="text-xs font-semibold text-indigo-600">{groupedRules.number.config.cache_hours || 24}</span>
+                        </div>
+                        <Slider
                           value={groupedRules.number.config.cache_hours || 24}
-                          onChange={(e) => updateRuleConfig(groupedRules.number!.id, 'cache_hours', parseInt(e.target.value))}
+                          min={1}
+                          max={168}
+                          step={1}
+                          onChange={(value) => updateRuleConfig(groupedRules.number!.id, 'cache_hours', value)}
                         />
+                      </div>
+                      
+                      <div className="pt-2 border-t border-gray-100">
+                        <Button
+                          size="sm"
+                          onClick={() => handleSave(groupedRules.number!.id)}
+                          disabled={saving}
+                          className="w-full bg-gradient-to-r from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600 text-white text-xs py-1.5 rounded-lg"
+                        >
+                          {saving ? 'Salvando...' : 'Salvar'}
+                        </Button>
                       </div>
                     </div>
                   )}
                 </>
               ) : (
-                <p className="text-gray-500 text-sm">Regra não encontrada</p>
+                <p className="text-gray-400 text-xs">Regra não encontrada</p>
               )}
             </CardContent>
           </Card>
