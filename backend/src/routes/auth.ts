@@ -28,10 +28,13 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ error: 'Credenciais inválidas' });
     }
 
+    const jwtSecret = process.env.JWT_SECRET || 'secret';
+    const jwtExpiresIn = process.env.JWT_EXPIRES_IN || '7d';
+    
     const token = jwt.sign(
       { id: user.id, email: user.email, role: user.role },
-      process.env.JWT_SECRET || 'secret',
-      { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
+      jwtSecret,
+      { expiresIn: jwtExpiresIn }
     );
 
     res.json({

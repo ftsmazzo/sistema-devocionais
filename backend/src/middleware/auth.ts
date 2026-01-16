@@ -18,7 +18,8 @@ export function authenticateToken(req: AuthRequest, res: Response, next: NextFun
   }
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'secret') as any;
+    const jwtSecret = process.env.JWT_SECRET || 'secret';
+    const decoded = jwt.verify(token, jwtSecret) as any;
     req.user = {
       id: decoded.id,
       email: decoded.email,
