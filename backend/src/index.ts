@@ -67,38 +67,26 @@ async function start() {
     server.keepAliveTimeout = 65000;
     server.headersTimeout = 66000;
 
-    // Graceful shutdown - ignorar SIGTERM muito cedo
-    const gracefulShutdown = (signal: string) => {
+    // Ignorar SIGTERM completamente - EasyPanel não tem health check configurável
+    // O servidor deve ficar rodando indefinidamente
+    process.on('SIGTERM', (signal) => {
       const uptime = Date.now() - startTime;
-      
-      // Ignorar SIGTERM se o servidor acabou de iniciar (menos de 30 segundos)
-      if (uptime < MIN_UPTIME) {
-        console.log(`⚠️ ${signal} recebido muito cedo (${Math.round(uptime/1000)}s), ignorando...`);
-        return;
-      }
-      
-      if (isShuttingDown) {
-        return; // Já está encerrando
-      }
-      
-      isShuttingDown = true;
-      console.log(`⚠️ ${signal} recebido após ${Math.round(uptime/1000)}s, encerrando servidor...`);
-      
-      // Dar tempo para requisições em andamento terminarem
-      setTimeout(() => {
-        if (server) {
-          server.close(() => {
-            console.log('✅ Servidor encerrado');
-            process.exit(0);
-          });
-        } else {
+      console.log(`⚠️ SIGTERM recebido após ${Math.round(uptime/1000)}s, mas ignorando para manter servidor ativo...`);
+      // Não encerrar - apenas logar
+    });
+    
+    // Apenas SIGINT (Ctrl+C) encerra o servidor
+    process.on('SIGINT', () => {
+      console.log('⚠️ SIGINT recebido, encerrando servidor...');
+      if (server) {
+        server.close(() => {
+          console.log('✅ Servidor encerrado');
           process.exit(0);
-        }
-      }, 5000);
-    };
-
-    process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
-    process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+        });
+      } else {
+        process.exit(0);
+      }
+    });
     
     // Manter processo vivo
     process.on('uncaughtException', (error) => {
