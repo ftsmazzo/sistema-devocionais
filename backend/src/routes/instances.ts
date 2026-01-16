@@ -125,12 +125,14 @@ router.post('/:id/connect', async (req, res) => {
     const instance = instanceResult.rows[0];
     const evolutionUrl = `${instance.api_url}/instance/create`;
 
+    console.log(`🔗 Conectando instância ${instance.instance_name} em ${evolutionUrl}`);
+
     // Criar instância no Evolution API
+    // A Evolution API usa apikey no header, não precisa de token no body
     const evolutionResponse = await axios.post(
       evolutionUrl,
       {
         instanceName: instance.instance_name,
-        token: instance.api_key,
         qrcode: true,
       },
       {
@@ -140,6 +142,8 @@ router.post('/:id/connect', async (req, res) => {
         },
       }
     );
+
+    console.log(`✅ Resposta da Evolution API:`, JSON.stringify(evolutionResponse.data, null, 2));
 
     // Atualizar status e QR code
     await pool.query(
@@ -157,9 +161,22 @@ router.post('/:id/connect', async (req, res) => {
       qr_code: evolutionResponse.data.qrcode?.base64,
     });
   } catch (error: any) {
-    console.error('Erro ao conectar instância:', error);
-    res.status(500).json({
+    console.error('❌ Erro ao conectar instância:', error.message);
+    if (error.response) {
+      console.error('   Status:', error.response.status);
+      console.error('   Data:', JSON.stringify(error.response.data, null, 2));
+    }
+    
+    // Retornar erro mais detalhado
+    const statusCode = error.response?.status || 500;
+    const errorMessage = error.response?.data?.message || 
+                        error.response?.data?.error || 
+                        error.message || 
+                        'Erro ao conectar instância';
+    
+    res.status(statusCode).json({
       error: 'Erro ao conectar instância',
+      message: errorMessage,
       details: error.response?.data || error.message,
     });
   }
