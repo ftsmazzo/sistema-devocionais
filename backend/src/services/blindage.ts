@@ -76,7 +76,7 @@ export async function applyBlindage(
       return contentValidation;
     }
 
-    // 4. Selecionar instância (rotação)
+    // 4. Selecionar instância (seleção + rotação)
     const instanceSelection = await selectInstance(messageData.instanceId, rules);
     if (!instanceSelection.canSend) {
       return instanceSelection;
@@ -844,6 +844,18 @@ export async function createDefaultRules(instanceId: number): Promise<void> {
           default_country_code: '55', // Código do Brasil
           cache_hours: 24, // Cache por 24 horas
           timeout_ms: 10000, // Timeout de 10 segundos
+        },
+      },
+      {
+        instance_id: instanceId,
+        rule_name: 'Seleção de Instâncias',
+        rule_type: 'instance_selection',
+        enabled: true,
+        config: {
+          selected_instance_ids: [], // IDs das instâncias selecionadas (vazio = todas)
+          max_simultaneous: 1, // Máximo de instâncias simultâneas
+          auto_switch_on_failure: true, // Trocar automaticamente quando uma instância cair
+          retry_after_pause: true, // Reiniciar com outra instância após pausa
         },
       },
     ];

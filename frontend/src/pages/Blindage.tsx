@@ -61,6 +61,10 @@ export default function Blindage() {
         setInstance(instanceRes.data.instance);
       }
 
+      // Carregar todas as instâncias para seleção
+      const instancesRes = await api.get('/instances');
+      setAllInstances(instancesRes.data.instances || []);
+
       // Carregar regras
       const rulesRes = await api.get(`/blindage/rules${instanceId ? `?instanceId=${instanceId}` : ''}`);
       const loadedRules = (rulesRes.data.rules || []).map((rule: any) => ({
@@ -184,6 +188,7 @@ export default function Blindage() {
     health: rules.find(r => r.rule_type === 'health_check'),
     content: rules.find(r => r.rule_type === 'content_validation'),
     number: rules.find(r => r.rule_type === 'number_validation'),
+    selection: rules.find(r => r.rule_type === 'instance_selection'),
   };
 
   return (
@@ -237,7 +242,7 @@ export default function Blindage() {
         </div>
 
         {/* Grupos de Blindagem */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
           {/* 1. Delay Entre Mensagens */}
           <Card className="border border-gray-200 hover:border-indigo-300 hover:shadow-md transition-all duration-200 rounded-lg overflow-hidden bg-white">
             <CardHeader className="bg-gradient-to-br from-gray-50 to-white border-b border-gray-100 py-2.5 px-3">
