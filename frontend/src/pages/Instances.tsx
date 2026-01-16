@@ -339,7 +339,8 @@ export default function Instances() {
             ))}
           </div>
         )}
-      </main>
+      </div>
+    </div>
 
       {/* Modal de Formulário */}
       {showModal && (
