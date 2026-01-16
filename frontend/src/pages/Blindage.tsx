@@ -69,41 +69,52 @@ export default function Blindage() {
 
       // Carregar regras
       const rulesRes = await api.get(`/blindage/rules${instanceId ? `?instanceId=${instanceId}` : ''}`);
-      const loadedRules = (rulesRes.data.rules || []).map((rule: any) => ({
+      let loadedRules = (rulesRes.data.rules || []).map((rule: any) => ({
         ...rule,
         // Garantir que config seja um objeto, não string
         config: typeof rule.config === 'string' ? JSON.parse(rule.config) : rule.config,
       }));
-      setRules(loadedRules);
       
       // Se a regra de seleção não existe, criar automaticamente
       const selectionRule = loadedRules.find((r: any) => r.rule_type === 'instance_selection');
-      if (!selectionRule && instanceId) {
+      if (!selectionRule) {
         try {
-          // Criar regra de seleção de instâncias
-          await api.post('/blindage/rules', {
-            instance_id: parseInt(instanceId),
-            rule_name: 'Seleção de Instâncias',
-            rule_type: 'instance_selection',
-            enabled: true,
-            config: {
-              selected_instance_ids: [],
-              max_simultaneous: 1,
-              auto_switch_on_failure: true,
-              retry_after_pause: true,
-            },
-          });
-          // Recarregar regras após criar
-          const newRulesRes = await api.get(`/blindage/rules${instanceId ? `?instanceId=${instanceId}` : ''}`);
-          const newLoadedRules = (newRulesRes.data.rules || []).map((rule: any) => ({
-            ...rule,
-            config: typeof rule.config === 'string' ? JSON.parse(rule.config) : rule.config,
-          }));
-          setRules(newLoadedRules);
-        } catch (error) {
+          // Se há instanceId, criar para essa instância, senão criar para a primeira instância disponível
+          let targetInstanceId = instanceId ? parseInt(instanceId) : null;
+          
+          if (!targetInstanceId && allInstances.length > 0) {
+            targetInstanceId = allInstances[0].id;
+          }
+          
+          if (targetInstanceId) {
+            console.log(`Criando regra de seleção para instância ${targetInstanceId}`);
+            // Criar regra de seleção de instâncias
+            await api.post('/blindage/rules', {
+              instance_id: targetInstanceId,
+              rule_name: 'Seleção de Instâncias',
+              rule_type: 'instance_selection',
+              enabled: true,
+              config: {
+                selected_instance_ids: [],
+                max_simultaneous: 1,
+                auto_switch_on_failure: true,
+                retry_after_pause: true,
+              },
+            });
+            // Recarregar regras após criar
+            const newRulesRes = await api.get(`/blindage/rules${instanceId ? `?instanceId=${instanceId}` : ''}`);
+            loadedRules = (newRulesRes.data.rules || []).map((rule: any) => ({
+              ...rule,
+              config: typeof rule.config === 'string' ? JSON.parse(rule.config) : rule.config,
+            }));
+          }
+        } catch (error: any) {
           console.error('Erro ao criar regra de seleção:', error);
+          console.error('Detalhes:', error.response?.data || error.message);
         }
       }
+      
+      setRules(loadedRules);
     } catch (error) {
       console.error('Erro ao carregar dados:', error);
       alert('Erro ao carregar configurações de blindagem');
@@ -223,7 +234,7 @@ export default function Blindage() {
   };
 
   return (
-    <div className="relative">
+    <>
       <div className="max-w-7xl mx-auto">
         {/* Header */}
         <div className="mb-6">
