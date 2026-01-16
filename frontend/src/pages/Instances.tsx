@@ -329,7 +329,7 @@ export default function Instances() {
                   <label className="text-sm font-medium mb-2 block">Nome</label>
                   <Input
                     value={formData.name}
-                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFormData({ ...formData, name: e.target.value })}
                     placeholder="Minha Instância"
                     required
                   />
@@ -338,7 +338,7 @@ export default function Instances() {
                   <label className="text-sm font-medium mb-2 block">Instance Name</label>
                   <Input
                     value={formData.instance_name}
-                    onChange={(e) =>
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                       setFormData({ ...formData, instance_name: e.target.value })
                     }
                     placeholder="instance-01"
@@ -349,7 +349,7 @@ export default function Instances() {
                   <label className="text-sm font-medium mb-2 block">API URL</label>
                   <Input
                     value={formData.api_url}
-                    onChange={(e) => setFormData({ ...formData, api_url: e.target.value })}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFormData({ ...formData, api_url: e.target.value })}
                     placeholder="http://localhost:8080"
                     required
                   />
@@ -359,7 +359,7 @@ export default function Instances() {
                   <Input
                     type="password"
                     value={formData.api_key}
-                    onChange={(e) => setFormData({ ...formData, api_key: e.target.value })}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFormData({ ...formData, api_key: e.target.value })}
                     placeholder="sua-api-key"
                     required
                   />

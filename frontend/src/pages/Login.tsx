@@ -13,7 +13,7 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const navigate = useNavigate();
-  const setAuth = useAuthStore((state) => state.setAuth);
+  const setAuth = useAuthStore((state: any) => state.setAuth);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -59,7 +59,7 @@ export default function Login() {
                 type="email"
                 placeholder="admin@example.com"
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEmail(e.target.value)}
                 required
                 disabled={loading}
               />
@@ -73,7 +73,7 @@ export default function Login() {
                 type="password"
                 placeholder="••••••••"
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPassword(e.target.value)}
                 required
                 disabled={loading}
               />
