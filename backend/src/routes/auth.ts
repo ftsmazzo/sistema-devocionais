@@ -15,9 +15,11 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ error: 'Email e senha são obrigatórios' });
     }
 
+    console.log(`🔐 Tentativa de login: ${email}`);
     const result = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
 
     if (result.rows.length === 0) {
+      console.log(`❌ Usuário não encontrado: ${email}`);
       return res.status(401).json({ error: 'Credenciais inválidas' });
     }
 
@@ -25,8 +27,11 @@ router.post('/login', async (req, res) => {
     const validPassword = await bcrypt.compare(password, user.password);
 
     if (!validPassword) {
+      console.log(`❌ Senha inválida para: ${email}`);
       return res.status(401).json({ error: 'Credenciais inválidas' });
     }
+
+    console.log(`✅ Login bem-sucedido: ${email}`);
 
     const jwtSecret = (process.env.JWT_SECRET || 'secret') as string;
     const jwtExpiresIn = process.env.JWT_EXPIRES_IN || '7d';
