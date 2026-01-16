@@ -3,7 +3,7 @@ import { useParams } from 'react-router-dom';
 import api from '@/lib/api';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import Switch from '@/components/ui/Switch';
 import Label from '@/components/ui/Label';
 import Tooltip from '@/components/ui/Tooltip';
@@ -100,16 +100,21 @@ export default function Blindage() {
     setHasChanges(true);
   };
 
-  const handleSave = async () => {
+  const handleSave = async (ruleId?: number) => {
     try {
       setSaving(true);
       setSaved(false);
+
+      // Se ruleId fornecido, salvar apenas essa regra
+      const rulesToSave = ruleId 
+        ? rules.filter(r => r.id === ruleId)
+        : rules;
 
       // Salvar cada regra modificada
       let savedCount = 0;
       const errors: string[] = [];
       
-      for (const rule of rules) {
+      for (const rule of rulesToSave) {
         try {
           console.log(`Salvando regra ${rule.id}:`, {
             enabled: rule.enabled,
@@ -137,7 +142,9 @@ export default function Blindage() {
         });
       } else {
         setSaved(true);
-        setHasChanges(false);
+        if (!ruleId) {
+          setHasChanges(false);
+        }
         setToast({
           message: `✅ ${savedCount} configuração(ões) salva(s) com sucesso!`,
           type: 'success',
