@@ -33,7 +33,7 @@ router.post('/login', async (req, res) => {
     
     const payload = { id: user.id, email: user.email, role: user.role };
     // @ts-ignore - jsonwebtoken types are strict but string works at runtime
-    const token = jwt.sign(payload, jwtSecret, { expiresIn: jwtExpiresIn });
+    const token = jwt.sign(payload, jwtSecret, { expiresIn: jwtExpiresIn as any });
 
     res.json({
       token,
