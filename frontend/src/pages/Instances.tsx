@@ -34,6 +34,9 @@ export default function Instances() {
   const [instances, setInstances] = useState<Instance[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
+  const [showQrModal, setShowQrModal] = useState(false);
+  const [qrCode, setQrCode] = useState<string | null>(null);
+  const [qrInstanceName, setQrInstanceName] = useState<string>('');
   const [editingInstance, setEditingInstance] = useState<Instance | null>(null);
   const [formData, setFormData] = useState({
     name: '',
@@ -96,8 +99,10 @@ export default function Instances() {
     try {
       const response = await api.post(`/instances/${id}/connect`);
       if (response.data.qr_code) {
-        // Mostrar QR code em modal
-        alert('QR Code gerado! Escaneie com o WhatsApp.');
+        const instance = instances.find((inst) => inst.id === id);
+        setQrCode(response.data.qr_code);
+        setQrInstanceName(instance?.name || 'Instância');
+        setShowQrModal(true);
       }
       loadInstances();
     } catch (error: any) {
@@ -315,7 +320,7 @@ export default function Instances() {
         )}
       </main>
 
-      {/* Modal */}
+      {/* Modal de Formulário */}
       {showModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
           <Card className="w-full max-w-md">
@@ -382,6 +387,42 @@ export default function Instances() {
                   </Button>
                 </div>
               </form>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Modal de QR Code */}
+      {showQrModal && qrCode && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+          <Card className="w-full max-w-md">
+            <CardHeader>
+              <CardTitle>Escaneie o QR Code</CardTitle>
+              <CardDescription>
+                Escaneie este QR code com o WhatsApp para conectar a instância <strong>{qrInstanceName}</strong>
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex justify-center bg-white p-4 rounded-lg">
+                <img src={qrCode} alt="QR Code" className="max-w-full h-auto" />
+              </div>
+              <div className="text-center text-sm text-muted-foreground">
+                <p>1. Abra o WhatsApp no seu celular</p>
+                <p>2. Vá em Configurações → Aparelhos conectados</p>
+                <p>3. Toque em "Conectar um aparelho"</p>
+                <p>4. Escaneie este QR code</p>
+              </div>
+              <Button
+                variant="outline"
+                className="w-full"
+                onClick={() => {
+                  setShowQrModal(false);
+                  setQrCode(null);
+                  setQrInstanceName('');
+                }}
+              >
+                Fechar
+              </Button>
             </CardContent>
           </Card>
         </div>
