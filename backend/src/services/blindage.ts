@@ -28,15 +28,26 @@ export interface BlindageResult {
  */
 export async function getActiveRules(instanceId?: number): Promise<BlindageRule[]> {
   try {
+    // Buscar regras globais (instance_id IS NULL) e regras específicas da instância
     let query = `
       SELECT * FROM blindage_rules 
       WHERE enabled = TRUE
+        AND (
+          instance_id IS NULL 
+          OR instance_id = $1
+        )
     `;
     const params: any[] = [];
 
     if (instanceId) {
-      query += ` AND instance_id = $1`;
       params.push(instanceId);
+    } else {
+      // Se não há instanceId, buscar apenas regras globais
+      query = `
+        SELECT * FROM blindage_rules 
+        WHERE enabled = TRUE
+          AND instance_id IS NULL
+      `;
     }
 
     query += ` ORDER BY rule_type, id`;
@@ -429,7 +440,12 @@ async function selectInstance(
   
   if (selectionRule && selectionRule.enabled) {
     const config = selectionRule.config || {};
-    const selectedIds = Array.isArray(config.selected_instance_ids) ? config.selected_instance_ids : [];
+    
+    // Parse config se for string (vindo do banco)
+    const parsedConfig = typeof config === 'string' ? JSON.parse(config) : config;
+    const selectedIds = Array.isArray(parsedConfig.selected_instance_ids) ? parsedConfig.selected_instance_ids : [];
+    
+    console.log(`🔍 Regra de seleção encontrada. IDs selecionados:`, selectedIds);
     
     if (selectedIds.length > 0) {
       // Usar apenas instâncias selecionadas
@@ -441,12 +457,14 @@ async function selectInstance(
         [selectedIds]
       );
       availableInstanceIds = result.rows.map((r: any) => r.id);
+      console.log(`✅ Instâncias disponíveis (selecionadas):`, availableInstanceIds);
     } else {
       // Se nenhuma selecionada, usar todas as conectadas
       const result = await pool.query(
         `SELECT id FROM instances WHERE status = 'connected' ORDER BY id`
       );
       availableInstanceIds = result.rows.map((r: any) => r.id);
+      console.log(`✅ Instâncias disponíveis (todas conectadas):`, availableInstanceIds);
     }
   } else {
     // Sem regra de seleção, usar todas as conectadas
@@ -454,6 +472,7 @@ async function selectInstance(
       `SELECT id FROM instances WHERE status = 'connected' ORDER BY id`
     );
     availableInstanceIds = result.rows.map((r: any) => r.id);
+    console.log(`⚠️ Sem regra de seleção, usando todas conectadas:`, availableInstanceIds);
   }
   
   if (availableInstanceIds.length === 0) {
@@ -880,8 +899,10 @@ export async function createDefaultRules(instanceId: number): Promise<void> {
           timeout_ms: 10000, // Timeout de 10 segundos
         },
       },
+      // Regra de seleção de instâncias é GLOBAL (instance_id = NULL)
+      // Criar apenas uma vez, não por instância
       {
-        instance_id: instanceId,
+        instance_id: null, // NULL = regra global
         rule_name: 'Seleção de Instâncias',
         rule_type: 'instance_selection',
         enabled: true,

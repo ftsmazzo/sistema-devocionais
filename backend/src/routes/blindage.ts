@@ -81,20 +81,23 @@ router.post('/rules', async (req: AuthRequest, res) => {
   try {
     const { instance_id, rule_name, rule_type, enabled = true, config } = req.body;
 
-    if (!instance_id || !rule_name || !rule_type || !config) {
+    if (!rule_name || !rule_type || !config) {
       return res.status(400).json({
-        error: 'Campos obrigatórios: instance_id, rule_name, rule_type, config',
+        error: 'Campos obrigatórios: rule_name, rule_type, config',
       });
     }
 
-    // Validar que a instância existe
-    const instanceCheck = await pool.query(
-      'SELECT id FROM instances WHERE id = $1',
-      [instance_id]
-    );
+    // instance_id pode ser null para regras globais (ex: instance_selection)
+    // Se fornecido, validar que a instância existe
+    if (instance_id !== null && instance_id !== undefined) {
+      const instanceCheck = await pool.query(
+        'SELECT id FROM instances WHERE id = $1',
+        [instance_id]
+      );
 
-    if (instanceCheck.rows.length === 0) {
-      return res.status(404).json({ error: 'Instância não encontrada' });
+      if (instanceCheck.rows.length === 0) {
+        return res.status(404).json({ error: 'Instância não encontrada' });
+      }
     }
 
     const result = await pool.query(

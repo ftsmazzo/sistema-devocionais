@@ -75,39 +75,30 @@ export default function Blindage() {
         config: typeof rule.config === 'string' ? JSON.parse(rule.config) : rule.config,
       }));
       
-      // Se a regra de seleção não existe, criar automaticamente
+      // Se a regra de seleção não existe, criar automaticamente como GLOBAL (instance_id = null)
       const selectionRule = loadedRules.find((r: any) => r.rule_type === 'instance_selection');
       if (!selectionRule) {
         try {
-          // Se há instanceId, criar para essa instância, senão criar para a primeira instância disponível
-          let targetInstanceId = instanceId ? parseInt(instanceId) : null;
-          
-          if (!targetInstanceId && allInstances.length > 0) {
-            targetInstanceId = allInstances[0].id;
-          }
-          
-          if (targetInstanceId) {
-            console.log(`Criando regra de seleção para instância ${targetInstanceId}`);
-            // Criar regra de seleção de instâncias
-            await api.post('/blindage/rules', {
-              instance_id: targetInstanceId,
-              rule_name: 'Seleção de Instâncias',
-              rule_type: 'instance_selection',
-              enabled: true,
-              config: {
-                selected_instance_ids: [],
-                max_simultaneous: 1,
-                auto_switch_on_failure: true,
-                retry_after_pause: true,
-              },
-            });
-            // Recarregar regras após criar
-            const newRulesRes = await api.get(`/blindage/rules${instanceId ? `?instanceId=${instanceId}` : ''}`);
-            loadedRules = (newRulesRes.data.rules || []).map((rule: any) => ({
-              ...rule,
-              config: typeof rule.config === 'string' ? JSON.parse(rule.config) : rule.config,
-            }));
-          }
+          console.log('Criando regra de seleção GLOBAL (instance_id = null)');
+          // Criar regra de seleção de instâncias como GLOBAL (sem instance_id)
+          await api.post('/blindage/rules', {
+            instance_id: null, // NULL = regra global
+            rule_name: 'Seleção de Instâncias',
+            rule_type: 'instance_selection',
+            enabled: true,
+            config: {
+              selected_instance_ids: [],
+              max_simultaneous: 1,
+              auto_switch_on_failure: true,
+              retry_after_pause: true,
+            },
+          });
+          // Recarregar regras após criar
+          const newRulesRes = await api.get(`/blindage/rules${instanceId ? `?instanceId=${instanceId}` : ''}`);
+          loadedRules = (newRulesRes.data.rules || []).map((rule: any) => ({
+            ...rule,
+            config: typeof rule.config === 'string' ? JSON.parse(rule.config) : rule.config,
+          }));
         } catch (error: any) {
           console.error('Erro ao criar regra de seleção:', error);
           console.error('Detalhes:', error.response?.data || error.message);
