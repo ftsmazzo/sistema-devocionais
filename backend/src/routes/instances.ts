@@ -126,22 +126,46 @@ router.post('/:id/connect', async (req, res) => {
     const evolutionUrl = `${instance.api_url}/instance/create`;
 
     console.log(`🔗 Conectando instância ${instance.instance_name} em ${evolutionUrl}`);
+    console.log(`   API Key: ${instance.api_key.substring(0, 10)}...`);
 
     // Criar instância no Evolution API
-    // A Evolution API usa apikey no header, não precisa de token no body
-    const evolutionResponse = await axios.post(
-      evolutionUrl,
-      {
-        instanceName: instance.instance_name,
-        qrcode: true,
-      },
-      {
-        headers: {
-          'apikey': instance.api_key,
-          'Content-Type': 'application/json',
-        },
+    // Tentar diferentes formatos de autenticação
+    const requestBody = {
+      instanceName: instance.instance_name,
+      qrcode: true,
+    };
+
+    // Tentar primeiro com apikey no header
+    let evolutionResponse;
+    try {
+      evolutionResponse = await axios.post(
+        evolutionUrl,
+        requestBody,
+        {
+          headers: {
+            'apikey': instance.api_key,
+            'Content-Type': 'application/json',
+          },
+        }
+      );
+    } catch (error: any) {
+      // Se falhar com apikey, tentar com Authorization Bearer
+      if (error.response?.status === 400 || error.response?.status === 401) {
+        console.log('   Tentando com Authorization Bearer...');
+        evolutionResponse = await axios.post(
+          evolutionUrl,
+          requestBody,
+          {
+            headers: {
+              'Authorization': `Bearer ${instance.api_key}`,
+              'Content-Type': 'application/json',
+            },
+          }
+        );
+      } else {
+        throw error;
       }
-    );
+    }
 
     console.log(`✅ Resposta da Evolution API:`, JSON.stringify(evolutionResponse.data, null, 2));
 
