@@ -550,7 +550,7 @@ async function configureWebhook(instance: any, instanceId: number) {
           'Content-Type': 'application/json',
         },
         byEvents: false, // false = envia todos os eventos listados
-        base64: false,
+        base64: true, // Habilitar envio de mídia em base64
         events: [
           'APPLICATION_STARTUP',
           'QRCODE_UPDATED',
@@ -576,6 +576,8 @@ async function configureWebhook(instance: any, instanceId: number) {
           'CALL',
           'TYPEBOT_START',
           'TYPEBOT_CHANGE_STATUS',
+          'REMOVE_INSTANCE', // Evento quando instância é removida
+          'LOGOUT_INSTANCE', // Evento quando instância faz logout
         ],
       },
     };
