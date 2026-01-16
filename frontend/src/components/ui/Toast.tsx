@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { CheckCircle2, XCircle, Info, AlertCircle, X } from 'lucide-react';
 
 interface ToastProps {
