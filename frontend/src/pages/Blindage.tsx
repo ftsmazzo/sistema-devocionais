@@ -234,7 +234,7 @@ export default function Blindage() {
   };
 
   return (
-    <>
+    <div>
       <div className="max-w-7xl mx-auto">
         {/* Header */}
         <div className="mb-6">
@@ -980,16 +980,16 @@ export default function Blindage() {
         </div>
       </div>
 
+      </div>
+      
+      {/* Toast Notification - Renderizado fora do container */}
+      {toast && (
+        <Toast
+          message={toast.message}
+          type={toast.type}
+          onClose={() => setToast(null)}
+        />
+      )}
     </div>
-    
-    {/* Toast Notification - Renderizado fora do container */}
-    {toast && (
-      <Toast
-        message={toast.message}
-        type={toast.type}
-        onClose={() => setToast(null)}
-      />
-    )}
-    </>
   );
 }
