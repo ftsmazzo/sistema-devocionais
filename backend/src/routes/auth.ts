@@ -1,6 +1,6 @@
 import express from 'express';
 import bcrypt from 'bcryptjs';
-import jwt, { SignOptions } from 'jsonwebtoken';
+import jwt from 'jsonwebtoken';
 import { pool } from '../database';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
 
@@ -32,8 +32,8 @@ router.post('/login', async (req, res) => {
     const jwtExpiresIn = process.env.JWT_EXPIRES_IN || '7d';
     
     const payload = { id: user.id, email: user.email, role: user.role };
-    // @ts-ignore - jsonwebtoken types are strict but string works at runtime
-    const token = jwt.sign(payload, jwtSecret, { expiresIn: jwtExpiresIn as any });
+    // @ts-expect-error - jsonwebtoken accepts string for expiresIn at runtime
+    const token = jwt.sign(payload, jwtSecret, { expiresIn: jwtExpiresIn });
 
     res.json({
       token,
