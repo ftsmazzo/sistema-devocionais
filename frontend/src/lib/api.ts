@@ -13,7 +13,8 @@ api.interceptors.request.use((config) => {
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
-  console.log('📤 Requisição:', config.method?.toUpperCase(), config.url, config.baseURL + config.url);
+  const fullUrl = `${config.baseURL || ''}${config.url || ''}`;
+  console.log('📤 Requisição:', config.method?.toUpperCase(), config.url, fullUrl);
   return config;
 });
 
