@@ -3,10 +3,8 @@ import { Link, useLocation } from 'react-router-dom';
 import { useAuthStore } from '@/store/authStore';
 import Button from '@/components/ui/Button';
 import {
-  LayoutDashboard,
   Shield,
   MessageSquare,
-  Settings,
   LogOut,
   Menu,
   X,

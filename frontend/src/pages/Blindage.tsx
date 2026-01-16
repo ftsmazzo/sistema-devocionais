@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import api from '@/lib/api';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
@@ -17,7 +17,6 @@ import {
   FileText,
   Phone,
   Save,
-  ArrowLeft,
   CheckCircle2,
 } from 'lucide-react';
 
@@ -38,7 +37,6 @@ interface Instance {
 
 export default function Blindage() {
   const { instanceId } = useParams<{ instanceId: string }>();
-  const navigate = useNavigate();
   const [instance, setInstance] = useState<Instance | null>(null);
   const [rules, setRules] = useState<BlindageRule[]>([]);
   const [loading, setLoading] = useState(true);
