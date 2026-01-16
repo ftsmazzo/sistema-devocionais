@@ -138,7 +138,7 @@ export default function Instances() {
   const getStatusIcon = (status: string) => {
     switch (status) {
       case 'connected':
-        return <CheckCircle2 className="h-5 w-5 text-green-500" />;
+        return <CheckCircle2 className="h-4 w-4 text-green-500" />;
       case 'connecting':
         return <Clock className="h-4 w-4 text-yellow-500" />;
       default:
