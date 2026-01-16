@@ -399,24 +399,30 @@ export default function Blindage() {
           </Card>
 
           {/* 3. Rotação de Instâncias */}
-          <Card className="border border-gray-200 hover:border-indigo-300 hover:shadow-lg hover:shadow-indigo-500/10 transition-all duration-300 rounded-2xl overflow-hidden bg-white">
-            <CardHeader className="bg-gradient-to-br from-gray-50 to-white border-b border-gray-100">
-              <CardTitle className="flex items-center gap-2.5 text-lg">
-                <div className="w-8 h-8 bg-gradient-to-br from-purple-500 to-pink-500 rounded-lg flex items-center justify-center">
-                  <RotateCcw className="h-4 w-4 text-white" />
+          <Card className="border border-gray-200 hover:border-indigo-300 hover:shadow-md transition-all duration-200 rounded-xl overflow-hidden bg-white">
+            <CardHeader className="bg-gradient-to-br from-gray-50 to-white border-b border-gray-100 py-3 px-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-7 h-7 bg-gradient-to-br from-purple-500 to-pink-500 rounded-lg flex items-center justify-center flex-shrink-0">
+                    <RotateCcw className="h-3.5 w-3.5 text-white" />
+                  </div>
+                  <div>
+                    <CardTitle className="text-base font-semibold text-gray-900">
+                      Rotação de Instâncias
+                    </CardTitle>
+                    <CardDescription className="text-xs text-gray-500 mt-0.5">
+                      Distribuição entre instâncias
+                    </CardDescription>
+                  </div>
                 </div>
-                Rotação de Instâncias
                 <Tooltip content="Distribui mensagens entre todas as instâncias conectadas, evitando sobrecarga em uma única instância. Funciona em modo round-robin (rodízio)." />
-              </CardTitle>
-              <CardDescription className="text-sm text-gray-500 mt-1">
-                Configure a distribuição entre instâncias
-              </CardDescription>
+              </div>
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className="p-4 space-y-3">
               {groupedRules.rotation ? (
                 <>
-                  <div className="flex items-center justify-between">
-                    <Label>Habilitar Rotação</Label>
+                  <div className="flex items-center justify-between py-1">
+                    <Label className="text-sm mb-0">Habilitar</Label>
                     <Switch
                       checked={groupedRules.rotation.enabled}
                       onCheckedChange={(checked) => updateRule(groupedRules.rotation!.id, { enabled: checked })}
@@ -424,26 +430,25 @@ export default function Blindage() {
                   </div>
                   
                   {groupedRules.rotation.enabled && (
-                    <div className="space-y-4 pt-4 border-t border-gray-100">
-                      <div>
-                        <Label htmlFor="min_delay_instances">
-                          Delay Mínimo Entre Instâncias (segundos)
-                          <Tooltip content="Tempo mínimo entre usar instâncias diferentes. Evita alternância muito rápida." />
-                        </Label>
-                        <Input
-                          id="min_delay_instances"
-                          type="number"
-                          min="0"
-                          max="60"
-                          value={groupedRules.rotation.config.min_delay_between_instances || 1}
-                          onChange={(e) => updateRuleConfig(groupedRules.rotation!.id, 'min_delay_between_instances', parseInt(e.target.value))}
-                        />
-                      </div>
+                    <div className="pt-2 border-t border-gray-100">
+                      <Label htmlFor="min_delay_instances" className="text-xs mb-1">
+                        Delay Entre Instâncias (s)
+                        <Tooltip content="Tempo mínimo entre usar instâncias diferentes." />
+                      </Label>
+                      <Input
+                        id="min_delay_instances"
+                        type="number"
+                        min="0"
+                        max="60"
+                        value={groupedRules.rotation.config.min_delay_between_instances || 1}
+                        onChange={(e) => updateRuleConfig(groupedRules.rotation!.id, 'min_delay_between_instances', parseInt(e.target.value))}
+                        className="h-9 text-sm"
+                      />
                     </div>
                   )}
                 </>
               ) : (
-                <p className="text-gray-500 text-sm">Regra não encontrada</p>
+                <p className="text-gray-400 text-xs">Regra não encontrada</p>
               )}
             </CardContent>
           </Card>
