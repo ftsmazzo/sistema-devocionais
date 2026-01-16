@@ -283,6 +283,20 @@ export async function initializeDatabase() {
       CREATE INDEX IF NOT EXISTS idx_blindage_actions_created_at ON blindage_actions(created_at);
     `);
 
+    // Criar tabela de cache de validação de números
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS number_validation_cache (
+        phone_number VARCHAR(20) PRIMARY KEY,
+        is_valid BOOLEAN NOT NULL,
+        checked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_number_validation_cache_checked_at 
+      ON number_validation_cache(checked_at);
+    `);
+
     // Melhorar tabela webhook_events
     await client.query(`
       ALTER TABLE webhook_events

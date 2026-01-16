@@ -1,4 +1,5 @@
 import { pool } from '../database';
+import axios from 'axios';
 
 export interface BlindageRule {
   id: number;
@@ -63,37 +64,43 @@ export async function applyBlindage(
     // 1. Buscar regras ativas
     const rules = await getActiveRules(messageData.instanceId);
 
-    // 2. Validar conteúdo
+    // 2. Validar número e verificar WhatsApp
+    const numberValidation = await validatePhoneNumber(messageData.to, messageData.instanceId, rules);
+    if (!numberValidation.canSend) {
+      return numberValidation;
+    }
+
+    // 3. Validar conteúdo
     const contentValidation = await validateContent(messageData.message, rules);
     if (!contentValidation.canSend) {
       return contentValidation;
     }
 
-    // 3. Selecionar instância (rotação)
+    // 4. Selecionar instância (rotação)
     const instanceSelection = await selectInstance(messageData.instanceId, rules);
     if (!instanceSelection.canSend) {
       return instanceSelection;
     }
 
-    // 4. Verificar saúde da instância
+    // 5. Verificar saúde da instância
     const healthCheck = await checkInstanceHealth(instanceSelection.selectedInstanceId!, rules);
     if (!healthCheck.canSend) {
       return healthCheck;
     }
 
-    // 5. Verificar limites
+    // 6. Verificar limites
     const limitCheck = await checkLimits(instanceSelection.selectedInstanceId!, rules);
     if (!limitCheck.canSend) {
       return limitCheck;
     }
 
-    // 6. Verificar horários permitidos
+    // 7. Verificar horários permitidos
     const timeCheck = await checkAllowedHours(instanceSelection.selectedInstanceId!, rules);
     if (!timeCheck.canSend) {
       return timeCheck;
     }
 
-    // 7. Calcular delay necessário
+    // 8. Calcular delay necessário
     const delay = await calculateDelay(instanceSelection.selectedInstanceId!, rules);
 
     // 8. Registrar ação de blindagem
@@ -116,6 +123,246 @@ export async function applyBlindage(
       blockedBy: 'system_error',
     };
   }
+}
+
+/**
+ * Valida número de telefone e verifica se está no WhatsApp
+ */
+async function validatePhoneNumber(
+  phoneNumber: string,
+  instanceId: number | undefined,
+  rules: BlindageRule[]
+): Promise<BlindageResult> {
+  const numberValidationRule = rules.find(r => r.rule_type === 'number_validation');
+  if (!numberValidationRule || !numberValidationRule.enabled) {
+    return { canSend: true };
+  }
+
+  const config = numberValidationRule.config || {};
+
+  // Normalizar número (sempre fazer, mesmo se não validar formato)
+  const cleanNumber = phoneNumber.replace(/[\s\-\(\)]/g, '');
+  let normalizedNumber = cleanNumber;
+  
+  if (!normalizedNumber.startsWith('+')) {
+    // Se não tem +, assumir código do Brasil (55) se não especificado
+    if (config.default_country_code) {
+      normalizedNumber = `+${config.default_country_code}${normalizedNumber}`;
+    } else if (normalizedNumber.startsWith('55')) {
+      normalizedNumber = `+${normalizedNumber}`;
+    } else {
+      normalizedNumber = `+55${normalizedNumber}`;
+    }
+  }
+
+  // 1. Validar formato do número (E.164)
+  if (config.validate_format !== false) {
+    // Validar formato E.164 básico: +[1-9][0-9]{1,14}
+    const e164Regex = /^\+[1-9]\d{1,14}$/;
+    if (!e164Regex.test(normalizedNumber)) {
+      await logBlindageAction(numberValidationRule.instance_id, {
+        action_type: 'number_blocked',
+        reason: 'invalid_format',
+        phone_number: phoneNumber,
+        normalized_number: normalizedNumber,
+      }, numberValidationRule.id);
+
+      return {
+        canSend: false,
+        reason: `Número com formato inválido: ${phoneNumber}`,
+        blockedBy: 'number_validation',
+      };
+    }
+  }
+
+  // 2. Verificar se número está no WhatsApp (se configurado)
+  if (config.check_whatsapp !== false) {
+    try {
+      // Buscar instância para usar na verificação
+      let instanceForCheck = instanceId;
+      if (!instanceForCheck) {
+        // Se não tem instância específica, buscar uma conectada
+        const instanceResult = await pool.query(
+          `SELECT id, instance_name, api_url, api_key 
+           FROM instances 
+           WHERE status = 'connected' 
+           LIMIT 1`
+        );
+        if (instanceResult.rows.length === 0) {
+          // Se não há instância conectada, permitir envio (fallback)
+          if (config.require_whatsapp_check === true) {
+            return {
+              canSend: false,
+              reason: 'Nenhuma instância conectada para verificar número',
+              blockedBy: 'number_validation',
+            };
+          }
+          return { canSend: true };
+        }
+        instanceForCheck = instanceResult.rows[0].id;
+      }
+
+      // Buscar dados da instância
+      const instanceResult = await pool.query(
+        `SELECT instance_name, api_url, api_key 
+         FROM instances 
+         WHERE id = $1`,
+        [instanceForCheck]
+      );
+
+      if (instanceResult.rows.length === 0) {
+        return {
+          canSend: false,
+          reason: 'Instância não encontrada',
+          blockedBy: 'number_validation',
+        };
+      }
+
+      const instance = instanceResult.rows[0];
+      const evolutionApiUrl = process.env.EVOLUTION_API_URL || instance.api_url;
+      const evolutionApiKey = process.env.EVOLUTION_API_KEY || instance.api_key;
+
+      // Normalizar número para verificação (remover +)
+      const numberToCheck = normalizedNumber.replace('+', '');
+
+      // Verificar cache primeiro
+      const cacheKey = `whatsapp_check_${numberToCheck}`;
+      const cacheResult = await pool.query(
+        `SELECT is_valid, checked_at 
+         FROM number_validation_cache 
+         WHERE phone_number = $1 
+           AND checked_at > NOW() - INTERVAL '${config.cache_hours || 24} hours'`,
+        [numberToCheck]
+      );
+
+      let isValid = false;
+      if (cacheResult.rows.length > 0) {
+        isValid = cacheResult.rows[0].is_valid;
+        console.log(`   ✅ Número verificado no cache: ${numberToCheck} = ${isValid ? 'válido' : 'inválido'}`);
+      } else {
+        // Verificar via Evolution API
+        try {
+          // Evolution API endpoint para verificar números
+          // Tentar diferentes endpoints possíveis
+          let checkUrl = `${evolutionApiUrl}/chat/whatsappNumbers/${instance.instance_name}`;
+          let checkResponse: any;
+          
+          try {
+            // Tentar endpoint POST com array de números
+            checkResponse = await axios.post(
+              checkUrl,
+              {
+                numbers: [numberToCheck],
+              },
+              {
+                headers: {
+                  'apikey': evolutionApiKey,
+                  'Content-Type': 'application/json',
+                },
+                timeout: config.timeout_ms || 10000,
+                validateStatus: () => true,
+              }
+            );
+          } catch (postError: any) {
+            // Se POST falhar, tentar GET com query parameter
+            if (postError.response?.status === 404 || postError.code === 'ECONNREFUSED') {
+              checkUrl = `${evolutionApiUrl}/chat/whatsappNumbers/${instance.instance_name}?numbers=${numberToCheck}`;
+              checkResponse = await axios.get(checkUrl, {
+                headers: {
+                  'apikey': evolutionApiKey,
+                },
+                timeout: config.timeout_ms || 10000,
+                validateStatus: () => true,
+              });
+            } else {
+              throw postError;
+            }
+          }
+
+          // Evolution API retorna array com status de cada número
+          if (checkResponse && checkResponse.data) {
+            if (Array.isArray(checkResponse.data)) {
+              const numberStatus = checkResponse.data.find((n: any) => 
+                n.jid === `${numberToCheck}@s.whatsapp.net` || 
+                n.number === numberToCheck ||
+                n.jid?.includes(numberToCheck)
+              );
+              isValid = numberStatus?.exists === true || 
+                       numberStatus?.status === 'valid' || 
+                       numberStatus?.onWhatsApp === true ||
+                       numberStatus?.isWhatsApp === true;
+            } else if (checkResponse.data.exists !== undefined) {
+              isValid = checkResponse.data.exists === true;
+            } else if (checkResponse.status === 200) {
+              // Se retornou 200, assumir que está válido
+              isValid = true;
+            }
+          }
+
+          // Salvar no cache
+          await pool.query(
+            `INSERT INTO number_validation_cache (phone_number, is_valid, checked_at)
+             VALUES ($1, $2, CURRENT_TIMESTAMP)
+             ON CONFLICT (phone_number) 
+             DO UPDATE SET is_valid = $2, checked_at = CURRENT_TIMESTAMP`,
+            [numberToCheck, isValid]
+          );
+
+          console.log(`   ${isValid ? '✅' : '❌'} Número verificado via API: ${numberToCheck} = ${isValid ? 'válido' : 'inválido'}`);
+        } catch (apiError: any) {
+          console.error('   ⚠️ Erro ao verificar número via Evolution API:', apiError.message);
+          
+          // Se falhar e não for obrigatório, permitir envio
+          if (config.require_whatsapp_check !== true) {
+            console.log('   ⚠️ Verificação falhou, mas permitindo envio (não obrigatório)');
+            return { canSend: true };
+          }
+
+          await logBlindageAction(numberValidationRule.instance_id, {
+            action_type: 'number_check_failed',
+            reason: 'api_error',
+            phone_number: numberToCheck,
+            error: apiError.message,
+          }, numberValidationRule.id);
+
+          return {
+            canSend: false,
+            reason: `Erro ao verificar número no WhatsApp: ${apiError.message}`,
+            blockedBy: 'number_validation',
+          };
+        }
+      }
+
+      if (!isValid) {
+        await logBlindageAction(numberValidationRule.instance_id, {
+          action_type: 'number_blocked',
+          reason: 'not_on_whatsapp',
+          phone_number: numberToCheck,
+        }, numberValidationRule.id);
+
+        return {
+          canSend: false,
+          reason: `Número ${numberToCheck} não está registrado no WhatsApp`,
+          blockedBy: 'number_validation',
+        };
+      }
+    } catch (error: any) {
+      console.error('Erro ao validar número:', error);
+      
+      // Se não for obrigatório, permitir envio
+      if (config.require_whatsapp_check !== true) {
+        return { canSend: true };
+      }
+
+      return {
+        canSend: false,
+        reason: `Erro ao validar número: ${error.message}`,
+        blockedBy: 'number_validation',
+      };
+    }
+  }
+
+  return { canSend: true };
 }
 
 /**
@@ -583,6 +830,20 @@ export async function createDefaultRules(instanceId: number): Promise<void> {
         config: {
           max_length: 4096,
           blocked_words: [],
+        },
+      },
+      {
+        instance_id: instanceId,
+        rule_name: 'Validação de Número',
+        rule_type: 'number_validation',
+        enabled: true,
+        config: {
+          validate_format: true,
+          check_whatsapp: true,
+          require_whatsapp_check: false, // Se true, bloqueia se não conseguir verificar
+          default_country_code: '55', // Código do Brasil
+          cache_hours: 24, // Cache por 24 horas
+          timeout_ms: 10000, // Timeout de 10 segundos
         },
       },
     ];
