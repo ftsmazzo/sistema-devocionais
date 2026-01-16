@@ -509,24 +509,30 @@ export default function Blindage() {
           </Card>
 
           {/* 5. Health Check */}
-          <Card className="border border-gray-200 hover:border-indigo-300 hover:shadow-lg hover:shadow-indigo-500/10 transition-all duration-300 rounded-2xl overflow-hidden bg-white">
-            <CardHeader className="bg-gradient-to-br from-gray-50 to-white border-b border-gray-100">
-              <CardTitle className="flex items-center gap-2.5 text-lg">
-                <div className="w-8 h-8 bg-gradient-to-br from-red-500 to-rose-500 rounded-lg flex items-center justify-center">
-                  <Heart className="h-4 w-4 text-white" />
+          <Card className="border border-gray-200 hover:border-indigo-300 hover:shadow-md transition-all duration-200 rounded-xl overflow-hidden bg-white">
+            <CardHeader className="bg-gradient-to-br from-gray-50 to-white border-b border-gray-100 py-3 px-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-7 h-7 bg-gradient-to-br from-red-500 to-rose-500 rounded-lg flex items-center justify-center flex-shrink-0">
+                    <Heart className="h-3.5 w-3.5 text-white" />
+                  </div>
+                  <div>
+                    <CardTitle className="text-base font-semibold text-gray-900">
+                      Health Check
+                    </CardTitle>
+                    <CardDescription className="text-xs text-gray-500 mt-0.5">
+                      Monitoramento de saúde
+                    </CardDescription>
+                  </div>
                 </div>
-                Health Check
                 <Tooltip content="Monitora a saúde das instâncias e pausa envios automaticamente se uma instância estiver com problemas (degradada ou down)." />
-              </CardTitle>
-              <CardDescription className="text-sm text-gray-500 mt-1">
-                Configure monitoramento de saúde das instâncias
-              </CardDescription>
+              </div>
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className="p-4 space-y-3">
               {groupedRules.health ? (
                 <>
-                  <div className="flex items-center justify-between">
-                    <Label>Habilitar Health Check</Label>
+                  <div className="flex items-center justify-between py-1">
+                    <Label className="text-sm mb-0">Habilitar</Label>
                     <Switch
                       checked={groupedRules.health.enabled}
                       onCheckedChange={(checked) => updateRule(groupedRules.health!.id, { enabled: checked })}
@@ -534,17 +540,17 @@ export default function Blindage() {
                   </div>
                   
                   {groupedRules.health.enabled && (
-                    <div className="space-y-4 pt-4 border-t border-gray-100">
-                      <div className="flex items-center justify-between">
-                        <Label>Pausar se Degradada</Label>
+                    <div className="space-y-2 pt-2 border-t border-gray-100">
+                      <div className="flex items-center justify-between py-1">
+                        <Label className="text-xs mb-0">Pausar se Degradada</Label>
                         <Switch
                           checked={groupedRules.health.config.pause_if_degraded !== false}
                           onCheckedChange={(checked) => updateRuleConfig(groupedRules.health!.id, 'pause_if_degraded', checked)}
                         />
                       </div>
                       
-                      <div className="flex items-center justify-between">
-                        <Label>Pausar se Down</Label>
+                      <div className="flex items-center justify-between py-1">
+                        <Label className="text-xs mb-0">Pausar se Down</Label>
                         <Switch
                           checked={groupedRules.health.config.pause_if_down !== false}
                           onCheckedChange={(checked) => updateRuleConfig(groupedRules.health!.id, 'pause_if_down', checked)}
@@ -554,7 +560,7 @@ export default function Blindage() {
                   )}
                 </>
               ) : (
-                <p className="text-gray-500 text-sm">Regra não encontrada</p>
+                <p className="text-gray-400 text-xs">Regra não encontrada</p>
               )}
             </CardContent>
           </Card>
