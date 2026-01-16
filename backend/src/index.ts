@@ -11,12 +11,7 @@ dotenv.config();
 const app = express();
 const PORT: number = parseInt(process.env.PORT || '3001', 10);
 
-// Middlewares
-app.use(cors());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-
-// Health check (deve ser antes das rotas para responder rapidamente)
+// Health check ANTES dos middlewares para responder o mais rápido possível
 app.get('/health', (req, res) => {
   res.status(200).json({ 
     status: 'ok', 
@@ -25,7 +20,6 @@ app.get('/health', (req, res) => {
   });
 });
 
-// Health check alternativo
 app.get('/', (req, res) => {
   res.status(200).json({ 
     status: 'ok', 
@@ -33,6 +27,11 @@ app.get('/', (req, res) => {
     timestamp: new Date().toISOString()
   });
 });
+
+// Middlewares
+app.use(cors());
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 // Routes
 app.use('/api/auth', authRoutes);
@@ -51,7 +50,12 @@ async function start() {
     
     server = app.listen(PORT, '0.0.0.0', () => {
       console.log(`🚀 Servidor rodando na porta ${PORT}`);
+      console.log(`✅ Health check disponível em http://0.0.0.0:${PORT}/health`);
     });
+
+    // Manter o processo vivo
+    server.keepAliveTimeout = 65000;
+    server.headersTimeout = 66000;
 
     // Graceful shutdown
     const gracefulShutdown = (signal: string) => {
