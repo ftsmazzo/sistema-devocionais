@@ -44,6 +44,8 @@ app.use(errorHandler);
 async function start() {
   let server: any;
   let isShuttingDown = false;
+  let startTime = Date.now();
+  const MIN_UPTIME = 30000; // Mínimo de 30 segundos antes de permitir shutdown
   
   try {
     await initializeDatabase();
@@ -52,20 +54,29 @@ async function start() {
     server = app.listen(PORT, '0.0.0.0', () => {
       console.log(`🚀 Servidor rodando na porta ${PORT}`);
       console.log(`✅ Health check disponível em http://0.0.0.0:${PORT}/health`);
+      startTime = Date.now();
     });
 
     // Manter o processo vivo
     server.keepAliveTimeout = 65000;
     server.headersTimeout = 66000;
 
-    // Graceful shutdown com delay para dar tempo do health check
+    // Graceful shutdown - ignorar SIGTERM muito cedo
     const gracefulShutdown = (signal: string) => {
+      const uptime = Date.now() - startTime;
+      
+      // Ignorar SIGTERM se o servidor acabou de iniciar (menos de 30 segundos)
+      if (uptime < MIN_UPTIME) {
+        console.log(`⚠️ ${signal} recebido muito cedo (${Math.round(uptime/1000)}s), ignorando...`);
+        return;
+      }
+      
       if (isShuttingDown) {
         return; // Já está encerrando
       }
       
       isShuttingDown = true;
-      console.log(`⚠️ ${signal} recebido, aguardando 5 segundos antes de encerrar...`);
+      console.log(`⚠️ ${signal} recebido após ${Math.round(uptime/1000)}s, encerrando servidor...`);
       
       // Dar tempo para requisições em andamento terminarem
       setTimeout(() => {
