@@ -62,7 +62,12 @@ export default function Blindage() {
 
       // Carregar regras
       const rulesRes = await api.get(`/blindage/rules${instanceId ? `?instanceId=${instanceId}` : ''}`);
-      setRules(rulesRes.data.rules || []);
+      const loadedRules = (rulesRes.data.rules || []).map((rule: any) => ({
+        ...rule,
+        // Garantir que config seja um objeto, não string
+        config: typeof rule.config === 'string' ? JSON.parse(rule.config) : rule.config,
+      }));
+      setRules(loadedRules);
     } catch (error) {
       console.error('Erro ao carregar dados:', error);
       alert('Erro ao carregar configurações de blindagem');
@@ -101,32 +106,49 @@ export default function Blindage() {
 
       // Salvar cada regra modificada
       let savedCount = 0;
+      const errors: string[] = [];
+      
       for (const rule of rules) {
         try {
-          await api.put(`/blindage/rules/${rule.id}`, {
+          console.log(`Salvando regra ${rule.id}:`, {
             enabled: rule.enabled,
             config: rule.config,
           });
+          
+          const response = await api.put(`/blindage/rules/${rule.id}`, {
+            enabled: rule.enabled,
+            config: rule.config,
+          });
+          
+          console.log(`Regra ${rule.id} salva com sucesso:`, response.data);
           savedCount++;
         } catch (error: any) {
           console.error(`Erro ao salvar regra ${rule.id}:`, error);
-          throw error;
+          const errorMsg = error.response?.data?.error || error.message || 'Erro desconhecido';
+          errors.push(`Regra ${rule.id}: ${errorMsg}`);
         }
       }
 
-      setSaved(true);
-      setHasChanges(false);
-      setToast({
-        message: `✅ ${savedCount} configuração(ões) salva(s) com sucesso!`,
-        type: 'success',
-      });
+      if (errors.length > 0) {
+        setToast({
+          message: `⚠️ ${savedCount} salva(s), ${errors.length} erro(s): ${errors.join(', ')}`,
+          type: 'warning',
+        });
+      } else {
+        setSaved(true);
+        setHasChanges(false);
+        setToast({
+          message: `✅ ${savedCount} configuração(ões) salva(s) com sucesso!`,
+          type: 'success',
+        });
+      }
       
       // Recarregar dados para garantir sincronização
       await loadData();
     } catch (error: any) {
       console.error('Erro ao salvar:', error);
       setToast({
-        message: `❌ Erro ao salvar: ${error.response?.data?.error || 'Erro desconhecido'}`,
+        message: `❌ Erro ao salvar: ${error.response?.data?.error || error.message || 'Erro desconhecido'}`,
         type: 'error',
       });
     } finally {

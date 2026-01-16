@@ -41,15 +41,37 @@ export default function Toast({ message, type = 'info', duration = 3000, onClose
   const Icon = icons[type];
 
   return (
-    <div className={`fixed top-4 right-4 z-[9999] max-w-md w-[calc(100%-2rem)] sm:w-auto flex items-start gap-3 px-4 py-3 rounded-xl border shadow-2xl animate-in slide-in-from-top ${colors[type]}`} style={{ position: 'fixed' }}>
+    <div 
+      className={`fixed top-20 right-4 z-[99999] max-w-md w-[calc(100%-2rem)] sm:w-auto flex items-start gap-3 px-4 py-3 rounded-xl border-2 shadow-2xl ${colors[type]}`}
+      style={{ 
+        position: 'fixed',
+        top: '80px',
+        right: '16px',
+        zIndex: 99999,
+        animation: 'slideIn 0.3s ease-out'
+      }}
+    >
       <Icon className={`h-5 w-5 ${iconColors[type]} flex-shrink-0 mt-0.5`} />
-      <p className="text-sm font-medium flex-1 break-words whitespace-normal">{message}</p>
+      <p className="text-sm font-medium flex-1 break-words whitespace-normal leading-relaxed">{message}</p>
       <button
         onClick={onClose}
-        className={`${iconColors[type]} hover:opacity-70 transition-opacity flex-shrink-0`}
+        className={`${iconColors[type]} hover:opacity-70 transition-opacity flex-shrink-0 ml-1`}
+        aria-label="Fechar"
       >
         <X className="h-4 w-4" />
       </button>
+      <style>{`
+        @keyframes slideIn {
+          from {
+            transform: translateX(100%);
+            opacity: 0;
+          }
+          to {
+            transform: translateX(0);
+            opacity: 1;
+          }
+        }
+      `}</style>
     </div>
   );
 }
