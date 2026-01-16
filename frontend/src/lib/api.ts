@@ -24,9 +24,10 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    // Só redireciona para login se o erro 401 vier do nosso backend (não de APIs externas)
-    // APIs externas podem retornar 401, mas não devemos deslogar o usuário por isso
-    if (error.response?.status === 401 && error.config?.url?.startsWith('/api/auth')) {
+    // Só redireciona para login se o erro 401 vier do nosso backend (rotas /api/auth)
+    // Erros 401 de outras rotas não devem deslogar o usuário
+    if (error.response?.status === 401 && error.config?.url?.includes('/auth')) {
+      console.log('🔒 Token inválido, redirecionando para login...');
       localStorage.removeItem('token');
       localStorage.removeItem('user');
       window.location.href = '/login';
