@@ -3,14 +3,14 @@ FROM node:18-alpine
 WORKDIR /app
 
 # Copiar arquivos de dependências
-COPY package*.json ./
-COPY tsconfig.json ./
+COPY backend/package*.json ./
+COPY backend/tsconfig.json ./
 
 # Instalar dependências
 RUN npm ci
 
 # Copiar código fonte
-COPY src ./src
+COPY backend/src ./src
 
 # Build
 RUN npm run build
