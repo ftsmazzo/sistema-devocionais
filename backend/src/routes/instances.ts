@@ -128,32 +128,105 @@ router.post('/:id/connect', async (req, res) => {
     console.log(`🔗 Conectando instância ${instance.instance_name} em ${evolutionUrl}`);
     console.log(`   API Key: ${instance.api_key.substring(0, 10)}...`);
 
-    // Criar instância no Evolution API
-    // Tentar diferentes formatos de autenticação
-    const requestBody = {
-      instanceName: instance.instance_name,
-      qrcode: true,
-    };
-
-    // Evolution API geralmente usa 'apikey' no header (não Authorization Bearer)
-    // O erro "Invalid integration" pode significar que a API key está incorreta
-    // ou que precisa de campos adicionais no body
-    const evolutionResponse = await axios.post(
-      evolutionUrl,
-      requestBody,
-      {
+    // Verificar se a instância já existe na Evolution API
+    try {
+      const checkUrl = `${instance.api_url}/instance/fetchInstances`;
+      const checkResponse = await axios.get(checkUrl, {
         headers: {
           'apikey': instance.api_key,
-          'Content-Type': 'application/json',
         },
-        validateStatus: () => true, // Não lançar erro automaticamente
-      }
-    );
+        validateStatus: () => true,
+      });
 
-    // Verificar se a resposta foi bem-sucedida
-    if (evolutionResponse.status >= 400) {
-      console.error(`   Erro da Evolution API (${evolutionResponse.status}):`, evolutionResponse.data);
-      throw new Error(`Evolution API retornou erro: ${JSON.stringify(evolutionResponse.data)}`);
+      if (checkResponse.status === 200 && Array.isArray(checkResponse.data)) {
+        const existingInstance = checkResponse.data.find(
+          (inst: any) => inst.instance?.instanceName === instance.instance_name
+        );
+
+        if (existingInstance) {
+          console.log(`   ⚠️ Instância já existe na Evolution API`);
+          // Atualizar status e QR code se já existe
+          await pool.query(
+            `UPDATE instances 
+             SET status = $1,
+                 qr_code = $2,
+                 last_connection = CURRENT_TIMESTAMP,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = $3`,
+            [
+              existingInstance.instance?.status === 'open' ? 'connected' : 'connecting',
+              existingInstance.qrcode?.base64 || null,
+              id,
+            ]
+          );
+
+          return res.json({
+            message: 'Instância já existe na Evolution API',
+            qr_code: existingInstance.qrcode?.base64,
+            status: existingInstance.instance?.status,
+          });
+        }
+      }
+    } catch (checkError: any) {
+      console.log(`   ⚠️ Não foi possível verificar instâncias existentes: ${checkError.message}`);
+      // Continuar tentando criar mesmo se a verificação falhar
+    }
+
+    // Criar instância no Evolution API
+    // Tentar diferentes formatos de body
+    const requestBodies = [
+      // Formato 1: padrão
+      {
+        instanceName: instance.instance_name,
+        qrcode: true,
+      },
+      // Formato 2: com token no body
+      {
+        instanceName: instance.instance_name,
+        token: instance.api_key,
+        qrcode: true,
+      },
+      // Formato 3: apenas instanceName
+      {
+        instanceName: instance.instance_name,
+      },
+    ];
+
+    let evolutionResponse;
+    let lastError;
+
+    for (const requestBody of requestBodies) {
+      try {
+        console.log(`   Tentando formato:`, JSON.stringify(requestBody));
+        evolutionResponse = await axios.post(
+          evolutionUrl,
+          requestBody,
+          {
+            headers: {
+              'apikey': instance.api_key,
+              'Content-Type': 'application/json',
+            },
+            validateStatus: () => true,
+          }
+        );
+
+        if (evolutionResponse.status < 400) {
+          console.log(`   ✅ Sucesso com formato:`, JSON.stringify(requestBody));
+          break;
+        } else {
+          console.log(`   ❌ Erro ${evolutionResponse.status}:`, evolutionResponse.data);
+          lastError = evolutionResponse.data;
+        }
+      } catch (error: any) {
+        console.log(`   ❌ Erro ao tentar formato:`, error.message);
+        lastError = error.response?.data || error.message;
+      }
+    }
+
+    // Verificar se alguma tentativa foi bem-sucedida
+    if (!evolutionResponse || evolutionResponse.status >= 400) {
+      console.error(`   ❌ Todas as tentativas falharam. Último erro:`, lastError);
+      throw new Error(`Evolution API retornou erro: ${JSON.stringify(lastError)}`);
     }
 
     console.log(`✅ Resposta da Evolution API:`, JSON.stringify(evolutionResponse.data, null, 2));
