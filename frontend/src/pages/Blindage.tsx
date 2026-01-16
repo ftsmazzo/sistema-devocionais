@@ -141,13 +141,15 @@ export default function Blindage() {
         <div className="mb-8">
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-3">
-                <Shield className="h-8 w-8 text-blue-600" />
+              <h1 className="text-3xl font-bold bg-gradient-to-r from-gray-900 to-gray-700 bg-clip-text text-transparent flex items-center gap-3 mb-2">
+                <div className="w-10 h-10 bg-gradient-to-br from-indigo-500 to-purple-500 rounded-xl flex items-center justify-center shadow-md">
+                  <Shield className="h-6 w-6 text-white" />
+                </div>
                 Configurações de Blindagem
               </h1>
               {instance && (
-                <p className="text-gray-600 mt-2">
-                  Instância: <span className="font-semibold">{instance.name}</span>
+                <p className="text-gray-500 text-sm">
+                  Instância: <span className="font-semibold text-gray-700">{instance.name}</span>
                 </p>
               )}
             </div>
@@ -155,7 +157,7 @@ export default function Blindage() {
             <Button
               onClick={handleSave}
               disabled={saving}
-              className="flex items-center gap-2"
+              className="flex items-center gap-2 bg-gradient-to-r from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600 text-white shadow-md shadow-indigo-500/30 rounded-xl px-6"
             >
               {saved ? (
                 <>
@@ -173,16 +175,18 @@ export default function Blindage() {
         </div>
 
         {/* Grupos de Blindagem */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
           {/* 1. Delay Entre Mensagens */}
-          <Card className="border-2 hover:border-blue-300 transition-colors">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Clock className="h-5 w-5 text-blue-600" />
+          <Card className="border border-gray-200 hover:border-indigo-300 hover:shadow-lg hover:shadow-indigo-500/10 transition-all duration-300 rounded-2xl overflow-hidden bg-white">
+            <CardHeader className="bg-gradient-to-br from-gray-50 to-white border-b border-gray-100">
+              <CardTitle className="flex items-center gap-2.5 text-lg">
+                <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-cyan-500 rounded-lg flex items-center justify-center">
+                  <Clock className="h-4 w-4 text-white" />
+                </div>
                 Delay Entre Mensagens
                 <Tooltip content="Controla o tempo mínimo entre o envio de mensagens. O delay progressivo aumenta automaticamente conforme o volume de mensagens enviadas, ajudando a evitar bloqueios." />
               </CardTitle>
-              <CardDescription>
+              <CardDescription className="text-sm text-gray-500 mt-1">
                 Configure o intervalo de tempo entre envios
               </CardDescription>
             </CardHeader>
@@ -198,7 +202,7 @@ export default function Blindage() {
                   </div>
                   
                   {groupedRules.delay.enabled && (
-                    <div className="space-y-4 pt-4 border-t">
+                    <div className="space-y-4 pt-4 border-t border-gray-100">
                       <div>
                         <Label htmlFor="min_delay">
                           Delay Mínimo (segundos)
@@ -279,14 +283,16 @@ export default function Blindage() {
           </Card>
 
           {/* 2. Limite de Mensagens */}
-          <Card className="border-2 hover:border-blue-300 transition-colors">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <BarChart3 className="h-5 w-5 text-blue-600" />
+          <Card className="border border-gray-200 hover:border-indigo-300 hover:shadow-lg hover:shadow-indigo-500/10 transition-all duration-300 rounded-2xl overflow-hidden bg-white">
+            <CardHeader className="bg-gradient-to-br from-gray-50 to-white border-b border-gray-100">
+              <CardTitle className="flex items-center gap-2.5 text-lg">
+                <div className="w-8 h-8 bg-gradient-to-br from-green-500 to-emerald-500 rounded-lg flex items-center justify-center">
+                  <BarChart3 className="h-4 w-4 text-white" />
+                </div>
                 Limite de Mensagens
                 <Tooltip content="Define limites máximos de mensagens que podem ser enviadas por hora e por dia. Ajuda a evitar bloqueios por excesso de envios." />
               </CardTitle>
-              <CardDescription>
+              <CardDescription className="text-sm text-gray-500 mt-1">
                 Configure limites de envio por período
               </CardDescription>
             </CardHeader>
@@ -302,7 +308,7 @@ export default function Blindage() {
                   </div>
                   
                   {groupedRules.limit.enabled && (
-                    <div className="space-y-4 pt-4 border-t">
+                    <div className="space-y-4 pt-4 border-t border-gray-100">
                       <div>
                         <Label htmlFor="max_hour">
                           Máximo por Hora
@@ -342,14 +348,16 @@ export default function Blindage() {
           </Card>
 
           {/* 3. Rotação de Instâncias */}
-          <Card className="border-2 hover:border-blue-300 transition-colors">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <RotateCcw className="h-5 w-5 text-blue-600" />
+          <Card className="border border-gray-200 hover:border-indigo-300 hover:shadow-lg hover:shadow-indigo-500/10 transition-all duration-300 rounded-2xl overflow-hidden bg-white">
+            <CardHeader className="bg-gradient-to-br from-gray-50 to-white border-b border-gray-100">
+              <CardTitle className="flex items-center gap-2.5 text-lg">
+                <div className="w-8 h-8 bg-gradient-to-br from-purple-500 to-pink-500 rounded-lg flex items-center justify-center">
+                  <RotateCcw className="h-4 w-4 text-white" />
+                </div>
                 Rotação de Instâncias
                 <Tooltip content="Distribui mensagens entre todas as instâncias conectadas, evitando sobrecarga em uma única instância. Funciona em modo round-robin (rodízio)." />
               </CardTitle>
-              <CardDescription>
+              <CardDescription className="text-sm text-gray-500 mt-1">
                 Configure a distribuição entre instâncias
               </CardDescription>
             </CardHeader>
@@ -365,7 +373,7 @@ export default function Blindage() {
                   </div>
                   
                   {groupedRules.rotation.enabled && (
-                    <div className="space-y-4 pt-4 border-t">
+                    <div className="space-y-4 pt-4 border-t border-gray-100">
                       <div>
                         <Label htmlFor="min_delay_instances">
                           Delay Mínimo Entre Instâncias (segundos)
@@ -390,14 +398,16 @@ export default function Blindage() {
           </Card>
 
           {/* 4. Horários Permitidos */}
-          <Card className="border-2 hover:border-blue-300 transition-colors">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Calendar className="h-5 w-5 text-blue-600" />
+          <Card className="border border-gray-200 hover:border-indigo-300 hover:shadow-lg hover:shadow-indigo-500/10 transition-all duration-300 rounded-2xl overflow-hidden bg-white">
+            <CardHeader className="bg-gradient-to-br from-gray-50 to-white border-b border-gray-100">
+              <CardTitle className="flex items-center gap-2.5 text-lg">
+                <div className="w-8 h-8 bg-gradient-to-br from-amber-500 to-orange-500 rounded-lg flex items-center justify-center">
+                  <Calendar className="h-4 w-4 text-white" />
+                </div>
                 Horários Permitidos
                 <Tooltip content="Define em quais horários as mensagens podem ser enviadas. Bloqueia envios em horários de risco (madrugada) e permite apenas em horários comerciais." />
               </CardTitle>
-              <CardDescription>
+              <CardDescription className="text-sm text-gray-500 mt-1">
                 Configure horários de envio permitidos
               </CardDescription>
             </CardHeader>
@@ -413,7 +423,7 @@ export default function Blindage() {
                   </div>
                   
                   {groupedRules.hours.enabled && (
-                    <div className="pt-4 border-t">
+                    <div className="pt-4 border-t border-gray-100">
                       <p className="text-sm text-gray-600 mb-4">
                         Configure os horários permitidos (0-23). Exemplo: [8, 9, 10, ..., 20] permite envios das 8h às 20h.
                       </p>
@@ -443,14 +453,16 @@ export default function Blindage() {
           </Card>
 
           {/* 5. Health Check */}
-          <Card className="border-2 hover:border-blue-300 transition-colors">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Heart className="h-5 w-5 text-blue-600" />
+          <Card className="border border-gray-200 hover:border-indigo-300 hover:shadow-lg hover:shadow-indigo-500/10 transition-all duration-300 rounded-2xl overflow-hidden bg-white">
+            <CardHeader className="bg-gradient-to-br from-gray-50 to-white border-b border-gray-100">
+              <CardTitle className="flex items-center gap-2.5 text-lg">
+                <div className="w-8 h-8 bg-gradient-to-br from-red-500 to-rose-500 rounded-lg flex items-center justify-center">
+                  <Heart className="h-4 w-4 text-white" />
+                </div>
                 Health Check
                 <Tooltip content="Monitora a saúde das instâncias e pausa envios automaticamente se uma instância estiver com problemas (degradada ou down)." />
               </CardTitle>
-              <CardDescription>
+              <CardDescription className="text-sm text-gray-500 mt-1">
                 Configure monitoramento de saúde das instâncias
               </CardDescription>
             </CardHeader>
@@ -466,7 +478,7 @@ export default function Blindage() {
                   </div>
                   
                   {groupedRules.health.enabled && (
-                    <div className="space-y-4 pt-4 border-t">
+                    <div className="space-y-4 pt-4 border-t border-gray-100">
                       <div className="flex items-center justify-between">
                         <Label>Pausar se Degradada</Label>
                         <Switch
@@ -492,14 +504,16 @@ export default function Blindage() {
           </Card>
 
           {/* 6. Validação de Conteúdo */}
-          <Card className="border-2 hover:border-blue-300 transition-colors">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <FileText className="h-5 w-5 text-blue-600" />
+          <Card className="border border-gray-200 hover:border-indigo-300 hover:shadow-lg hover:shadow-indigo-500/10 transition-all duration-300 rounded-2xl overflow-hidden bg-white">
+            <CardHeader className="bg-gradient-to-br from-gray-50 to-white border-b border-gray-100">
+              <CardTitle className="flex items-center gap-2.5 text-lg">
+                <div className="w-8 h-8 bg-gradient-to-br from-indigo-500 to-blue-500 rounded-lg flex items-center justify-center">
+                  <FileText className="h-4 w-4 text-white" />
+                </div>
                 Validação de Conteúdo
                 <Tooltip content="Valida o conteúdo das mensagens antes do envio. Pode bloquear mensagens muito longas ou com palavras proibidas." />
               </CardTitle>
-              <CardDescription>
+              <CardDescription className="text-sm text-gray-500 mt-1">
                 Configure validações de conteúdo das mensagens
               </CardDescription>
             </CardHeader>
@@ -515,7 +529,7 @@ export default function Blindage() {
                   </div>
                   
                   {groupedRules.content.enabled && (
-                    <div className="space-y-4 pt-4 border-t">
+                    <div className="space-y-4 pt-4 border-t border-gray-100">
                       <div>
                         <Label htmlFor="max_length">
                           Tamanho Máximo (caracteres)
@@ -561,14 +575,16 @@ export default function Blindage() {
           </Card>
 
           {/* 7. Validação de Número */}
-          <Card className="border-2 hover:border-blue-300 transition-colors">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Phone className="h-5 w-5 text-blue-600" />
+          <Card className="border border-gray-200 hover:border-indigo-300 hover:shadow-lg hover:shadow-indigo-500/10 transition-all duration-300 rounded-2xl overflow-hidden bg-white">
+            <CardHeader className="bg-gradient-to-br from-gray-50 to-white border-b border-gray-100">
+              <CardTitle className="flex items-center gap-2.5 text-lg">
+                <div className="w-8 h-8 bg-gradient-to-br from-teal-500 to-cyan-500 rounded-lg flex items-center justify-center">
+                  <Phone className="h-4 w-4 text-white" />
+                </div>
                 Validação de Número
                 <Tooltip content="Valida o formato do número de telefone e verifica se está cadastrado no WhatsApp antes de enviar. Usa cache para melhor performance." />
               </CardTitle>
-              <CardDescription>
+              <CardDescription className="text-sm text-gray-500 mt-1">
                 Configure validação de números de telefone
               </CardDescription>
             </CardHeader>
@@ -584,7 +600,7 @@ export default function Blindage() {
                   </div>
                   
                   {groupedRules.number.enabled && (
-                    <div className="space-y-4 pt-4 border-t">
+                    <div className="space-y-4 pt-4 border-t border-gray-100">
                       <div className="flex items-center justify-between">
                         <Label>Validar Formato</Label>
                         <Switch
