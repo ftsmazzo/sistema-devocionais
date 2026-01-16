@@ -242,7 +242,7 @@ export default function Blindage() {
                       </div>
                       
                       {groupedRules.delay.config.progressive !== false && (
-                        <div className="space-y-4 pt-4 border-t">
+                        <div className="space-y-4 pt-4 border-t border-gray-100">
                           <div>
                             <Label htmlFor="base_delay">
                               Delay Base (segundos)
