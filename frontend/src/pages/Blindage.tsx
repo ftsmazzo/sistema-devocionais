@@ -46,6 +46,7 @@ export default function Blindage() {
   const [saved, setSaved] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' | 'warning' } | null>(null);
   const [hasChanges, setHasChanges] = useState(false);
+  const [allInstances, setAllInstances] = useState<any[]>([]);
 
   useEffect(() => {
     loadData();
@@ -803,6 +804,124 @@ export default function Blindage() {
                         <Button
                           size="sm"
                           onClick={() => handleSave(groupedRules.number!.id)}
+                          disabled={saving}
+                          className="w-full bg-gradient-to-r from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600 text-white text-xs py-1.5 rounded-lg"
+                        >
+                          {saving ? 'Salvando...' : 'Salvar'}
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <p className="text-gray-400 text-xs">Regra não encontrada</p>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* 8. Seleção de Instâncias */}
+          <Card className="border border-gray-200 hover:border-indigo-300 hover:shadow-md transition-all duration-200 rounded-lg overflow-hidden bg-white">
+            <CardHeader className="bg-gradient-to-br from-gray-50 to-white border-b border-gray-100 py-2.5 px-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-6 h-6 bg-gradient-to-br from-violet-500 to-purple-500 rounded-lg flex items-center justify-center flex-shrink-0">
+                    <Server className="h-3.5 w-3.5 text-white" />
+                  </div>
+                  <CardTitle className="text-sm font-semibold text-gray-900">
+                    Seleção de Instâncias
+                  </CardTitle>
+                </div>
+                <Tooltip content="Escolha quais instâncias participarão dos disparos. Quando uma instância cair, o sistema automaticamente trocará para outra disponível." />
+              </div>
+            </CardHeader>
+            <CardContent className="p-3 space-y-2.5">
+              {groupedRules.selection ? (
+                <>
+                  <div className="flex items-center justify-between py-0.5">
+                    <Label className="text-xs mb-0">Habilitar</Label>
+                    <Switch
+                      checked={groupedRules.selection.enabled}
+                      onCheckedChange={(checked) => updateRule(groupedRules.selection!.id, { enabled: checked })}
+                    />
+                  </div>
+                  
+                  {groupedRules.selection.enabled && (
+                    <div className="space-y-2 pt-2 border-t border-gray-100">
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <Label htmlFor="max_instances" className="text-xs">
+                            Máximo Simultâneas
+                            <Tooltip content="Quantas instâncias usar simultaneamente nos disparos." />
+                          </Label>
+                          <span className="text-xs font-semibold text-indigo-600">{groupedRules.selection.config.max_simultaneous || 1}</span>
+                        </div>
+                        <Slider
+                          value={groupedRules.selection.config.max_simultaneous || 1}
+                          min={1}
+                          max={allInstances.length || 10}
+                          step={1}
+                          onChange={(value) => updateRuleConfig(groupedRules.selection!.id, 'max_simultaneous', value)}
+                        />
+                      </div>
+                      
+                      <div>
+                        <Label className="text-xs mb-1.5 block">
+                          Instâncias Selecionadas
+                          <Tooltip content="Marque as instâncias que participarão dos disparos." />
+                        </Label>
+                        <div className="max-h-40 overflow-y-auto space-y-1.5 p-2 bg-gray-50 rounded-lg border border-gray-100">
+                          {allInstances.length === 0 ? (
+                            <p className="text-xs text-gray-400">Carregando instâncias...</p>
+                          ) : (
+                            allInstances.map((inst) => {
+                              const selectedIds = Array.isArray(groupedRules.selection?.config.selected_instance_ids) 
+                                ? groupedRules.selection.config.selected_instance_ids 
+                                : [];
+                              const isSelected = selectedIds.includes(inst.id);
+                              
+                              return (
+                                <div key={inst.id} className="flex items-center gap-2 p-1.5 hover:bg-white rounded">
+                                  <input
+                                    type="checkbox"
+                                    id={`instance-${inst.id}`}
+                                    checked={isSelected}
+                                    onChange={(e) => {
+                                      const currentIds = Array.isArray(groupedRules.selection?.config.selected_instance_ids) 
+                                        ? groupedRules.selection.config.selected_instance_ids 
+                                        : [];
+                                      const newIds = e.target.checked
+                                        ? [...currentIds, inst.id]
+                                        : currentIds.filter((id: number) => id !== inst.id);
+                                      updateRuleConfig(groupedRules.selection!.id, 'selected_instance_ids', newIds);
+                                    }}
+                                    className="w-3.5 h-3.5 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500"
+                                  />
+                                  <label 
+                                    htmlFor={`instance-${inst.id}`} 
+                                    className="flex-1 text-xs cursor-pointer flex items-center gap-1.5"
+                                  >
+                                    <span className="font-medium text-gray-700">{inst.name}</span>
+                                    <span className={`text-xs px-1.5 py-0.5 rounded-full ${
+                                      inst.status === 'connected' 
+                                        ? 'bg-green-100 text-green-700' 
+                                        : inst.status === 'connecting'
+                                        ? 'bg-yellow-100 text-yellow-700'
+                                        : 'bg-gray-100 text-gray-500'
+                                    }`}>
+                                      {inst.status === 'connected' ? 'Conectado' : inst.status === 'connecting' ? 'Conectando' : 'Desconectado'}
+                                    </span>
+                                  </label>
+                                </div>
+                              );
+                            })
+                          )}
+                        </div>
+                      </div>
+                      
+                      <div className="pt-2 border-t border-gray-100">
+                        <Button
+                          size="sm"
+                          onClick={() => handleSave(groupedRules.selection!.id)}
                           disabled={saving}
                           className="w-full bg-gradient-to-r from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600 text-white text-xs py-1.5 rounded-lg"
                         >
