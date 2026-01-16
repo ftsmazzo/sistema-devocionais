@@ -106,6 +106,38 @@ async function processWebhookEvent(instanceId: number, eventType: string, eventD
         console.log(`   📨 Status de mensagem atualizado para instância ${instanceId}`);
         break;
 
+      case 'logout.instance':
+      case 'LOGOUT_INSTANCE':
+        // Instância fez logout
+        console.log(`   🔌 Logout detectado para instância ${instanceId}`);
+        await pool.query(
+          `UPDATE instances 
+           SET status = 'disconnected',
+               phone_number = NULL,
+               qr_code = NULL,
+               health_status = 'down',
+               updated_at = CURRENT_TIMESTAMP
+           WHERE id = $1`,
+          [instanceId]
+        );
+        break;
+
+      case 'remove.instance':
+      case 'REMOVE_INSTANCE':
+        // Instância foi removida
+        console.log(`   🗑️ Remoção detectada para instância ${instanceId}`);
+        await pool.query(
+          `UPDATE instances 
+           SET status = 'disconnected',
+               phone_number = NULL,
+               qr_code = NULL,
+               health_status = 'down',
+               updated_at = CURRENT_TIMESTAMP
+           WHERE id = $1`,
+          [instanceId]
+        );
+        break;
+
       default:
         console.log(`   ℹ️ Evento ${eventType} registrado mas não processado`);
     }

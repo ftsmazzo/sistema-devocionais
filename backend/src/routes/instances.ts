@@ -244,8 +244,52 @@ router.post('/:id/connect', async (req, res) => {
 
     // Verificar se a resposta foi bem-sucedida
     if (evolutionResponse.status >= 400) {
-      console.error(`   ❌ Erro da Evolution API (${evolutionResponse.status}):`, evolutionResponse.data);
-      throw new Error(`Evolution API retornou erro: ${JSON.stringify(evolutionResponse.data)}`);
+      // Se erro 403 e mensagem diz que nome já está em uso, tentar deletar e recriar
+      if (evolutionResponse.status === 403 && 
+          evolutionResponse.data?.response?.message?.some((msg: string) => 
+            msg.includes('already in use') || msg.includes('já está em uso')
+          )) {
+        console.log(`   ⚠️ Nome já em uso, tentando deletar instância existente...`);
+        
+        try {
+          const deleteUrl = `${instance.api_url}/instance/delete/${instance.instance_name}`;
+          await axios.delete(deleteUrl, {
+            headers: {
+              'apikey': instance.api_key,
+            },
+            validateStatus: () => true,
+          });
+          
+          console.log(`   ✅ Instância deletada, tentando criar novamente...`);
+          await new Promise(resolve => setTimeout(resolve, 1500));
+          
+          // Tentar criar novamente
+          const retryResponse = await axios.post(
+            evolutionUrl,
+            requestBody,
+            {
+              headers: {
+                'apikey': instance.api_key,
+                'Content-Type': 'application/json',
+              },
+              validateStatus: () => true,
+            }
+          );
+
+          if (retryResponse.status >= 400) {
+            throw new Error(`Evolution API retornou erro após deletar: ${JSON.stringify(retryResponse.data)}`);
+          }
+
+          // Usar a resposta do retry
+          Object.assign(evolutionResponse, retryResponse);
+        } catch (deleteError: any) {
+          console.error(`   ❌ Erro ao deletar e recriar:`, deleteError.message);
+          throw new Error(`Evolution API retornou erro: ${JSON.stringify(evolutionResponse.data)}`);
+        }
+      } else {
+        console.error(`   ❌ Erro da Evolution API (${evolutionResponse.status}):`, evolutionResponse.data);
+        throw new Error(`Evolution API retornou erro: ${JSON.stringify(evolutionResponse.data)}`);
+      }
     }
 
     console.log(`✅ Resposta da Evolution API:`, JSON.stringify(evolutionResponse.data, null, 2));
