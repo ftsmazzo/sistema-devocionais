@@ -139,12 +139,23 @@ async function updatePhoneNumber(instanceId: number) {
     );
 
     if (foundInstance) {
-      const phoneNumber = foundInstance?.instance?.owner ||
-                         foundInstance?.instance?.phoneNumber ||
-                         foundInstance?.owner ||
-                         foundInstance?.phoneNumber ||
-                         foundInstance?.phone ||
-                         foundInstance?.instance?.phone;
+      // Evolution API 2.3.7 retorna ownerJid como "5516996282630@s.whatsapp.net"
+      let rawPhone = foundInstance?.instance?.owner ||
+                    foundInstance?.instance?.phoneNumber ||
+                    foundInstance?.owner ||
+                    foundInstance?.ownerJid ||
+                    foundInstance?.phoneNumber ||
+                    foundInstance?.phone ||
+                    foundInstance?.instance?.phone ||
+                    foundInstance?.instance?.ownerJid;
+
+      // Extrair número de ownerJid se for formato JID
+      let phoneNumber = null;
+      if (rawPhone && rawPhone.includes('@')) {
+        phoneNumber = rawPhone.split('@')[0];
+      } else if (rawPhone) {
+        phoneNumber = rawPhone;
+      }
 
       if (phoneNumber) {
         await pool.query(

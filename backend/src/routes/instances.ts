@@ -271,14 +271,22 @@ router.post('/:id/connect', async (req, res) => {
         );
         
         // Tentar diferentes caminhos para o número de telefone
-        phoneNumber = foundInstance?.instance?.owner || 
-                     foundInstance?.instance?.phoneNumber ||
-                     foundInstance?.owner ||
-                     foundInstance?.phoneNumber ||
-                     foundInstance?.phone ||
-                     foundInstance?.instance?.phone;
+        // Evolution API 2.3.7 retorna ownerJid como "5516996282630@s.whatsapp.net"
+        let rawPhone = foundInstance?.instance?.owner || 
+                      foundInstance?.instance?.phoneNumber ||
+                      foundInstance?.owner ||
+                      foundInstance?.ownerJid ||
+                      foundInstance?.phoneNumber ||
+                      foundInstance?.phone ||
+                      foundInstance?.instance?.phone ||
+                      foundInstance?.instance?.ownerJid;
         
-        if (phoneNumber) {
+        // Extrair número de ownerJid se for formato JID
+        if (rawPhone && rawPhone.includes('@')) {
+          phoneNumber = rawPhone.split('@')[0];
+          console.log(`   📱 Número extraído de JID ao conectar: ${rawPhone} → ${phoneNumber}`);
+        } else if (rawPhone) {
+          phoneNumber = rawPhone;
           console.log(`   📱 Número encontrado ao conectar: ${phoneNumber}`);
         }
       } catch (phoneError) {
@@ -335,19 +343,39 @@ router.post('/:id/disconnect', async (req, res) => {
     }
 
     const instance = instanceResult.rows[0];
-    // Usar logout ao invés de delete para apenas desconectar sem deletar
+    // Evolution API 2.3.7 usa DELETE para logout (não PUT)
+    // Mas vamos usar a rota de logout que apenas desconecta
     const evolutionUrl = `${instance.api_url}/instance/logout/${instance.instance_name}`;
 
     console.log(`🔌 Desconectando instância ${instance.instance_name} da Evolution API: ${evolutionUrl}`);
 
     // Fazer logout da instância (não deleta, apenas desconecta)
-    await axios.put(evolutionUrl, {}, {
-      headers: {
-        'apikey': instance.api_key,
-        'Content-Type': 'application/json',
-      },
-      validateStatus: () => true, // Não lançar erro automaticamente
-    });
+    // Evolution API 2.3.7 pode usar DELETE ou PUT, vamos tentar DELETE primeiro
+    try {
+      const logoutResponse = await axios.delete(evolutionUrl, {
+        headers: {
+          'apikey': instance.api_key,
+        },
+        validateStatus: () => true,
+      });
+
+      if (logoutResponse.status >= 400) {
+        // Se DELETE falhar, tentar PUT
+        console.log(`   ⚠️ DELETE falhou, tentando PUT...`);
+        await axios.put(evolutionUrl, {}, {
+          headers: {
+            'apikey': instance.api_key,
+            'Content-Type': 'application/json',
+          },
+          validateStatus: () => true,
+        });
+      }
+      
+      console.log(`   ✅ Logout realizado com sucesso`);
+    } catch (error: any) {
+      console.log(`   ⚠️ Erro no logout (continuando...):`, error.message);
+      // Continuar mesmo se falhar, pois pode ser que a instância já esteja desconectada
+    }
 
     // Atualizar status e limpar número de telefone
     await pool.query(
@@ -431,14 +459,22 @@ router.get('/:id/status', async (req, res) => {
           );
           
           // Tentar diferentes caminhos para o número de telefone
-          phoneNumber = foundInstance?.instance?.owner || 
-                       foundInstance?.instance?.phoneNumber ||
-                       foundInstance?.owner ||
-                       foundInstance?.phoneNumber ||
-                       foundInstance?.phone ||
-                       foundInstance?.instance?.phone;
+          // Evolution API 2.3.7 retorna ownerJid como "5516996282630@s.whatsapp.net"
+          let rawPhone = foundInstance?.instance?.owner || 
+                        foundInstance?.instance?.phoneNumber ||
+                        foundInstance?.owner ||
+                        foundInstance?.ownerJid ||
+                        foundInstance?.phoneNumber ||
+                        foundInstance?.phone ||
+                        foundInstance?.instance?.phone ||
+                        foundInstance?.instance?.ownerJid;
           
-          if (phoneNumber) {
+          // Extrair número de ownerJid se for formato JID
+          if (rawPhone && rawPhone.includes('@')) {
+            phoneNumber = rawPhone.split('@')[0];
+            console.log(`   📱 Número extraído de JID: ${rawPhone} → ${phoneNumber}`);
+          } else if (rawPhone) {
+            phoneNumber = rawPhone;
             console.log(`   📱 Número encontrado: ${phoneNumber}`);
           } else {
             console.log(`   ⚠️ Número não encontrado na resposta:`, JSON.stringify(foundInstance, null, 2));
@@ -505,41 +541,20 @@ async function configureWebhook(instance: any, instanceId: number) {
     // Configurar webhook na Evolution API
     const webhookConfigUrl = `${instance.api_url}/webhook/set/${instance.instance_name}`;
     
+    // Evolution API 2.3.7 - estrutura simplificada
     const webhookResponse = await axios.post(
       webhookConfigUrl,
       {
         url: webhookUrl,
-        webhook_by_events: true,
-        webhook_base64: false,
+        enabled: true,
         events: [
           'APPLICATION_STARTUP',
           'QRCODE_UPDATED',
           'MESSAGES_UPSERT',
           'MESSAGES_UPDATE',
           'MESSAGES_DELETE',
-          'SEND_MESSAGE',
-          'CONTACTS_UPDATE',
-          'CONTACTS_UPSERT',
-          'PRESENCE_UPDATE',
-          'CHATS_UPDATE',
-          'CHATS_UPSERT',
-          'CHATS_DELETE',
-          'GROUPS_UPSERT',
-          'GROUP_UPDATE',
-          'GROUP_PARTICIPANTS_UPDATE',
           'CONNECTION_UPDATE',
-          'LABELS_EDIT',
-          'LABELS_ASSOCIATION',
-          'CALL_UPSERT',
-          'CALL_UPDATE',
-          'TYPEBOT_START',
-          'TYPEBOT_CHANGE_STATUS',
-          'CHAMA_AI_ACTION',
         ],
-        qrcode: true,
-        number: true,
-        read_messages: true,
-        read_status: true,
       },
       {
         headers: {
