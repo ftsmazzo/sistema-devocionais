@@ -359,30 +359,25 @@ export default function Blindage() {
           </Card>
 
           {/* 2. Limite de Mensagens */}
-          <Card className="border border-gray-200 hover:border-indigo-300 hover:shadow-md transition-all duration-200 rounded-xl overflow-hidden bg-white">
-            <CardHeader className="bg-gradient-to-br from-gray-50 to-white border-b border-gray-100 py-3 px-4">
+          <Card className="border border-gray-200 hover:border-indigo-300 hover:shadow-md transition-all duration-200 rounded-lg overflow-hidden bg-white">
+            <CardHeader className="bg-gradient-to-br from-gray-50 to-white border-b border-gray-100 py-2.5 px-3">
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-7 h-7 bg-gradient-to-br from-green-500 to-emerald-500 rounded-lg flex items-center justify-center flex-shrink-0">
+                <div className="flex items-center gap-2">
+                  <div className="w-6 h-6 bg-gradient-to-br from-green-500 to-emerald-500 rounded-lg flex items-center justify-center flex-shrink-0">
                     <BarChart3 className="h-3.5 w-3.5 text-white" />
                   </div>
-                  <div>
-                    <CardTitle className="text-base font-semibold text-gray-900">
-                      Limite de Mensagens
-                    </CardTitle>
-                    <CardDescription className="text-xs text-gray-500 mt-0.5">
-                      Limites por período
-                    </CardDescription>
-                  </div>
+                  <CardTitle className="text-sm font-semibold text-gray-900">
+                    Limite de Mensagens
+                  </CardTitle>
                 </div>
                 <Tooltip content="Define limites máximos de mensagens que podem ser enviadas por hora e por dia. Ajuda a evitar bloqueios por excesso de envios." />
               </div>
             </CardHeader>
-            <CardContent className="p-4 space-y-3">
+            <CardContent className="p-3 space-y-2.5">
               {groupedRules.limit ? (
                 <>
-                  <div className="flex items-center justify-between py-1">
-                    <Label className="text-sm mb-0">Habilitar</Label>
+                  <div className="flex items-center justify-between py-0.5">
+                    <Label className="text-xs mb-0">Habilitar</Label>
                     <Switch
                       checked={groupedRules.limit.enabled}
                       onCheckedChange={(checked) => updateRule(groupedRules.limit!.id, { enabled: checked })}
@@ -390,37 +385,50 @@ export default function Blindage() {
                   </div>
                   
                   {groupedRules.limit.enabled && (
-                    <div className="grid grid-cols-2 gap-2.5 pt-2 border-t border-gray-100">
+                    <div className="space-y-2 pt-2 border-t border-gray-100">
                       <div>
-                        <Label htmlFor="max_hour" className="text-xs mb-1">
-                          Por Hora
-                          <Tooltip content="Máximo de mensagens por hora. Recomendado: 30-50." />
-                        </Label>
-                        <Input
-                          id="max_hour"
-                          type="number"
-                          min="1"
-                          max="1000"
+                        <div className="flex items-center justify-between mb-1">
+                          <Label htmlFor="max_hour" className="text-xs">
+                            Por Hora
+                            <Tooltip content="Máximo de mensagens por hora. Recomendado: 30-50." />
+                          </Label>
+                          <span className="text-xs font-semibold text-indigo-600">{groupedRules.limit.config.max_per_hour || 50}</span>
+                        </div>
+                        <Slider
                           value={groupedRules.limit.config.max_per_hour || 50}
-                          onChange={(e) => updateRuleConfig(groupedRules.limit!.id, 'max_per_hour', parseInt(e.target.value))}
-                          className="h-9 text-sm"
+                          min={1}
+                          max={1000}
+                          step={1}
+                          onChange={(value) => updateRuleConfig(groupedRules.limit!.id, 'max_per_hour', value)}
                         />
                       </div>
                       
                       <div>
-                        <Label htmlFor="max_day" className="text-xs mb-1">
-                          Por Dia
-                          <Tooltip content="Máximo de mensagens por dia. Recomendado: 300-500." />
-                        </Label>
-                        <Input
-                          id="max_day"
-                          type="number"
-                          min="1"
-                          max="10000"
+                        <div className="flex items-center justify-between mb-1">
+                          <Label htmlFor="max_day" className="text-xs">
+                            Por Dia
+                            <Tooltip content="Máximo de mensagens por dia. Recomendado: 300-500." />
+                          </Label>
+                          <span className="text-xs font-semibold text-indigo-600">{groupedRules.limit.config.max_per_day || 500}</span>
+                        </div>
+                        <Slider
                           value={groupedRules.limit.config.max_per_day || 500}
-                          onChange={(e) => updateRuleConfig(groupedRules.limit!.id, 'max_per_day', parseInt(e.target.value))}
-                          className="h-9 text-sm"
+                          min={1}
+                          max={10000}
+                          step={10}
+                          onChange={(value) => updateRuleConfig(groupedRules.limit!.id, 'max_per_day', value)}
                         />
+                      </div>
+                      
+                      <div className="pt-2 border-t border-gray-100">
+                        <Button
+                          size="sm"
+                          onClick={() => handleSave(groupedRules.limit!.id)}
+                          disabled={saving}
+                          className="w-full bg-gradient-to-r from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600 text-white text-xs py-1.5 rounded-lg"
+                        >
+                          {saving ? 'Salvando...' : 'Salvar'}
+                        </Button>
                       </div>
                     </div>
                   )}
