@@ -43,6 +43,7 @@ app.use(errorHandler);
 // Inicializar banco e servidor
 async function start() {
   let server: any;
+  let isShuttingDown = false;
   
   try {
     await initializeDatabase();
@@ -57,21 +58,39 @@ async function start() {
     server.keepAliveTimeout = 65000;
     server.headersTimeout = 66000;
 
-    // Graceful shutdown
+    // Graceful shutdown com delay para dar tempo do health check
     const gracefulShutdown = (signal: string) => {
-      console.log(`⚠️ ${signal} recebido, encerrando servidor...`);
-      if (server) {
-        server.close(() => {
-          console.log('✅ Servidor encerrado');
-          process.exit(0);
-        });
-      } else {
-        process.exit(0);
+      if (isShuttingDown) {
+        return; // Já está encerrando
       }
+      
+      isShuttingDown = true;
+      console.log(`⚠️ ${signal} recebido, aguardando 5 segundos antes de encerrar...`);
+      
+      // Dar tempo para requisições em andamento terminarem
+      setTimeout(() => {
+        if (server) {
+          server.close(() => {
+            console.log('✅ Servidor encerrado');
+            process.exit(0);
+          });
+        } else {
+          process.exit(0);
+        }
+      }, 5000);
     };
 
     process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
     process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+    
+    // Manter processo vivo
+    process.on('uncaughtException', (error) => {
+      console.error('❌ Erro não capturado:', error);
+    });
+    
+    process.on('unhandledRejection', (reason, promise) => {
+      console.error('❌ Promise rejeitada não tratada:', reason);
+    });
   } catch (error) {
     console.error('❌ Erro ao iniciar servidor:', error);
     process.exit(1);
