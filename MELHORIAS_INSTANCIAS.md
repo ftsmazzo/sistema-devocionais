@@ -31,20 +31,56 @@
 - ✅ Dados sensíveis protegidos
 - ✅ Apenas dados necessários são expostos no frontend
 
-## 📋 Configuração Necessária
+## 📋 Configuração e Deploy
 
-### Variáveis de Ambiente no EasyPanel
+### ⚠️ IMPORTANTE: Você tem 2 serviços separados!
 
-Adicione estas variáveis no serviço `devocional-backend`:
+1. **`devocional-backend`** - API Node.js
+2. **`devocional-frontend`** - Interface React
+
+---
+
+### 🔧 1. Serviço: `devocional-backend`
+
+#### Configurar Variáveis de Ambiente
+
+No serviço `devocional-backend`, adicione estas variáveis:
 
 ```env
 EVOLUTION_API_KEY=sua-api-key-aqui
 EVOLUTION_API_URL=http://seu-evolution-api:8080
 ```
 
-## 🔄 Migração do Banco de Dados
+**Onde:** EasyPanel → Projeto → Serviço `devocional-backend` → Environment Variables
 
-A coluna `phone_number` é adicionada automaticamente na próxima inicialização do backend.
+#### Fazer Deploy
+
+1. Acesse o serviço **`devocional-backend`** no EasyPanel
+2. Clique em **"Deploy"** ou **"Redeploy"**
+3. Aguarde o build completar
+
+**Nota:** A coluna `phone_number` será adicionada automaticamente na primeira inicialização.
+
+---
+
+### 🎨 2. Serviço: `devocional-frontend`
+
+#### Fazer Deploy
+
+1. Acesse o serviço **`devocional-frontend`** no EasyPanel
+2. Clique em **"Deploy"** ou **"Redeploy"**
+3. Aguarde o build completar
+
+**Nota:** O frontend não precisa de novas variáveis de ambiente.
+
+---
+
+### ✅ Ordem Recomendada
+
+1. **Primeiro:** Configure variáveis e faça deploy do `devocional-backend`
+2. **Depois:** Faça deploy do `devocional-frontend`
+
+---
 
 ## 🎯 Funcionalidades Mantidas
 
@@ -69,12 +105,13 @@ A coluna `phone_number` é adicionada automaticamente na próxima inicializaçã
 - Status com badge colorido
 - Layout mais organizado
 
-## 🚀 Próximos Passos
+## 🧪 Teste Após Deploy
 
-1. Configure as variáveis de ambiente no EasyPanel
-2. Faça o deploy do backend atualizado
-3. Teste criando uma nova instância
-4. Conecte e verifique se o número aparece
+1. Acesse o frontend
+2. Faça login
+3. Tente criar uma nova instância (deve pedir apenas Nome e Instance Name)
+4. Conecte a instância
+5. Verifique se o número de telefone aparece no card
 
 ---
 
