@@ -43,6 +43,7 @@ export default function Instances() {
   });
   const [refreshing, setRefreshing] = useState<number | null>(null);
   const navigate = useNavigate();
+  const { user } = useAuthStore();
 
   useEffect(() => {
     if (!user) {
@@ -340,7 +341,6 @@ export default function Instances() {
           </div>
         )}
       </div>
-    </div>
 
       {/* Modal de Formulário */}
       {showModal && (
