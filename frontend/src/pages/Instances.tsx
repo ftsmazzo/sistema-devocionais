@@ -16,6 +16,7 @@ import {
   CheckCircle2,
   XCircle,
   Clock,
+  Shield,
 } from 'lucide-react';
 
 interface Instance {
@@ -343,6 +344,15 @@ export default function Instances() {
                           <Trash2 className="h-4 w-4" />
                         </Button>
                       </div>
+                      <Button
+                        size="sm"
+                        variant="default"
+                        onClick={() => navigate(`/blindage/${instance.id}`)}
+                        className="w-full bg-blue-600 hover:bg-blue-700 text-white"
+                      >
+                        <Shield className="h-4 w-4 mr-2" />
+                        Configurar Blindagem
+                      </Button>
                     </div>
                   </div>
                 </CardContent>

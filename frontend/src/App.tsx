@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useAuthStore } from './store/authStore';
 import Login from './pages/Login';
 import Instances from './pages/Instances';
+import Blindage from './pages/Blindage';
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const { user, init } = useAuthStore();
@@ -31,6 +32,14 @@ function App() {
           element={
             <PrivateRoute>
               <Instances />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/blindage/:instanceId?"
+          element={
+            <PrivateRoute>
+              <Blindage />
             </PrivateRoute>
           }
         />
