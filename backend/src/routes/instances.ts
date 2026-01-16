@@ -178,39 +178,74 @@ router.post('/:id/connect', async (req, res) => {
 
       if (checkResponse.status === 200 && Array.isArray(checkResponse.data)) {
         const existingInstance = checkResponse.data.find(
-          (inst: any) => inst.instance?.instanceName === instance.instance_name
+          (inst: any) => inst.instance?.instanceName === instance.instance_name ||
+                        inst.instanceName === instance.instance_name ||
+                        inst.name === instance.instance_name
         );
 
         if (existingInstance) {
-          console.log(`   ⚠️ Instância já existe na Evolution API`);
-          // Buscar número de telefone se conectado
-          let phoneNumber = null;
-          if (existingInstance.instance?.status === 'open' && existingInstance.instance?.owner) {
-            phoneNumber = existingInstance.instance.owner;
+          const existingState = existingInstance.instance?.state || 
+                               existingInstance.state || 
+                               existingInstance.instance?.status ||
+                               existingInstance.status;
+
+          console.log(`   ⚠️ Instância já existe na Evolution API com estado: ${existingState}`);
+
+          // Se está "open" (conectada), apenas atualizar status
+          if (existingState === 'open') {
+            let phoneNumber = null;
+            const rawPhone = existingInstance.instance?.owner ||
+                           existingInstance.instance?.ownerJid ||
+                           existingInstance.owner ||
+                           existingInstance.ownerJid;
+            
+            if (rawPhone && rawPhone.includes('@')) {
+              phoneNumber = rawPhone.split('@')[0];
+            } else if (rawPhone) {
+              phoneNumber = rawPhone;
+            }
+
+            await pool.query(
+              `UPDATE instances 
+               SET status = 'connected',
+                   qr_code = NULL,
+                   phone_number = COALESCE($1, phone_number),
+                   last_connection = CURRENT_TIMESTAMP,
+                   updated_at = CURRENT_TIMESTAMP
+               WHERE id = $2`,
+              [phoneNumber, id]
+            );
+
+            return res.json({
+              message: 'Instância já está conectada na Evolution API',
+              status: 'connected',
+            });
           }
 
-          // Atualizar status, QR code e número de telefone se já existe
-          await pool.query(
-            `UPDATE instances 
-             SET status = $1,
-                 qr_code = $2,
-                 phone_number = COALESCE($3, phone_number),
-                 last_connection = CURRENT_TIMESTAMP,
-                 updated_at = CURRENT_TIMESTAMP
-             WHERE id = $4`,
-            [
-              existingInstance.instance?.status === 'open' ? 'connected' : 'connecting',
-              existingInstance.qrcode?.base64 || null,
-              phoneNumber,
-              id,
-            ]
-          );
-
-          return res.json({
-            message: 'Instância já existe na Evolution API',
-            qr_code: existingInstance.qrcode?.base64,
-            status: existingInstance.instance?.status,
-          });
+          // Se está "close" (desconectada), deletar primeiro para poder recriar
+          if (existingState === 'close') {
+            console.log(`   🗑️ Instância existe mas está fechada, deletando para recriar...`);
+            try {
+              const deleteUrl = `${instance.api_url}/instance/delete/${instance.instance_name}`;
+              const deleteResponse = await axios.delete(deleteUrl, {
+                headers: {
+                  'apikey': instance.api_key,
+                },
+                validateStatus: () => true,
+              });
+              
+              if (deleteResponse.status === 200 || deleteResponse.status === 204) {
+                console.log(`   ✅ Instância deletada, pode criar nova`);
+                // Aguardar um pouco para a Evolution API processar
+                await new Promise(resolve => setTimeout(resolve, 1500));
+              } else {
+                console.log(`   ⚠️ Resposta inesperada ao deletar: ${deleteResponse.status}`);
+              }
+            } catch (deleteError: any) {
+              console.log(`   ⚠️ Erro ao deletar instância existente: ${deleteError.message}`);
+              // Continuar tentando criar mesmo assim
+            }
+          }
         }
       }
     } catch (checkError: any) {
