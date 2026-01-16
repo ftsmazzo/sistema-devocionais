@@ -41,7 +41,7 @@ export default function Toast({ message, type = 'info', duration = 3000, onClose
   const Icon = icons[type];
 
   return (
-    <div className={`fixed top-4 right-4 z-50 max-w-md w-full sm:w-auto flex items-start gap-3 px-4 py-3 rounded-xl border shadow-lg animate-in slide-in-from-top ${colors[type]}`}>
+    <div className={`fixed top-4 right-4 z-[9999] max-w-md w-[calc(100%-2rem)] sm:w-auto flex items-start gap-3 px-4 py-3 rounded-xl border shadow-2xl animate-in slide-in-from-top ${colors[type]}`} style={{ position: 'fixed' }}>
       <Icon className={`h-5 w-5 ${iconColors[type]} flex-shrink-0 mt-0.5`} />
       <p className="text-sm font-medium flex-1 break-words whitespace-normal">{message}</p>
       <button
