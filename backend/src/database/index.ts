@@ -258,6 +258,28 @@ export async function initializeDatabase() {
       )
     `);
 
+    // Permitir instance_id NULL para regras globais
+    await client.query(`
+      DO $$ 
+      BEGIN 
+        IF EXISTS (
+          SELECT 1 FROM information_schema.columns 
+          WHERE table_name = 'blindage_rules' 
+          AND column_name = 'instance_id' 
+          AND is_nullable = 'NO'
+        ) THEN
+          ALTER TABLE blindage_rules ALTER COLUMN instance_id DROP NOT NULL;
+        END IF;
+      END $$;
+    `);
+
+    // Criar índice único para regra global de seleção (apenas uma regra global por tipo)
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_blindage_rules_global_type 
+      ON blindage_rules(rule_type) 
+      WHERE instance_id IS NULL;
+    `);
+
     await client.query(`
       CREATE INDEX IF NOT EXISTS idx_blindage_rules_instance ON blindage_rules(instance_id);
       CREATE INDEX IF NOT EXISTS idx_blindage_rules_enabled ON blindage_rules(enabled);
