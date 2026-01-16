@@ -20,6 +20,7 @@ import {
   Phone,
   Save,
   CheckCircle2,
+  Server,
 } from 'lucide-react';
 
 interface BlindageRule {
