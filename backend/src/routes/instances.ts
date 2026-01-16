@@ -254,11 +254,14 @@ router.post('/:id/disconnect', async (req, res) => {
     const instance = instanceResult.rows[0];
     const evolutionUrl = `${instance.api_url}/instance/delete/${instance.instance_name}`;
 
+    console.log(`🔌 Desconectando instância ${instance.instance_name} da Evolution API: ${evolutionUrl}`);
+
     // Deletar instância no Evolution API
     await axios.delete(evolutionUrl, {
       headers: {
         'apikey': instance.api_key,
       },
+      validateStatus: () => true, // Não lançar erro automaticamente
     });
 
     // Atualizar status
@@ -312,7 +315,12 @@ router.get('/:id/status', async (req, res) => {
 
     // Verificar se a resposta foi bem-sucedida
     if (evolutionResponse.status === 200 && evolutionResponse.data) {
-      const connectionState = evolutionResponse.data.state || evolutionResponse.data.status;
+      // A resposta pode ter 'state' no objeto instance ou diretamente
+      const connectionState = evolutionResponse.data.instance?.state || 
+                             evolutionResponse.data.state || 
+                             evolutionResponse.data.status;
+      
+      console.log(`   Estado da conexão: ${connectionState}`);
       
       if (connectionState === 'open') {
         status = 'connected';
@@ -329,6 +337,7 @@ router.get('/:id/status', async (req, res) => {
     } else if (evolutionResponse.status === 404) {
       // Instância não existe na Evolution API
       status = 'disconnected';
+      qrCode = null;
     }
 
     // Atualizar status no banco
