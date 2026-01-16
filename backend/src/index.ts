@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 import { initializeDatabase } from './database';
 import authRoutes from './routes/auth';
 import instanceRoutes from './routes/instances';
+import webhookRoutes from './routes/webhooks';
 import { errorHandler } from './middleware/errorHandler';
 
 dotenv.config();
@@ -62,6 +63,7 @@ app.get('/api/test', (req, res) => {
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/instances', instanceRoutes);
+app.use('/api/webhooks', webhookRoutes);
 
 // Error handler
 app.use(errorHandler);

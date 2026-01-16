@@ -250,6 +250,9 @@ router.post('/:id/connect', async (req, res) => {
 
     console.log(`✅ Resposta da Evolution API:`, JSON.stringify(evolutionResponse.data, null, 2));
 
+    // Configurar webhook automaticamente após criar instância
+    await configureWebhook(instance, id);
+
     // Buscar número de telefone se a instância já estiver conectada
     let phoneNumber = null;
     if (evolutionResponse.data.instance?.state === 'open') {
@@ -260,12 +263,23 @@ router.post('/:id/connect', async (req, res) => {
           validateStatus: () => true,
         });
         
+        // Evolution API 2.3.7 pode retornar em diferentes estruturas
         const foundInstance = phoneResponse.data?.find(
-          (inst: any) => inst.instance?.instanceName === instance.instance_name
+          (inst: any) => inst.instance?.instanceName === instance.instance_name || 
+                        inst.instanceName === instance.instance_name ||
+                        inst.name === instance.instance_name
         );
         
-        if (foundInstance?.instance?.owner) {
-          phoneNumber = foundInstance.instance.owner;
+        // Tentar diferentes caminhos para o número de telefone
+        phoneNumber = foundInstance?.instance?.owner || 
+                     foundInstance?.instance?.phoneNumber ||
+                     foundInstance?.owner ||
+                     foundInstance?.phoneNumber ||
+                     foundInstance?.phone ||
+                     foundInstance?.instance?.phone;
+        
+        if (phoneNumber) {
+          console.log(`   📱 Número encontrado ao conectar: ${phoneNumber}`);
         }
       } catch (phoneError) {
         console.log('   ⚠️ Não foi possível buscar número de telefone:', phoneError);
@@ -321,14 +335,16 @@ router.post('/:id/disconnect', async (req, res) => {
     }
 
     const instance = instanceResult.rows[0];
-    const evolutionUrl = `${instance.api_url}/instance/delete/${instance.instance_name}`;
+    // Usar logout ao invés de delete para apenas desconectar sem deletar
+    const evolutionUrl = `${instance.api_url}/instance/logout/${instance.instance_name}`;
 
     console.log(`🔌 Desconectando instância ${instance.instance_name} da Evolution API: ${evolutionUrl}`);
 
-    // Deletar instância no Evolution API
-    await axios.delete(evolutionUrl, {
+    // Fazer logout da instância (não deleta, apenas desconecta)
+    await axios.put(evolutionUrl, {}, {
       headers: {
         'apikey': instance.api_key,
+        'Content-Type': 'application/json',
       },
       validateStatus: () => true, // Não lançar erro automaticamente
     });
@@ -407,13 +423,25 @@ router.get('/:id/status', async (req, res) => {
             validateStatus: () => true,
           });
           
+          // Evolution API 2.3.7 pode retornar em diferentes estruturas
           const foundInstance = phoneResponse.data?.find(
-            (inst: any) => inst.instance?.instanceName === instance.instance_name
+            (inst: any) => inst.instance?.instanceName === instance.instance_name || 
+                          inst.instanceName === instance.instance_name ||
+                          inst.name === instance.instance_name
           );
           
-          if (foundInstance?.instance?.owner) {
-            phoneNumber = foundInstance.instance.owner;
+          // Tentar diferentes caminhos para o número de telefone
+          phoneNumber = foundInstance?.instance?.owner || 
+                       foundInstance?.instance?.phoneNumber ||
+                       foundInstance?.owner ||
+                       foundInstance?.phoneNumber ||
+                       foundInstance?.phone ||
+                       foundInstance?.instance?.phone;
+          
+          if (phoneNumber) {
             console.log(`   📱 Número encontrado: ${phoneNumber}`);
+          } else {
+            console.log(`   ⚠️ Número não encontrado na resposta:`, JSON.stringify(foundInstance, null, 2));
           }
         } catch (phoneError) {
           console.log('   ⚠️ Não foi possível buscar número de telefone:', phoneError);
@@ -464,5 +492,95 @@ router.get('/:id/status', async (req, res) => {
     });
   }
 });
+
+// Configurar webhook automaticamente
+async function configureWebhook(instance: any, instanceId: number) {
+  try {
+    // URL do webhook (ajustar conforme sua URL pública)
+    const webhookBaseUrl = process.env.WEBHOOK_BASE_URL || process.env.BACKEND_URL || 'http://localhost:3001';
+    const webhookUrl = `${webhookBaseUrl}/api/webhooks/evolution/${instance.instance_name}`;
+
+    console.log(`🔗 Configurando webhook para instância ${instance.instance_name}: ${webhookUrl}`);
+
+    // Configurar webhook na Evolution API
+    const webhookConfigUrl = `${instance.api_url}/webhook/set/${instance.instance_name}`;
+    
+    const webhookResponse = await axios.post(
+      webhookConfigUrl,
+      {
+        url: webhookUrl,
+        webhook_by_events: true,
+        webhook_base64: false,
+        events: [
+          'APPLICATION_STARTUP',
+          'QRCODE_UPDATED',
+          'MESSAGES_UPSERT',
+          'MESSAGES_UPDATE',
+          'MESSAGES_DELETE',
+          'SEND_MESSAGE',
+          'CONTACTS_UPDATE',
+          'CONTACTS_UPSERT',
+          'PRESENCE_UPDATE',
+          'CHATS_UPDATE',
+          'CHATS_UPSERT',
+          'CHATS_DELETE',
+          'GROUPS_UPSERT',
+          'GROUP_UPDATE',
+          'GROUP_PARTICIPANTS_UPDATE',
+          'CONNECTION_UPDATE',
+          'LABELS_EDIT',
+          'LABELS_ASSOCIATION',
+          'CALL_UPSERT',
+          'CALL_UPDATE',
+          'TYPEBOT_START',
+          'TYPEBOT_CHANGE_STATUS',
+          'CHAMA_AI_ACTION',
+        ],
+        qrcode: true,
+        number: true,
+        read_messages: true,
+        read_status: true,
+      },
+      {
+        headers: {
+          'apikey': instance.api_key,
+          'Content-Type': 'application/json',
+        },
+        validateStatus: () => true,
+      }
+    );
+
+    if (webhookResponse.status === 200 || webhookResponse.status === 201) {
+      console.log(`   ✅ Webhook configurado com sucesso`);
+      
+      // Salvar configuração no banco
+      await pool.query(
+        `INSERT INTO instance_webhook_config (instance_id, webhook_url, events, enabled)
+         VALUES ($1, $2, $3, TRUE)
+         ON CONFLICT (instance_id) 
+         DO UPDATE SET 
+           webhook_url = EXCLUDED.webhook_url,
+           events = EXCLUDED.events,
+           updated_at = CURRENT_TIMESTAMP`,
+        [
+          instanceId,
+          webhookUrl,
+          [
+            'APPLICATION_STARTUP',
+            'QRCODE_UPDATED',
+            'MESSAGES_UPSERT',
+            'MESSAGES_UPDATE',
+            'CONNECTION_UPDATE',
+          ],
+        ]
+      );
+    } else {
+      console.log(`   ⚠️ Erro ao configurar webhook:`, webhookResponse.data);
+    }
+  } catch (error: any) {
+    console.error(`   ❌ Erro ao configurar webhook:`, error.message);
+    // Não falhar a conexão se o webhook falhar
+  }
+}
 
 export default router;

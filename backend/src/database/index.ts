@@ -56,6 +56,38 @@ export async function initializeDatabase() {
       END $$;
     `);
 
+    // Criar tabela de webhooks
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS webhook_events (
+        id SERIAL PRIMARY KEY,
+        instance_id INTEGER REFERENCES instances(id) ON DELETE CASCADE,
+        event_type VARCHAR(100) NOT NULL,
+        event_data JSONB NOT NULL,
+        received_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        processed BOOLEAN DEFAULT FALSE
+      )
+    `);
+
+    // Criar índices para webhooks
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_webhook_events_instance ON webhook_events(instance_id);
+      CREATE INDEX IF NOT EXISTS idx_webhook_events_type ON webhook_events(event_type);
+      CREATE INDEX IF NOT EXISTS idx_webhook_events_processed ON webhook_events(processed);
+    `);
+
+    // Criar tabela de configurações de webhook por instância
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS instance_webhook_config (
+        id SERIAL PRIMARY KEY,
+        instance_id INTEGER UNIQUE REFERENCES instances(id) ON DELETE CASCADE,
+        webhook_url VARCHAR(500) NOT NULL,
+        events TEXT[] DEFAULT ARRAY[]::TEXT[],
+        enabled BOOLEAN DEFAULT TRUE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
     // Criar índice para busca
     await client.query(`
       CREATE INDEX IF NOT EXISTS idx_instances_status ON instances(status)
