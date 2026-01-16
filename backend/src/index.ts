@@ -28,35 +28,33 @@ app.use('/api/instances', instanceRoutes);
 // Error handler
 app.use(errorHandler);
 
-// Tratamento de sinais para shutdown graceful
-process.on('SIGTERM', () => {
-  console.log('⚠️ SIGTERM recebido, encerrando servidor...');
-  process.exit(0);
-});
-
-process.on('SIGINT', () => {
-  console.log('⚠️ SIGINT recebido, encerrando servidor...');
-  process.exit(0);
-});
-
 // Inicializar banco e servidor
 async function start() {
+  let server: any;
+  
   try {
     await initializeDatabase();
     console.log('✅ Banco de dados inicializado');
     
-    const server = app.listen(PORT, '0.0.0.0', () => {
+    server = app.listen(PORT, '0.0.0.0', () => {
       console.log(`🚀 Servidor rodando na porta ${PORT}`);
     });
 
     // Graceful shutdown
-    process.on('SIGTERM', () => {
-      console.log('⚠️ SIGTERM recebido, encerrando servidor...');
-      server.close(() => {
-        console.log('✅ Servidor encerrado');
+    const gracefulShutdown = (signal: string) => {
+      console.log(`⚠️ ${signal} recebido, encerrando servidor...`);
+      if (server) {
+        server.close(() => {
+          console.log('✅ Servidor encerrado');
+          process.exit(0);
+        });
+      } else {
         process.exit(0);
-      });
-    });
+      }
+    };
+
+    process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+    process.on('SIGINT', () => gracefulShutdown('SIGINT'));
   } catch (error) {
     console.error('❌ Erro ao iniciar servidor:', error);
     process.exit(1);
