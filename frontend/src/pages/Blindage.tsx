@@ -8,7 +8,7 @@ import Switch from '@/components/ui/Switch';
 import Label from '@/components/ui/Label';
 import Tooltip from '@/components/ui/Tooltip';
 import Toast from '@/components/ui/Toast';
-import Slider from '@/components/ui/Slider';
+// import Slider from '@/components/ui/Slider'; // Será usado na próxima refatoração
 import {
   Shield,
   Clock,
