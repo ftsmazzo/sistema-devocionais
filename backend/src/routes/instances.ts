@@ -99,16 +99,39 @@ router.put('/:id', async (req, res) => {
 router.delete('/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const result = await pool.query('DELETE FROM instances WHERE id = $1 RETURNING *', [id]);
+    const instanceResult = await pool.query('SELECT * FROM instances WHERE id = $1', [id]);
 
-    if (result.rows.length === 0) {
+    if (instanceResult.rows.length === 0) {
       return res.status(404).json({ error: 'Instância não encontrada' });
     }
 
+    const instance = instanceResult.rows[0];
+
+    // Tentar deletar da Evolution API primeiro
+    try {
+      const evolutionUrl = `${instance.api_url}/instance/delete/${instance.instance_name}`;
+      console.log(`🗑️ Deletando instância ${instance.instance_name} da Evolution API: ${evolutionUrl}`);
+      
+      await axios.delete(evolutionUrl, {
+        headers: {
+          'apikey': instance.api_key,
+        },
+        validateStatus: () => true, // Não lançar erro automaticamente
+      });
+      
+      console.log(`✅ Instância deletada da Evolution API`);
+    } catch (error: any) {
+      console.error(`⚠️ Erro ao deletar da Evolution API (continuando...):`, error.message);
+      // Continuar mesmo se falhar na Evolution API
+    }
+
+    // Deletar do banco de dados
+    await pool.query('DELETE FROM instances WHERE id = $1', [id]);
+
     res.json({ message: 'Instância deletada com sucesso' });
-  } catch (error) {
-    console.error('Erro ao deletar instância:', error);
-    res.status(500).json({ error: 'Erro ao deletar instância' });
+  } catch (error: any) {
+    console.error('❌ Erro ao deletar instância:', error);
+    res.status(500).json({ error: 'Erro ao deletar instância', details: error.message });
   }
 });
 
