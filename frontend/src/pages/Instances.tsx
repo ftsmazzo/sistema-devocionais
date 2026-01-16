@@ -172,12 +172,17 @@ export default function Instances() {
     <div>
       {/* Main Content */}
       <div>
-        <div className="flex justify-between items-center mb-6">
+        <div className="flex justify-between items-center mb-8">
           <div>
-            <h2 className="text-3xl font-bold text-gray-900">Instâncias</h2>
-            <p className="text-muted-foreground mt-1">Gerencie suas instâncias do Evolution API</p>
+            <h2 className="text-3xl font-bold bg-gradient-to-r from-gray-900 to-gray-700 bg-clip-text text-transparent mb-1">
+              Instâncias WhatsApp
+            </h2>
+            <p className="text-gray-500 text-sm">Gerencie e configure suas instâncias</p>
           </div>
-          <Button onClick={() => setShowModal(true)}>
+          <Button 
+            onClick={() => setShowModal(true)}
+            className="bg-gradient-to-r from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600 text-white shadow-md shadow-indigo-500/30 rounded-xl px-6"
+          >
             <Plus className="h-4 w-4 mr-2" />
             Nova Instância
           </Button>
@@ -192,28 +197,28 @@ export default function Instances() {
             </CardContent>
           </Card>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
             {instances.map((instance) => (
-              <Card key={instance.id} className="hover:shadow-xl transition-all duration-300 border-2 hover:border-primary/20 bg-gradient-to-br from-white to-gray-50/50">
-                <CardHeader className="pb-3">
+              <Card key={instance.id} className="hover:shadow-xl hover:shadow-indigo-500/10 transition-all duration-300 border border-gray-200 hover:border-indigo-300 bg-white rounded-2xl overflow-hidden group">
+                <CardHeader className="pb-4 bg-gradient-to-br from-gray-50 to-white border-b border-gray-100">
                   <div className="flex justify-between items-start">
                     <div className="flex-1">
-                      <CardTitle className="text-xl font-bold text-gray-900 mb-1">
+                      <CardTitle className="text-lg font-bold text-gray-900 mb-1.5">
                         {instance.name}
                       </CardTitle>
-                      <CardDescription className="text-xs font-mono text-gray-500">
+                      <CardDescription className="text-xs font-mono text-gray-400">
                         {instance.instance_name}
                       </CardDescription>
                     </div>
-                    <div className="ml-2">
+                    <div className="ml-3">
                       {getStatusIcon(instance.status)}
                     </div>
                   </div>
                 </CardHeader>
-                <CardContent className="pt-0">
-                  <div className="space-y-4">
+                <CardContent className="pt-4">
+                  <div className="space-y-3">
                     {/* Status Badge */}
-                    <div className="flex items-center justify-between p-2 bg-gray-50 rounded-lg">
+                    <div className="flex items-center justify-between p-2.5 bg-gray-50 rounded-xl border border-gray-100">
                       <span className="text-xs font-medium text-gray-600">Status</span>
                       <span className={`text-xs font-semibold px-2 py-1 rounded-full ${
                         instance.status === 'connected' 
@@ -228,7 +233,7 @@ export default function Instances() {
 
                     {/* Número de Telefone */}
                     {instance.phone_number ? (
-                      <div className="flex items-center gap-2 p-3 bg-blue-50 rounded-lg border border-blue-100">
+                      <div className="flex items-center gap-2.5 p-3 bg-gradient-to-br from-indigo-50 to-purple-50 rounded-xl border border-indigo-100">
                         <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
                         </svg>
@@ -240,16 +245,16 @@ export default function Instances() {
                         </div>
                       </div>
                     ) : instance.status === 'connected' ? (
-                      <div className="p-3 bg-gray-50 rounded-lg border border-gray-200">
-                        <p className="text-xs text-gray-500">Número não disponível</p>
+                      <div className="p-3 bg-gray-50 rounded-xl border border-gray-100">
+                        <p className="text-xs text-gray-400">Número não disponível</p>
                       </div>
                     ) : (
-                      <div className="p-3 bg-yellow-50 rounded-lg border border-yellow-200">
-                        <p className="text-xs text-yellow-700">Conecte para ver o número</p>
+                      <div className="p-3 bg-amber-50 rounded-xl border border-amber-100">
+                        <p className="text-xs text-amber-600">Conecte para ver o número</p>
                       </div>
                     )}
                     {/* Botões de Ação */}
-                    <div className="flex flex-col gap-2 pt-2 border-t border-gray-200">
+                    <div className="flex flex-col gap-2 pt-3 border-t border-gray-100">
                       <div className="flex gap-2">
                         {instance.status === 'disconnected' ? (
                           <Button
@@ -257,7 +262,7 @@ export default function Instances() {
                             variant="default"
                             onClick={() => handleConnect(instance.id)}
                             disabled={refreshing === instance.id}
-                            className="flex-1 bg-green-600 hover:bg-green-700"
+                            className="flex-1 bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600 text-white rounded-xl shadow-sm"
                           >
                             {refreshing === instance.id ? (
                               <RefreshCw className="h-4 w-4 animate-spin" />
@@ -274,7 +279,7 @@ export default function Instances() {
                             variant="outline"
                             onClick={() => handleDisconnect(instance.id)}
                             disabled={refreshing === instance.id}
-                            className="flex-1 border-red-300 text-red-700 hover:bg-red-50"
+                            className="flex-1 border-red-200 text-red-600 hover:bg-red-50 hover:border-red-300 rounded-xl"
                           >
                             {refreshing === instance.id ? (
                               <RefreshCw className="h-4 w-4 animate-spin" />
@@ -292,7 +297,7 @@ export default function Instances() {
                           onClick={() => handleCheckStatus(instance.id)}
                           disabled={refreshing === instance.id}
                           title="Atualizar status"
-                          className="px-3"
+                          className="px-3 rounded-xl"
                         >
                           <RefreshCw
                             className={`h-4 w-4 ${refreshing === instance.id ? 'animate-spin' : ''}`}
@@ -311,7 +316,7 @@ export default function Instances() {
                             });
                             setShowModal(true);
                           }}
-                          className="flex-1"
+                          className="flex-1 rounded-xl"
                         >
                           Editar
                         </Button>
@@ -319,7 +324,7 @@ export default function Instances() {
                           size="sm"
                           variant="destructive"
                           onClick={() => handleDelete(instance.id)}
-                          className="px-3"
+                          className="px-3 rounded-xl"
                         >
                           <Trash2 className="h-4 w-4" />
                         </Button>
@@ -328,7 +333,7 @@ export default function Instances() {
                         size="sm"
                         variant="default"
                         onClick={() => navigate(`/blindage/${instance.id}`)}
-                        className="w-full bg-blue-600 hover:bg-blue-700 text-white"
+                        className="w-full bg-gradient-to-r from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600 text-white rounded-xl shadow-sm"
                       >
                         <Shield className="h-4 w-4 mr-2" />
                         Configurar Blindagem
