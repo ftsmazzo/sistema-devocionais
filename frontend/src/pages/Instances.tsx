@@ -127,10 +127,12 @@ export default function Instances() {
   const handleCheckStatus = async (id: number) => {
     setRefreshing(id);
     try {
-      await api.get(`/instances/${id}/status`);
+      const response = await api.get(`/instances/${id}/status`);
+      console.log('Status atualizado:', response.data);
       loadInstances();
     } catch (error: any) {
-      alert(error.response?.data?.error || 'Erro ao verificar status');
+      console.error('Erro ao verificar status:', error);
+      alert(error.response?.data?.error || error.response?.data?.message || 'Erro ao verificar status');
     } finally {
       setRefreshing(null);
     }

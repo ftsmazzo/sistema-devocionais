@@ -292,39 +292,65 @@ router.get('/:id/status', async (req, res) => {
     }
 
     const instance = instanceResult.rows[0];
-    const evolutionUrl = `${instance.api_url}/instance/fetchInstances`;
+    // Usar a rota correta: /instance/connectionState/{instanceName}
+    const evolutionUrl = `${instance.api_url}/instance/connectionState/${instance.instance_name}`;
+
+    console.log(`🔍 Verificando status da instância ${instance.instance_name} em ${evolutionUrl}`);
 
     // Buscar status no Evolution API
     const evolutionResponse = await axios.get(evolutionUrl, {
       headers: {
         'apikey': instance.api_key,
       },
+      validateStatus: () => true, // Não lançar erro automaticamente
     });
 
-    const evolutionInstance = evolutionResponse.data.find(
-      (inst: any) => inst.instance.instanceName === instance.instance_name
-    );
+    console.log(`   Resposta da Evolution API:`, JSON.stringify(evolutionResponse.data, null, 2));
 
     let status = 'disconnected';
-    if (evolutionInstance) {
-      status = evolutionInstance.instance.status === 'open' ? 'connected' : 'connecting';
+    let qrCode = instance.qr_code;
+
+    // Verificar se a resposta foi bem-sucedida
+    if (evolutionResponse.status === 200 && evolutionResponse.data) {
+      const connectionState = evolutionResponse.data.state || evolutionResponse.data.status;
+      
+      if (connectionState === 'open') {
+        status = 'connected';
+        qrCode = null; // Limpar QR code quando conectado
+      } else if (connectionState === 'close' || connectionState === 'connecting') {
+        status = 'connecting';
+        // Se ainda está conectando, verificar se tem QR code atualizado
+        if (evolutionResponse.data.qrcode?.base64) {
+          qrCode = evolutionResponse.data.qrcode.base64;
+        }
+      } else {
+        status = 'disconnected';
+      }
+    } else if (evolutionResponse.status === 404) {
+      // Instância não existe na Evolution API
+      status = 'disconnected';
     }
 
     // Atualizar status no banco
     await pool.query(
       `UPDATE instances 
        SET status = $1,
-       updated_at = CURRENT_TIMESTAMP
-       WHERE id = $2`,
-      [status, id]
+           qr_code = $2,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $3`,
+      [status, qrCode, id]
     );
 
     res.json({
       status,
-      instance: evolutionInstance || null,
+      instance: evolutionResponse.data || null,
     });
   } catch (error: any) {
-    console.error('Erro ao verificar status:', error);
+    console.error('❌ Erro ao verificar status:', error.message);
+    if (error.response) {
+      console.error('   Status:', error.response.status);
+      console.error('   Data:', JSON.stringify(error.response.data, null, 2));
+    }
     res.status(500).json({
       error: 'Erro ao verificar status',
       details: error.response?.data || error.message,

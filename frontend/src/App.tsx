@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useAuthStore } from './store/authStore';
 import Login from './pages/Login';
@@ -6,10 +6,17 @@ import Instances from './pages/Instances';
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const { user, init } = useAuthStore();
+  const [isInitialized, setIsInitialized] = useState(false);
   
   useEffect(() => {
     init();
+    setIsInitialized(true);
   }, [init]);
+  
+  // Aguardar inicialização antes de verificar user
+  if (!isInitialized) {
+    return <div className="min-h-screen flex items-center justify-center">Carregando...</div>;
+  }
   
   return user ? <>{children}</> : <Navigate to="/login" />;
 }
