@@ -504,30 +504,25 @@ export default function Blindage() {
           </Card>
 
           {/* 4. Horários Permitidos */}
-          <Card className="border border-gray-200 hover:border-indigo-300 hover:shadow-md transition-all duration-200 rounded-xl overflow-hidden bg-white">
-            <CardHeader className="bg-gradient-to-br from-gray-50 to-white border-b border-gray-100 py-3 px-4">
+          <Card className="border border-gray-200 hover:border-indigo-300 hover:shadow-md transition-all duration-200 rounded-lg overflow-hidden bg-white">
+            <CardHeader className="bg-gradient-to-br from-gray-50 to-white border-b border-gray-100 py-2.5 px-3">
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-7 h-7 bg-gradient-to-br from-amber-500 to-orange-500 rounded-lg flex items-center justify-center flex-shrink-0">
+                <div className="flex items-center gap-2">
+                  <div className="w-6 h-6 bg-gradient-to-br from-amber-500 to-orange-500 rounded-lg flex items-center justify-center flex-shrink-0">
                     <Calendar className="h-3.5 w-3.5 text-white" />
                   </div>
-                  <div>
-                    <CardTitle className="text-base font-semibold text-gray-900">
-                      Horários Permitidos
-                    </CardTitle>
-                    <CardDescription className="text-xs text-gray-500 mt-0.5">
-                      Controle de horários de envio
-                    </CardDescription>
-                  </div>
+                  <CardTitle className="text-sm font-semibold text-gray-900">
+                    Horários Permitidos
+                  </CardTitle>
                 </div>
                 <Tooltip content="Define em quais horários as mensagens podem ser enviadas. Bloqueia envios em horários de risco (madrugada) e permite apenas em horários comerciais." />
               </div>
             </CardHeader>
-            <CardContent className="p-4 space-y-3">
+            <CardContent className="p-3 space-y-2.5">
               {groupedRules.hours ? (
                 <>
-                  <div className="flex items-center justify-between py-1">
-                    <Label className="text-sm mb-0">Habilitar</Label>
+                  <div className="flex items-center justify-between py-0.5">
+                    <Label className="text-xs mb-0">Habilitar</Label>
                     <Switch
                       checked={groupedRules.hours.enabled}
                       onCheckedChange={(checked) => updateRule(groupedRules.hours!.id, { enabled: checked })}
@@ -535,8 +530,8 @@ export default function Blindage() {
                   </div>
                   
                   {groupedRules.hours.enabled && (
-                    <div className="pt-2 border-t border-gray-100">
-                      <Label className="text-xs mb-1.5 block">
+                    <div className="space-y-2 pt-2 border-t border-gray-100">
+                      <Label className="text-xs mb-1 block">
                         Horários (0-23, separados por vírgula)
                         <Tooltip content="Exemplo: 8,9,10,11,12,13,14,15,16,17,18,19,20 permite envios das 8h às 20h." />
                       </Label>
@@ -552,8 +547,19 @@ export default function Blindage() {
                             .filter(h => !isNaN(h) && h >= 0 && h <= 23);
                           updateRuleConfig(groupedRules.hours!.id, 'allowed_hours', hours);
                         }}
-                        className="h-9 text-sm"
+                        className="h-8 text-xs"
                       />
+                      
+                      <div className="pt-2 border-t border-gray-100">
+                        <Button
+                          size="sm"
+                          onClick={() => handleSave(groupedRules.hours!.id)}
+                          disabled={saving}
+                          className="w-full bg-gradient-to-r from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600 text-white text-xs py-1.5 rounded-lg"
+                        >
+                          {saving ? 'Salvando...' : 'Salvar'}
+                        </Button>
+                      </div>
                     </div>
                   )}
                 </>
@@ -627,30 +633,25 @@ export default function Blindage() {
           </Card>
 
           {/* 6. Validação de Conteúdo */}
-          <Card className="border border-gray-200 hover:border-indigo-300 hover:shadow-md transition-all duration-200 rounded-xl overflow-hidden bg-white">
-            <CardHeader className="bg-gradient-to-br from-gray-50 to-white border-b border-gray-100 py-3 px-4">
+          <Card className="border border-gray-200 hover:border-indigo-300 hover:shadow-md transition-all duration-200 rounded-lg overflow-hidden bg-white">
+            <CardHeader className="bg-gradient-to-br from-gray-50 to-white border-b border-gray-100 py-2.5 px-3">
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-7 h-7 bg-gradient-to-br from-indigo-500 to-blue-500 rounded-lg flex items-center justify-center flex-shrink-0">
+                <div className="flex items-center gap-2">
+                  <div className="w-6 h-6 bg-gradient-to-br from-indigo-500 to-blue-500 rounded-lg flex items-center justify-center flex-shrink-0">
                     <FileText className="h-3.5 w-3.5 text-white" />
                   </div>
-                  <div>
-                    <CardTitle className="text-base font-semibold text-gray-900">
-                      Validação de Conteúdo
-                    </CardTitle>
-                    <CardDescription className="text-xs text-gray-500 mt-0.5">
-                      Validação de mensagens
-                    </CardDescription>
-                  </div>
+                  <CardTitle className="text-sm font-semibold text-gray-900">
+                    Validação de Conteúdo
+                  </CardTitle>
                 </div>
                 <Tooltip content="Valida o conteúdo das mensagens antes do envio. Pode bloquear mensagens muito longas ou com palavras proibidas." />
               </div>
             </CardHeader>
-            <CardContent className="p-4 space-y-3">
+            <CardContent className="p-3 space-y-2.5">
               {groupedRules.content ? (
                 <>
-                  <div className="flex items-center justify-between py-1">
-                    <Label className="text-sm mb-0">Habilitar</Label>
+                  <div className="flex items-center justify-between py-0.5">
+                    <Label className="text-xs mb-0">Habilitar</Label>
                     <Switch
                       checked={groupedRules.content.enabled}
                       onCheckedChange={(checked) => updateRule(groupedRules.content!.id, { enabled: checked })}
@@ -658,20 +659,21 @@ export default function Blindage() {
                   </div>
                   
                   {groupedRules.content.enabled && (
-                    <div className="space-y-2.5 pt-2 border-t border-gray-100">
+                    <div className="space-y-2 pt-2 border-t border-gray-100">
                       <div>
-                        <Label htmlFor="max_length" className="text-xs mb-1">
-                          Tamanho Máximo (caracteres)
-                          <Tooltip content="WhatsApp permite até 4096 caracteres." />
-                        </Label>
-                        <Input
-                          id="max_length"
-                          type="number"
-                          min="1"
-                          max="4096"
+                        <div className="flex items-center justify-between mb-1">
+                          <Label htmlFor="max_length" className="text-xs">
+                            Tamanho Máximo (caracteres)
+                            <Tooltip content="WhatsApp permite até 4096 caracteres." />
+                          </Label>
+                          <span className="text-xs font-semibold text-indigo-600">{groupedRules.content.config.max_length || 4096}</span>
+                        </div>
+                        <Slider
                           value={groupedRules.content.config.max_length || 4096}
-                          onChange={(e) => updateRuleConfig(groupedRules.content!.id, 'max_length', parseInt(e.target.value))}
-                          className="h-9 text-sm"
+                          min={100}
+                          max={4096}
+                          step={50}
+                          onChange={(value) => updateRuleConfig(groupedRules.content!.id, 'max_length', value)}
                         />
                       </div>
                       
@@ -693,8 +695,19 @@ export default function Blindage() {
                               .filter(w => w.length > 0);
                             updateRuleConfig(groupedRules.content!.id, 'blocked_words', words);
                           }}
-                          className="h-9 text-sm"
+                          className="h-8 text-xs"
                         />
+                      </div>
+                      
+                      <div className="pt-2 border-t border-gray-100">
+                        <Button
+                          size="sm"
+                          onClick={() => handleSave(groupedRules.content!.id)}
+                          disabled={saving}
+                          className="w-full bg-gradient-to-r from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600 text-white text-xs py-1.5 rounded-lg"
+                        >
+                          {saving ? 'Salvando...' : 'Salvar'}
+                        </Button>
                       </div>
                     </div>
                   )}
