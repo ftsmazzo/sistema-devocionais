@@ -417,49 +417,83 @@ async function validateContent(message: string, rules: BlindageRule[]): Promise<
 }
 
 /**
- * Seleciona instância para envio (rotação)
+ * Seleciona instância para envio (seleção + rotação)
  */
 async function selectInstance(
   preferredInstanceId: number | undefined,
   rules: BlindageRule[]
 ): Promise<BlindageResult> {
-  const rotationRule = rules.find(r => r.rule_type === 'instance_rotation');
+  // Verificar regra de seleção de instâncias
+  const selectionRule = rules.find(r => r.rule_type === 'instance_selection');
+  let availableInstanceIds: number[] = [];
   
-  // Se não há regra de rotação e tem instância preferida, usa ela
-  if (!rotationRule || !rotationRule.enabled) {
-    if (preferredInstanceId) {
-      return {
-        canSend: true,
-        selectedInstanceId: preferredInstanceId,
-      };
+  if (selectionRule && selectionRule.enabled) {
+    const config = selectionRule.config || {};
+    const selectedIds = Array.isArray(config.selected_instance_ids) ? config.selected_instance_ids : [];
+    
+    if (selectedIds.length > 0) {
+      // Usar apenas instâncias selecionadas
+      const result = await pool.query(
+        `SELECT id FROM instances 
+         WHERE id = ANY($1::int[]) 
+           AND status = 'connected'
+         ORDER BY id`,
+        [selectedIds]
+      );
+      availableInstanceIds = result.rows.map((r: any) => r.id);
+    } else {
+      // Se nenhuma selecionada, usar todas as conectadas
+      const result = await pool.query(
+        `SELECT id FROM instances WHERE status = 'connected' ORDER BY id`
+      );
+      availableInstanceIds = result.rows.map((r: any) => r.id);
     }
-    // Se não tem instância preferida, busca uma conectada
+  } else {
+    // Sem regra de seleção, usar todas as conectadas
     const result = await pool.query(
-      `SELECT id FROM instances WHERE status = 'connected' ORDER BY RANDOM() LIMIT 1`
+      `SELECT id FROM instances WHERE status = 'connected' ORDER BY id`
     );
-    if (result.rows.length === 0) {
-      return {
-        canSend: false,
-        reason: 'Nenhuma instância conectada disponível',
-        blockedBy: 'instance_rotation',
-      };
-    }
+    availableInstanceIds = result.rows.map((r: any) => r.id);
+  }
+  
+  if (availableInstanceIds.length === 0) {
+    return {
+      canSend: false,
+      reason: 'Nenhuma instância conectada disponível',
+      blockedBy: 'instance_selection',
+    };
+  }
+  
+  // Se há instância preferida e ela está disponível, usar ela
+  if (preferredInstanceId && availableInstanceIds.includes(preferredInstanceId)) {
     return {
       canSend: true,
-      selectedInstanceId: result.rows[0].id,
+      selectedInstanceId: preferredInstanceId,
+    };
+  }
+  
+  // Verificar regra de rotação
+  const rotationRule = rules.find(r => r.rule_type === 'instance_rotation');
+  if (!rotationRule || !rotationRule.enabled) {
+    // Sem rotação, usar primeira disponível
+    return {
+      canSend: true,
+      selectedInstanceId: availableInstanceIds[0],
     };
   }
 
   const config = rotationRule.config || {};
   
-  // Buscar instâncias conectadas
+  // Buscar instâncias disponíveis com informações de uso
   const instancesResult = await pool.query(
     `SELECT id, name, instance_name, last_message_sent_at 
      FROM instances 
-     WHERE status = 'connected' 
+     WHERE id = ANY($1::int[])
+       AND status = 'connected'
      ORDER BY 
        COALESCE(last_message_sent_at, '1970-01-01'::timestamp) ASC,
-       id ASC`
+       id ASC`,
+    [availableInstanceIds]
   );
 
   if (instancesResult.rows.length === 0) {
