@@ -315,29 +315,34 @@ router.get('/:id/status', async (req, res) => {
 
     // Verificar se a resposta foi bem-sucedida
     if (evolutionResponse.status === 200 && evolutionResponse.data) {
-      // A resposta pode ter 'state' no objeto instance ou diretamente
+      // A resposta tem 'state' dentro de 'instance': { instance: { state: 'open' } }
       const connectionState = evolutionResponse.data.instance?.state || 
                              evolutionResponse.data.state || 
                              evolutionResponse.data.status;
       
       console.log(`   Estado da conexão: ${connectionState}`);
+      console.log(`   Dados completos:`, JSON.stringify(evolutionResponse.data, null, 2));
       
       if (connectionState === 'open') {
         status = 'connected';
         qrCode = null; // Limpar QR code quando conectado
+        console.log(`   ✅ Instância conectada`);
       } else if (connectionState === 'close' || connectionState === 'connecting') {
         status = 'connecting';
+        console.log(`   ⏳ Instância conectando`);
         // Se ainda está conectando, verificar se tem QR code atualizado
         if (evolutionResponse.data.qrcode?.base64) {
           qrCode = evolutionResponse.data.qrcode.base64;
         }
       } else {
         status = 'disconnected';
+        console.log(`   ❌ Instância desconectada`);
       }
     } else if (evolutionResponse.status === 404) {
       // Instância não existe na Evolution API
       status = 'disconnected';
       qrCode = null;
+      console.log(`   ❌ Instância não encontrada na Evolution API`);
     }
 
     // Atualizar status no banco
