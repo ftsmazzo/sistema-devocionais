@@ -7,6 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import Switch from '@/components/ui/Switch';
 import Label from '@/components/ui/Label';
 import Tooltip from '@/components/ui/Tooltip';
+import Toast from '@/components/ui/Toast';
 import {
   Shield,
   Clock,
@@ -42,6 +43,8 @@ export default function Blindage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' | 'warning' } | null>(null);
+  const [hasChanges, setHasChanges] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -72,6 +75,7 @@ export default function Blindage() {
     setRules(rules.map(rule => 
       rule.id === ruleId ? { ...rule, ...updates } : rule
     ));
+    setHasChanges(true);
   };
 
   const updateRuleConfig = (ruleId: number, configKey: string, value: any) => {
@@ -87,6 +91,7 @@ export default function Blindage() {
       }
       return rule;
     }));
+    setHasChanges(true);
   };
 
   const handleSave = async () => {
@@ -95,18 +100,35 @@ export default function Blindage() {
       setSaved(false);
 
       // Salvar cada regra modificada
+      let savedCount = 0;
       for (const rule of rules) {
-        await api.put(`/blindage/rules/${rule.id}`, {
-          enabled: rule.enabled,
-          config: rule.config,
-        });
+        try {
+          await api.put(`/blindage/rules/${rule.id}`, {
+            enabled: rule.enabled,
+            config: rule.config,
+          });
+          savedCount++;
+        } catch (error: any) {
+          console.error(`Erro ao salvar regra ${rule.id}:`, error);
+          throw error;
+        }
       }
 
       setSaved(true);
-      setTimeout(() => setSaved(false), 3000);
+      setHasChanges(false);
+      setToast({
+        message: `✅ ${savedCount} configuração(ões) salva(s) com sucesso!`,
+        type: 'success',
+      });
+      
+      // Recarregar dados para garantir sincronização
+      await loadData();
     } catch (error: any) {
       console.error('Erro ao salvar:', error);
-      alert(error.response?.data?.error || 'Erro ao salvar configurações');
+      setToast({
+        message: `❌ Erro ao salvar: ${error.response?.data?.error || 'Erro desconhecido'}`,
+        type: 'error',
+      });
     } finally {
       setSaving(false);
     }
@@ -156,10 +178,19 @@ export default function Blindage() {
             
             <Button
               onClick={handleSave}
-              disabled={saving}
-              className="flex items-center gap-2 bg-gradient-to-r from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600 text-white shadow-md shadow-indigo-500/30 rounded-xl px-6"
+              disabled={saving || !hasChanges}
+              className={`flex items-center gap-2 rounded-xl px-6 transition-all ${
+                hasChanges
+                  ? 'bg-gradient-to-r from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600 text-white shadow-md shadow-indigo-500/30'
+                  : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+              }`}
             >
-              {saved ? (
+              {saving ? (
+                <>
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                  Salvando...
+                </>
+              ) : saved ? (
                 <>
                   <CheckCircle2 className="h-4 w-4" />
                   Salvo!
@@ -167,7 +198,7 @@ export default function Blindage() {
               ) : (
                 <>
                   <Save className="h-4 w-4" />
-                  {saving ? 'Salvando...' : 'Salvar Alterações'}
+                  {hasChanges ? 'Salvar Alterações' : 'Sem alterações'}
                 </>
               )}
             </Button>
@@ -175,26 +206,32 @@ export default function Blindage() {
         </div>
 
         {/* Grupos de Blindagem */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {/* 1. Delay Entre Mensagens */}
-          <Card className="border border-gray-200 hover:border-indigo-300 hover:shadow-lg hover:shadow-indigo-500/10 transition-all duration-300 rounded-2xl overflow-hidden bg-white">
-            <CardHeader className="bg-gradient-to-br from-gray-50 to-white border-b border-gray-100">
-              <CardTitle className="flex items-center gap-2.5 text-lg">
-                <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-cyan-500 rounded-lg flex items-center justify-center">
-                  <Clock className="h-4 w-4 text-white" />
+          <Card className="border border-gray-200 hover:border-indigo-300 hover:shadow-md transition-all duration-200 rounded-xl overflow-hidden bg-white">
+            <CardHeader className="bg-gradient-to-br from-gray-50 to-white border-b border-gray-100 py-3 px-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-7 h-7 bg-gradient-to-br from-blue-500 to-cyan-500 rounded-lg flex items-center justify-center flex-shrink-0">
+                    <Clock className="h-3.5 w-3.5 text-white" />
+                  </div>
+                  <div>
+                    <CardTitle className="text-base font-semibold text-gray-900">
+                      Delay Entre Mensagens
+                    </CardTitle>
+                    <CardDescription className="text-xs text-gray-500 mt-0.5">
+                      Intervalo de tempo entre envios
+                    </CardDescription>
+                  </div>
                 </div>
-                Delay Entre Mensagens
                 <Tooltip content="Controla o tempo mínimo entre o envio de mensagens. O delay progressivo aumenta automaticamente conforme o volume de mensagens enviadas, ajudando a evitar bloqueios." />
-              </CardTitle>
-              <CardDescription className="text-sm text-gray-500 mt-1">
-                Configure o intervalo de tempo entre envios
-              </CardDescription>
+              </div>
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className="p-4 space-y-3">
               {groupedRules.delay ? (
                 <>
-                  <div className="flex items-center justify-between">
-                    <Label>Habilitar Delay</Label>
+                  <div className="flex items-center justify-between py-1">
+                    <Label className="text-sm mb-0">Habilitar</Label>
                     <Switch
                       checked={groupedRules.delay.enabled}
                       onCheckedChange={(checked) => updateRule(groupedRules.delay!.id, { enabled: checked })}
@@ -202,39 +239,43 @@ export default function Blindage() {
                   </div>
                   
                   {groupedRules.delay.enabled && (
-                    <div className="space-y-4 pt-4 border-t border-gray-100">
-                      <div>
-                        <Label htmlFor="min_delay">
-                          Delay Mínimo (segundos)
-                          <Tooltip content="Tempo mínimo obrigatório entre cada mensagem enviada. Recomendado: 3-5 segundos." />
-                        </Label>
-                        <Input
-                          id="min_delay"
-                          type="number"
-                          min="1"
-                          max="60"
-                          value={groupedRules.delay.config.min_delay_seconds || 3}
-                          onChange={(e) => updateRuleConfig(groupedRules.delay!.id, 'min_delay_seconds', parseInt(e.target.value))}
-                        />
+                    <div className="space-y-2.5 pt-2.5 border-t border-gray-100">
+                      <div className="grid grid-cols-2 gap-2.5">
+                        <div>
+                          <Label htmlFor="min_delay" className="text-xs mb-1">
+                            Mínimo (s)
+                            <Tooltip content="Tempo mínimo entre mensagens. Recomendado: 3-5s." />
+                          </Label>
+                          <Input
+                            id="min_delay"
+                            type="number"
+                            min="1"
+                            max="60"
+                            value={groupedRules.delay.config.min_delay_seconds || 3}
+                            onChange={(e) => updateRuleConfig(groupedRules.delay!.id, 'min_delay_seconds', parseInt(e.target.value))}
+                            className="h-9 text-sm"
+                          />
+                        </div>
+                        
+                        <div>
+                          <Label htmlFor="max_delay" className="text-xs mb-1">
+                            Máximo (s)
+                            <Tooltip content="Tempo máximo do delay progressivo." />
+                          </Label>
+                          <Input
+                            id="max_delay"
+                            type="number"
+                            min="1"
+                            max="300"
+                            value={groupedRules.delay.config.max_delay_seconds || 10}
+                            onChange={(e) => updateRuleConfig(groupedRules.delay!.id, 'max_delay_seconds', parseInt(e.target.value))}
+                            className="h-9 text-sm"
+                          />
+                        </div>
                       </div>
                       
-                      <div>
-                        <Label htmlFor="max_delay">
-                          Delay Máximo (segundos)
-                          <Tooltip content="Tempo máximo que o delay pode atingir quando progressivo. Evita delays muito longos." />
-                        </Label>
-                        <Input
-                          id="max_delay"
-                          type="number"
-                          min="1"
-                          max="300"
-                          value={groupedRules.delay.config.max_delay_seconds || 10}
-                          onChange={(e) => updateRuleConfig(groupedRules.delay!.id, 'max_delay_seconds', parseInt(e.target.value))}
-                        />
-                      </div>
-                      
-                      <div className="flex items-center justify-between">
-                        <Label>Delay Progressivo</Label>
+                      <div className="flex items-center justify-between py-1">
+                        <Label className="text-xs mb-0">Progressivo</Label>
                         <Switch
                           checked={groupedRules.delay.config.progressive !== false}
                           onCheckedChange={(checked) => updateRuleConfig(groupedRules.delay!.id, 'progressive', checked)}
@@ -242,11 +283,11 @@ export default function Blindage() {
                       </div>
                       
                       {groupedRules.delay.config.progressive !== false && (
-                        <div className="space-y-4 pt-4 border-t border-gray-100">
+                        <div className="grid grid-cols-2 gap-2.5 pt-2 border-t border-gray-100">
                           <div>
-                            <Label htmlFor="base_delay">
-                              Delay Base (segundos)
-                              <Tooltip content="Delay inicial quando o sistema começa a enviar mensagens." />
+                            <Label htmlFor="base_delay" className="text-xs mb-1">
+                              Base (s)
+                              <Tooltip content="Delay inicial." />
                             </Label>
                             <Input
                               id="base_delay"
@@ -254,13 +295,14 @@ export default function Blindage() {
                               min="1"
                               value={groupedRules.delay.config.base_delay || 3}
                               onChange={(e) => updateRuleConfig(groupedRules.delay!.id, 'base_delay', parseFloat(e.target.value))}
+                              className="h-9 text-sm"
                             />
                           </div>
                           
                           <div>
-                            <Label htmlFor="increment">
-                              Incremento por Mensagem
-                              <Tooltip content="Quantos segundos são adicionados ao delay a cada mensagem enviada. Exemplo: 0.5 = +0.5s por mensagem." />
+                            <Label htmlFor="increment" className="text-xs mb-1">
+                              Incremento
+                              <Tooltip content="Segundos adicionados por mensagem." />
                             </Label>
                             <Input
                               id="increment"
@@ -269,6 +311,7 @@ export default function Blindage() {
                               step="0.1"
                               value={groupedRules.delay.config.increment_per_message || 0.5}
                               onChange={(e) => updateRuleConfig(groupedRules.delay!.id, 'increment_per_message', parseFloat(e.target.value))}
+                              className="h-9 text-sm"
                             />
                           </div>
                         </div>
@@ -283,24 +326,30 @@ export default function Blindage() {
           </Card>
 
           {/* 2. Limite de Mensagens */}
-          <Card className="border border-gray-200 hover:border-indigo-300 hover:shadow-lg hover:shadow-indigo-500/10 transition-all duration-300 rounded-2xl overflow-hidden bg-white">
-            <CardHeader className="bg-gradient-to-br from-gray-50 to-white border-b border-gray-100">
-              <CardTitle className="flex items-center gap-2.5 text-lg">
-                <div className="w-8 h-8 bg-gradient-to-br from-green-500 to-emerald-500 rounded-lg flex items-center justify-center">
-                  <BarChart3 className="h-4 w-4 text-white" />
+          <Card className="border border-gray-200 hover:border-indigo-300 hover:shadow-md transition-all duration-200 rounded-xl overflow-hidden bg-white">
+            <CardHeader className="bg-gradient-to-br from-gray-50 to-white border-b border-gray-100 py-3 px-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-7 h-7 bg-gradient-to-br from-green-500 to-emerald-500 rounded-lg flex items-center justify-center flex-shrink-0">
+                    <BarChart3 className="h-3.5 w-3.5 text-white" />
+                  </div>
+                  <div>
+                    <CardTitle className="text-base font-semibold text-gray-900">
+                      Limite de Mensagens
+                    </CardTitle>
+                    <CardDescription className="text-xs text-gray-500 mt-0.5">
+                      Limites por período
+                    </CardDescription>
+                  </div>
                 </div>
-                Limite de Mensagens
                 <Tooltip content="Define limites máximos de mensagens que podem ser enviadas por hora e por dia. Ajuda a evitar bloqueios por excesso de envios." />
-              </CardTitle>
-              <CardDescription className="text-sm text-gray-500 mt-1">
-                Configure limites de envio por período
-              </CardDescription>
+              </div>
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className="p-4 space-y-3">
               {groupedRules.limit ? (
                 <>
-                  <div className="flex items-center justify-between">
-                    <Label>Habilitar Limites</Label>
+                  <div className="flex items-center justify-between py-1">
+                    <Label className="text-sm mb-0">Habilitar</Label>
                     <Switch
                       checked={groupedRules.limit.enabled}
                       onCheckedChange={(checked) => updateRule(groupedRules.limit!.id, { enabled: checked })}
@@ -308,11 +357,11 @@ export default function Blindage() {
                   </div>
                   
                   {groupedRules.limit.enabled && (
-                    <div className="space-y-4 pt-4 border-t border-gray-100">
+                    <div className="grid grid-cols-2 gap-2.5 pt-2 border-t border-gray-100">
                       <div>
-                        <Label htmlFor="max_hour">
-                          Máximo por Hora
-                          <Tooltip content="Número máximo de mensagens que podem ser enviadas em uma hora. Recomendado: 30-50 mensagens/hora." />
+                        <Label htmlFor="max_hour" className="text-xs mb-1">
+                          Por Hora
+                          <Tooltip content="Máximo de mensagens por hora. Recomendado: 30-50." />
                         </Label>
                         <Input
                           id="max_hour"
@@ -321,13 +370,14 @@ export default function Blindage() {
                           max="1000"
                           value={groupedRules.limit.config.max_per_hour || 50}
                           onChange={(e) => updateRuleConfig(groupedRules.limit!.id, 'max_per_hour', parseInt(e.target.value))}
+                          className="h-9 text-sm"
                         />
                       </div>
                       
                       <div>
-                        <Label htmlFor="max_day">
-                          Máximo por Dia
-                          <Tooltip content="Número máximo de mensagens que podem ser enviadas em um dia. Recomendado: 300-500 mensagens/dia." />
+                        <Label htmlFor="max_day" className="text-xs mb-1">
+                          Por Dia
+                          <Tooltip content="Máximo de mensagens por dia. Recomendado: 300-500." />
                         </Label>
                         <Input
                           id="max_day"
@@ -336,13 +386,14 @@ export default function Blindage() {
                           max="10000"
                           value={groupedRules.limit.config.max_per_day || 500}
                           onChange={(e) => updateRuleConfig(groupedRules.limit!.id, 'max_per_day', parseInt(e.target.value))}
+                          className="h-9 text-sm"
                         />
                       </div>
                     </div>
                   )}
                 </>
               ) : (
-                <p className="text-gray-500 text-sm">Regra não encontrada</p>
+                <p className="text-gray-400 text-xs">Regra não encontrada</p>
               )}
             </CardContent>
           </Card>
@@ -398,24 +449,30 @@ export default function Blindage() {
           </Card>
 
           {/* 4. Horários Permitidos */}
-          <Card className="border border-gray-200 hover:border-indigo-300 hover:shadow-lg hover:shadow-indigo-500/10 transition-all duration-300 rounded-2xl overflow-hidden bg-white">
-            <CardHeader className="bg-gradient-to-br from-gray-50 to-white border-b border-gray-100">
-              <CardTitle className="flex items-center gap-2.5 text-lg">
-                <div className="w-8 h-8 bg-gradient-to-br from-amber-500 to-orange-500 rounded-lg flex items-center justify-center">
-                  <Calendar className="h-4 w-4 text-white" />
+          <Card className="border border-gray-200 hover:border-indigo-300 hover:shadow-md transition-all duration-200 rounded-xl overflow-hidden bg-white">
+            <CardHeader className="bg-gradient-to-br from-gray-50 to-white border-b border-gray-100 py-3 px-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-7 h-7 bg-gradient-to-br from-amber-500 to-orange-500 rounded-lg flex items-center justify-center flex-shrink-0">
+                    <Calendar className="h-3.5 w-3.5 text-white" />
+                  </div>
+                  <div>
+                    <CardTitle className="text-base font-semibold text-gray-900">
+                      Horários Permitidos
+                    </CardTitle>
+                    <CardDescription className="text-xs text-gray-500 mt-0.5">
+                      Controle de horários de envio
+                    </CardDescription>
+                  </div>
                 </div>
-                Horários Permitidos
                 <Tooltip content="Define em quais horários as mensagens podem ser enviadas. Bloqueia envios em horários de risco (madrugada) e permite apenas em horários comerciais." />
-              </CardTitle>
-              <CardDescription className="text-sm text-gray-500 mt-1">
-                Configure horários de envio permitidos
-              </CardDescription>
+              </div>
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className="p-4 space-y-3">
               {groupedRules.hours ? (
                 <>
-                  <div className="flex items-center justify-between">
-                    <Label>Habilitar Controle de Horários</Label>
+                  <div className="flex items-center justify-between py-1">
+                    <Label className="text-sm mb-0">Habilitar</Label>
                     <Switch
                       checked={groupedRules.hours.enabled}
                       onCheckedChange={(checked) => updateRule(groupedRules.hours!.id, { enabled: checked })}
@@ -423,31 +480,30 @@ export default function Blindage() {
                   </div>
                   
                   {groupedRules.hours.enabled && (
-                    <div className="pt-4 border-t border-gray-100">
-                      <p className="text-sm text-gray-600 mb-4">
-                        Configure os horários permitidos (0-23). Exemplo: [8, 9, 10, ..., 20] permite envios das 8h às 20h.
-                      </p>
-                      <div className="space-y-2">
-                        <Label>Horários Permitidos (separados por vírgula)</Label>
-                        <Input
-                          placeholder="8,9,10,11,12,13,14,15,16,17,18,19,20"
-                          value={Array.isArray(groupedRules.hours.config.allowed_hours) 
-                            ? groupedRules.hours.config.allowed_hours.join(',') 
-                            : ''}
-                          onChange={(e) => {
-                            const hours = e.target.value
-                              .split(',')
-                              .map(h => parseInt(h.trim()))
-                              .filter(h => !isNaN(h) && h >= 0 && h <= 23);
-                            updateRuleConfig(groupedRules.hours!.id, 'allowed_hours', hours);
-                          }}
-                        />
-                      </div>
+                    <div className="pt-2 border-t border-gray-100">
+                      <Label className="text-xs mb-1.5 block">
+                        Horários (0-23, separados por vírgula)
+                        <Tooltip content="Exemplo: 8,9,10,11,12,13,14,15,16,17,18,19,20 permite envios das 8h às 20h." />
+                      </Label>
+                      <Input
+                        placeholder="8,9,10,11,12,13,14,15,16,17,18,19,20"
+                        value={Array.isArray(groupedRules.hours.config.allowed_hours) 
+                          ? groupedRules.hours.config.allowed_hours.join(',') 
+                          : ''}
+                        onChange={(e) => {
+                          const hours = e.target.value
+                            .split(',')
+                            .map(h => parseInt(h.trim()))
+                            .filter(h => !isNaN(h) && h >= 0 && h <= 23);
+                          updateRuleConfig(groupedRules.hours!.id, 'allowed_hours', hours);
+                        }}
+                        className="h-9 text-sm"
+                      />
                     </div>
                   )}
                 </>
               ) : (
-                <p className="text-gray-500 text-sm">Regra não encontrada</p>
+                <p className="text-gray-400 text-xs">Regra não encontrada</p>
               )}
             </CardContent>
           </Card>
@@ -504,24 +560,30 @@ export default function Blindage() {
           </Card>
 
           {/* 6. Validação de Conteúdo */}
-          <Card className="border border-gray-200 hover:border-indigo-300 hover:shadow-lg hover:shadow-indigo-500/10 transition-all duration-300 rounded-2xl overflow-hidden bg-white">
-            <CardHeader className="bg-gradient-to-br from-gray-50 to-white border-b border-gray-100">
-              <CardTitle className="flex items-center gap-2.5 text-lg">
-                <div className="w-8 h-8 bg-gradient-to-br from-indigo-500 to-blue-500 rounded-lg flex items-center justify-center">
-                  <FileText className="h-4 w-4 text-white" />
+          <Card className="border border-gray-200 hover:border-indigo-300 hover:shadow-md transition-all duration-200 rounded-xl overflow-hidden bg-white">
+            <CardHeader className="bg-gradient-to-br from-gray-50 to-white border-b border-gray-100 py-3 px-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-7 h-7 bg-gradient-to-br from-indigo-500 to-blue-500 rounded-lg flex items-center justify-center flex-shrink-0">
+                    <FileText className="h-3.5 w-3.5 text-white" />
+                  </div>
+                  <div>
+                    <CardTitle className="text-base font-semibold text-gray-900">
+                      Validação de Conteúdo
+                    </CardTitle>
+                    <CardDescription className="text-xs text-gray-500 mt-0.5">
+                      Validação de mensagens
+                    </CardDescription>
+                  </div>
                 </div>
-                Validação de Conteúdo
                 <Tooltip content="Valida o conteúdo das mensagens antes do envio. Pode bloquear mensagens muito longas ou com palavras proibidas." />
-              </CardTitle>
-              <CardDescription className="text-sm text-gray-500 mt-1">
-                Configure validações de conteúdo das mensagens
-              </CardDescription>
+              </div>
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className="p-4 space-y-3">
               {groupedRules.content ? (
                 <>
-                  <div className="flex items-center justify-between">
-                    <Label>Habilitar Validação</Label>
+                  <div className="flex items-center justify-between py-1">
+                    <Label className="text-sm mb-0">Habilitar</Label>
                     <Switch
                       checked={groupedRules.content.enabled}
                       onCheckedChange={(checked) => updateRule(groupedRules.content!.id, { enabled: checked })}
@@ -529,11 +591,11 @@ export default function Blindage() {
                   </div>
                   
                   {groupedRules.content.enabled && (
-                    <div className="space-y-4 pt-4 border-t border-gray-100">
+                    <div className="space-y-2.5 pt-2 border-t border-gray-100">
                       <div>
-                        <Label htmlFor="max_length">
+                        <Label htmlFor="max_length" className="text-xs mb-1">
                           Tamanho Máximo (caracteres)
-                          <Tooltip content="Tamanho máximo permitido para uma mensagem. WhatsApp permite até 4096 caracteres." />
+                          <Tooltip content="WhatsApp permite até 4096 caracteres." />
                         </Label>
                         <Input
                           id="max_length"
@@ -542,13 +604,14 @@ export default function Blindage() {
                           max="4096"
                           value={groupedRules.content.config.max_length || 4096}
                           onChange={(e) => updateRuleConfig(groupedRules.content!.id, 'max_length', parseInt(e.target.value))}
+                          className="h-9 text-sm"
                         />
                       </div>
                       
                       <div>
-                        <Label htmlFor="blocked_words">
-                          Palavras Bloqueadas (separadas por vírgula)
-                          <Tooltip content="Lista de palavras que, se encontradas na mensagem, farão com que ela seja bloqueada. Deixe vazio para não bloquear palavras." />
+                        <Label htmlFor="blocked_words" className="text-xs mb-1">
+                          Palavras Bloqueadas
+                          <Tooltip content="Separadas por vírgula. Deixe vazio para não bloquear." />
                         </Label>
                         <Input
                           id="blocked_words"
@@ -563,13 +626,14 @@ export default function Blindage() {
                               .filter(w => w.length > 0);
                             updateRuleConfig(groupedRules.content!.id, 'blocked_words', words);
                           }}
+                          className="h-9 text-sm"
                         />
                       </div>
                     </div>
                   )}
                 </>
               ) : (
-                <p className="text-gray-500 text-sm">Regra não encontrada</p>
+                <p className="text-gray-400 text-xs">Regra não encontrada</p>
               )}
             </CardContent>
           </Card>
