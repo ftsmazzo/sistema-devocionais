@@ -2,6 +2,7 @@ import express from 'express';
 import axios from 'axios';
 import { pool } from '../database';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
+import { createDefaultRules } from '../services/blindage';
 
 const router = express.Router();
 
@@ -71,6 +72,17 @@ router.post('/', async (req, res) => {
        RETURNING id, name, instance_name, status, phone_number, qr_code, last_connection, created_at, updated_at`,
       [name, api_key, api_url, instance_name]
     );
+
+    const instanceId = result.rows[0].id;
+
+    // Criar regras padrão de blindagem automaticamente
+    try {
+      await createDefaultRules(instanceId);
+      console.log(`✅ Regras padrão de blindagem criadas para instância ${instanceId}`);
+    } catch (error) {
+      console.error(`⚠️ Erro ao criar regras padrão para instância ${instanceId}:`, error);
+      // Não falhar a criação da instância se as regras falharem
+    }
 
     // Não retornar api_key e api_url por segurança
     res.status(201).json({ instance: result.rows[0] });
