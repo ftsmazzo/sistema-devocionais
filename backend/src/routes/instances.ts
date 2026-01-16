@@ -538,24 +538,53 @@ async function configureWebhook(instance: any, instanceId: number) {
 
     console.log(`🔗 Configurando webhook para instância ${instance.instance_name}: ${webhookUrl}`);
 
-    // Configurar webhook na Evolution API
+    // Configurar webhook na Evolution API 2.3.7
+    // Estrutura correta baseada na documentação do Postman
     const webhookConfigUrl = `${instance.api_url}/webhook/set/${instance.instance_name}`;
     
-    // Evolution API 2.3.7 - estrutura simplificada
-    const webhookResponse = await axios.post(
-      webhookConfigUrl,
-      {
-        url: webhookUrl,
+    const webhookPayload = {
+      webhook: {
         enabled: true,
+        url: webhookUrl,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        byEvents: false, // false = envia todos os eventos listados
+        base64: false,
         events: [
           'APPLICATION_STARTUP',
           'QRCODE_UPDATED',
+          'MESSAGES_SET',
           'MESSAGES_UPSERT',
           'MESSAGES_UPDATE',
           'MESSAGES_DELETE',
+          'SEND_MESSAGE',
+          'CONTACTS_SET',
+          'CONTACTS_UPSERT',
+          'CONTACTS_UPDATE',
+          'PRESENCE_UPDATE',
+          'CHATS_SET',
+          'CHATS_UPSERT',
+          'CHATS_UPDATE',
+          'CHATS_DELETE',
+          'GROUPS_UPSERT',
+          'GROUP_UPDATE',
+          'GROUP_PARTICIPANTS_UPDATE',
           'CONNECTION_UPDATE',
+          'LABELS_EDIT',
+          'LABELS_ASSOCIATION',
+          'CALL',
+          'TYPEBOT_START',
+          'TYPEBOT_CHANGE_STATUS',
         ],
       },
+    };
+
+    console.log(`   Payload:`, JSON.stringify(webhookPayload, null, 2));
+
+    const webhookResponse = await axios.post(
+      webhookConfigUrl,
+      webhookPayload,
       {
         headers: {
           'apikey': instance.api_key,
