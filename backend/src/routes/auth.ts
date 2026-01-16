@@ -1,6 +1,6 @@
 import express from 'express';
 import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
+import jwt, { SignOptions } from 'jsonwebtoken';
 import { pool } from '../database';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
 
@@ -29,10 +29,10 @@ router.post('/login', async (req, res) => {
     }
 
     const jwtSecret = (process.env.JWT_SECRET || 'secret') as string;
-    const jwtExpiresIn = (process.env.JWT_EXPIRES_IN || '7d') as string;
+    const jwtExpiresIn = process.env.JWT_EXPIRES_IN || '7d';
     
     const payload = { id: user.id, email: user.email, role: user.role };
-    const options = { expiresIn: jwtExpiresIn };
+    const options: SignOptions = { expiresIn: jwtExpiresIn as string | number };
     
     const token = jwt.sign(payload, jwtSecret, options);
 
