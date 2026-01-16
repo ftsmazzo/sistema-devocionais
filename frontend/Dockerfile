@@ -2,10 +2,6 @@ FROM node:18-alpine AS builder
 
 WORKDIR /app
 
-# Argumentos de build
-ARG VITE_API_URL
-ENV VITE_API_URL=$VITE_API_URL
-
 # Copiar arquivos de dependências
 COPY frontend/package*.json ./
 RUN npm install
@@ -14,6 +10,7 @@ RUN npm install
 COPY frontend/ ./
 
 # Build
+# Não precisa de VITE_API_URL pois usamos proxy relativo /api
 RUN npm run build
 
 # Produção

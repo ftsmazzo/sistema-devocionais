@@ -1,7 +1,9 @@
 import axios from 'axios';
 
+// Sempre usa proxy relativo para evitar problemas de Mixed Content (HTTP/HTTPS)
+// O nginx faz o proxy de /api para o backend
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || '/api',
+  baseURL: '/api',
   headers: {
     'Content-Type': 'application/json',
   },
