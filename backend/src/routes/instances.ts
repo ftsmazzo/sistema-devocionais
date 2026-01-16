@@ -251,7 +251,7 @@ router.post('/:id/connect', async (req, res) => {
     console.log(`✅ Resposta da Evolution API:`, JSON.stringify(evolutionResponse.data, null, 2));
 
     // Configurar webhook automaticamente após criar instância
-    await configureWebhook(instance, id);
+    await configureWebhook(instance, parseInt(id, 10));
 
     // Buscar número de telefone se a instância já estiver conectada
     let phoneNumber = null;
