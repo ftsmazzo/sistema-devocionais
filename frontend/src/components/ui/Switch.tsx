@@ -1,5 +1,3 @@
-import { useState } from 'react';
-
 interface SwitchProps {
   checked: boolean;
   onCheckedChange: (checked: boolean) => void;

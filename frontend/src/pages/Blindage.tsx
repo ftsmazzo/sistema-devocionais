@@ -19,7 +19,6 @@ import {
   Save,
   ArrowLeft,
   CheckCircle2,
-  XCircle,
 } from 'lucide-react';
 
 interface BlindageRule {
