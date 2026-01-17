@@ -3,7 +3,7 @@ import { useParams } from 'react-router-dom';
 import api from '@/lib/api';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/Card';
 import Switch from '@/components/ui/Switch';
 import Label from '@/components/ui/Label';
 import Tooltip from '@/components/ui/Tooltip';
@@ -21,6 +21,7 @@ import {
   Save,
   CheckCircle2,
   Server,
+  Info,
 } from 'lucide-react';
 
 interface BlindageRule {
@@ -57,32 +58,25 @@ export default function Blindage() {
     try {
       setLoading(true);
       
-      // Carregar instância
       if (instanceId) {
         const instanceRes = await api.get(`/instances/${instanceId}`);
         setInstance(instanceRes.data.instance);
       }
 
-      // Carregar todas as instâncias para seleção
       const instancesRes = await api.get('/instances');
       setAllInstances(instancesRes.data.instances || []);
 
-      // Carregar regras
       const rulesRes = await api.get(`/blindage/rules${instanceId ? `?instanceId=${instanceId}` : ''}`);
       let loadedRules = (rulesRes.data.rules || []).map((rule: any) => ({
         ...rule,
-        // Garantir que config seja um objeto, não string
         config: typeof rule.config === 'string' ? JSON.parse(rule.config) : rule.config,
       }));
       
-      // Se a regra de seleção não existe, criar automaticamente como GLOBAL (instance_id = null)
       const selectionRule = loadedRules.find((r: any) => r.rule_type === 'instance_selection');
       if (!selectionRule) {
         try {
-          console.log('Criando regra de seleção GLOBAL (instance_id = null)');
-          // Criar regra de seleção de instâncias como GLOBAL (sem instance_id)
           await api.post('/blindage/rules', {
-            instance_id: null, // NULL = regra global
+            instance_id: null,
             rule_name: 'Seleção de Instâncias',
             rule_type: 'instance_selection',
             enabled: true,
@@ -93,7 +87,6 @@ export default function Blindage() {
               retry_after_pause: true,
             },
           });
-          // Recarregar regras após criar
           const newRulesRes = await api.get(`/blindage/rules${instanceId ? `?instanceId=${instanceId}` : ''}`);
           loadedRules = (newRulesRes.data.rules || []).map((rule: any) => ({
             ...rule,
@@ -101,7 +94,6 @@ export default function Blindage() {
           }));
         } catch (error: any) {
           console.error('Erro ao criar regra de seleção:', error);
-          console.error('Detalhes:', error.response?.data || error.message);
         }
       }
       
@@ -142,31 +134,21 @@ export default function Blindage() {
       setSaving(true);
       setSaved(false);
 
-      // Se ruleId fornecido, salvar apenas essa regra
       const rulesToSave = ruleId 
         ? rules.filter(r => r.id === ruleId)
         : rules;
 
-      // Salvar cada regra modificada
       let savedCount = 0;
       const errors: string[] = [];
       
       for (const rule of rulesToSave) {
         try {
-          console.log(`Salvando regra ${rule.id}:`, {
+          await api.put(`/blindage/rules/${rule.id}`, {
             enabled: rule.enabled,
             config: rule.config,
           });
-          
-          const response = await api.put(`/blindage/rules/${rule.id}`, {
-            enabled: rule.enabled,
-            config: rule.config,
-          });
-          
-          console.log(`Regra ${rule.id} salva com sucesso:`, response.data);
           savedCount++;
         } catch (error: any) {
-          console.error(`Erro ao salvar regra ${rule.id}:`, error);
           const errorMsg = error.response?.data?.error || error.message || 'Erro desconhecido';
           errors.push(`Regra ${rule.id}: ${errorMsg}`);
         }
@@ -188,7 +170,6 @@ export default function Blindage() {
         });
       }
       
-      // Recarregar dados para garantir sincronização
       await loadData();
     } catch (error: any) {
       console.error('Erro ao salvar:', error);
@@ -201,18 +182,26 @@ export default function Blindage() {
     }
   };
 
+  // Helper para configurar horários com seletor visual
+  const handleTimeRangeChange = (ruleId: number, startHour: number, endHour: number) => {
+    const hours = [];
+    for (let h = startHour; h <= endHour; h++) {
+      hours.push(h);
+    }
+    updateRuleConfig(ruleId, 'allowed_hours', hours);
+  };
+
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mx-auto mb-4"></div>
           <p className="text-gray-600">Carregando configurações...</p>
         </div>
       </div>
     );
   }
 
-  // Agrupar regras por tipo
   const groupedRules = {
     delay: rules.find(r => r.rule_type === 'message_delay'),
     limit: rules.find(r => r.rule_type === 'message_limit'),
@@ -224,78 +213,94 @@ export default function Blindage() {
     selection: rules.find(r => r.rule_type === 'instance_selection'),
   };
 
+  // Calcular horário inicial e final para o seletor
+  const allowedHours = Array.isArray(groupedRules.hours?.config.allowed_hours) 
+    ? groupedRules.hours.config.allowed_hours 
+    : [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20];
+  const startHour = allowedHours.length > 0 ? Math.min(...allowedHours) : 8;
+  const endHour = allowedHours.length > 0 ? Math.max(...allowedHours) : 20;
+
   return (
-    <div>
-      <div className="max-w-7xl mx-auto">
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Header */}
-        <div className="mb-6">
-          <div className="flex items-center justify-between">
+        <div className="mb-8">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <div>
-              <h1 className="text-2xl font-bold bg-gradient-to-r from-gray-900 to-gray-700 bg-clip-text text-transparent flex items-center gap-2.5 mb-1">
-                <div className="w-8 h-8 bg-gradient-to-br from-indigo-500 to-purple-500 rounded-lg flex items-center justify-center shadow-md">
-                  <Shield className="h-5 w-5 text-white" />
+              <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-3 mb-2">
+                <div className="w-10 h-10 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-xl flex items-center justify-center shadow-lg">
+                  <Shield className="h-6 w-6 text-white" />
                 </div>
                 Configurações de Blindagem
               </h1>
               {instance && (
-                <p className="text-gray-500 text-xs ml-10.5">
-                  Instância: <span className="font-semibold text-gray-700">{instance.name}</span>
+                <p className="text-gray-600 text-sm ml-13">
+                  Instância: <span className="font-semibold text-gray-900">{instance.name}</span>
                 </p>
               )}
+              <p className="text-gray-500 text-sm ml-13 mt-1">
+                Configure as regras de proteção para otimizar o envio de mensagens
+              </p>
             </div>
             
             <Button
               onClick={() => handleSave()}
               disabled={saving || !hasChanges}
-              size="sm"
-              className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm transition-all ${
+              className={`flex items-center gap-2 px-6 py-3 text-base font-medium rounded-xl transition-all shadow-lg ${
                 hasChanges
-                  ? 'bg-gradient-to-r from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600 text-white shadow-md'
+                  ? 'bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white'
                   : 'bg-gray-200 text-gray-400 cursor-not-allowed'
               }`}
             >
               {saving ? (
                 <>
-                  <div className="animate-spin rounded-full h-3.5 w-3.5 border-b-2 border-white"></div>
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
                   Salvando...
                 </>
               ) : saved ? (
                 <>
-                  <CheckCircle2 className="h-3.5 w-3.5" />
+                  <CheckCircle2 className="h-5 w-5" />
                   Salvo!
                 </>
               ) : (
                 <>
-                  <Save className="h-3.5 w-3.5" />
-                  {hasChanges ? 'Salvar Tudo' : 'Sem alterações'}
+                  <Save className="h-5 w-5" />
+                  {hasChanges ? 'Salvar Todas as Alterações' : 'Sem alterações'}
                 </>
               )}
             </Button>
           </div>
         </div>
 
-        {/* Grupos de Blindagem */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+        {/* Grid de Cards - Layout em 2 colunas para melhor espaçamento */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* 1. Delay Entre Mensagens */}
-          <Card className="border border-gray-200 hover:border-indigo-300 hover:shadow-md transition-all duration-200 rounded-lg overflow-hidden bg-white">
-            <CardHeader className="bg-gradient-to-br from-gray-50 to-white border-b border-gray-100 py-2.5 px-3">
+          <Card className="border-2 border-gray-200 hover:border-indigo-300 hover:shadow-lg transition-all duration-300 rounded-2xl overflow-hidden bg-white shadow-md">
+            <CardHeader className="bg-gradient-to-br from-blue-50 to-cyan-50 border-b-2 border-gray-100 px-6 py-4">
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className="w-6 h-6 bg-gradient-to-br from-blue-500 to-cyan-500 rounded-lg flex items-center justify-center flex-shrink-0">
-                    <Clock className="h-3.5 w-3.5 text-white" />
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-cyan-500 rounded-xl flex items-center justify-center shadow-md">
+                    <Clock className="h-5 w-5 text-white" />
                   </div>
-                  <CardTitle className="text-sm font-semibold text-gray-900">
-                    Delay Entre Mensagens
-                  </CardTitle>
+                  <div>
+                    <CardTitle className="text-lg font-bold text-gray-900">
+                      Delay Entre Mensagens
+                    </CardTitle>
+                    <CardDescription className="text-xs text-gray-600 mt-0.5">
+                      Controle o tempo entre envios
+                    </CardDescription>
+                  </div>
                 </div>
-                <Tooltip content="Controla o tempo mínimo entre o envio de mensagens. O delay progressivo aumenta automaticamente conforme o volume de mensagens enviadas, ajudando a evitar bloqueios." />
+                <Tooltip content="Controla o tempo mínimo entre o envio de mensagens. O delay progressivo aumenta automaticamente conforme o volume de mensagens enviadas, ajudando a evitar bloqueios.">
+                  <Info className="h-5 w-5 text-gray-400 hover:text-indigo-600 cursor-help" />
+                </Tooltip>
               </div>
             </CardHeader>
-            <CardContent className="p-3 space-y-2.5">
+            <CardContent className="p-6 space-y-6">
               {groupedRules.delay ? (
                 <>
-                  <div className="flex items-center justify-between py-0.5">
-                    <Label className="text-xs mb-0">Habilitar</Label>
+                  <div className="flex items-center justify-between py-2">
+                    <Label className="text-sm font-medium text-gray-700">Habilitar Regra</Label>
                     <Switch
                       checked={groupedRules.delay.enabled}
                       onCheckedChange={(checked) => updateRule(groupedRules.delay!.id, { enabled: checked })}
@@ -303,14 +308,18 @@ export default function Blindage() {
                   </div>
                   
                   {groupedRules.delay.enabled && (
-                    <div className="space-y-2 pt-2 border-t border-gray-100">
-                      <div>
-                        <div className="flex items-center justify-between mb-1">
-                          <Label htmlFor="min_delay" className="text-xs">
-                            Mínimo (s)
-                            <Tooltip content="Tempo mínimo entre mensagens. Recomendado: 3-5s." />
+                    <div className="space-y-6 pt-4 border-t-2 border-gray-100">
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <Label htmlFor="min_delay" className="text-sm font-medium text-gray-700">
+                            Delay Mínimo
+                            <span className="block text-xs font-normal text-gray-500 mt-0.5">Tempo mínimo entre mensagens</span>
                           </Label>
-                          <span className="text-xs font-semibold text-indigo-600">{groupedRules.delay.config.min_delay_seconds || 3}</span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-lg font-bold text-indigo-600 min-w-[3rem] text-right">
+                              {groupedRules.delay.config.min_delay_seconds || 3}s
+                            </span>
+                          </div>
                         </div>
                         <Slider
                           value={groupedRules.delay.config.min_delay_seconds || 3}
@@ -318,16 +327,19 @@ export default function Blindage() {
                           max={60}
                           step={1}
                           onChange={(value) => updateRuleConfig(groupedRules.delay!.id, 'min_delay_seconds', value)}
+                          className="w-full"
                         />
                       </div>
                       
-                      <div>
-                        <div className="flex items-center justify-between mb-1">
-                          <Label htmlFor="max_delay" className="text-xs">
-                            Máximo (s)
-                            <Tooltip content="Tempo máximo do delay progressivo." />
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <Label htmlFor="max_delay" className="text-sm font-medium text-gray-700">
+                            Delay Máximo
+                            <span className="block text-xs font-normal text-gray-500 mt-0.5">Tempo máximo do delay progressivo</span>
                           </Label>
-                          <span className="text-xs font-semibold text-indigo-600">{groupedRules.delay.config.max_delay_seconds || 10}</span>
+                          <span className="text-lg font-bold text-indigo-600 min-w-[3rem] text-right">
+                            {groupedRules.delay.config.max_delay_seconds || 10}s
+                          </span>
                         </div>
                         <Slider
                           value={groupedRules.delay.config.max_delay_seconds || 10}
@@ -335,11 +347,15 @@ export default function Blindage() {
                           max={300}
                           step={1}
                           onChange={(value) => updateRuleConfig(groupedRules.delay!.id, 'max_delay_seconds', value)}
+                          className="w-full"
                         />
                       </div>
                       
-                      <div className="flex items-center justify-between py-0.5">
-                        <Label className="text-xs mb-0">Progressivo</Label>
+                      <div className="flex items-center justify-between py-2 border-t border-gray-100 pt-4">
+                        <Label className="text-sm font-medium text-gray-700">
+                          Delay Progressivo
+                          <span className="block text-xs font-normal text-gray-500 mt-0.5">Aumenta automaticamente</span>
+                        </Label>
                         <Switch
                           checked={groupedRules.delay.config.progressive !== false}
                           onCheckedChange={(checked) => updateRuleConfig(groupedRules.delay!.id, 'progressive', checked)}
@@ -347,14 +363,16 @@ export default function Blindage() {
                       </div>
                       
                       {groupedRules.delay.config.progressive !== false && (
-                        <div className="space-y-2 pt-2 border-t border-gray-100">
-                          <div>
-                            <div className="flex items-center justify-between mb-1">
-                              <Label htmlFor="base_delay" className="text-xs">
-                                Base (s)
-                                <Tooltip content="Delay inicial." />
+                        <div className="space-y-4 pt-4 border-t border-gray-100">
+                          <div className="space-y-3">
+                            <div className="flex items-center justify-between">
+                              <Label htmlFor="base_delay" className="text-sm font-medium text-gray-700">
+                                Delay Base
+                                <span className="block text-xs font-normal text-gray-500 mt-0.5">Valor inicial</span>
                               </Label>
-                              <span className="text-xs font-semibold text-indigo-600">{groupedRules.delay.config.base_delay || 3}</span>
+                              <span className="text-lg font-bold text-indigo-600 min-w-[3rem] text-right">
+                                {groupedRules.delay.config.base_delay || 3}s
+                              </span>
                             </div>
                             <Slider
                               value={groupedRules.delay.config.base_delay || 3}
@@ -362,16 +380,19 @@ export default function Blindage() {
                               max={30}
                               step={0.5}
                               onChange={(value) => updateRuleConfig(groupedRules.delay!.id, 'base_delay', value)}
+                              className="w-full"
                             />
                           </div>
                           
-                          <div>
-                            <div className="flex items-center justify-between mb-1">
-                              <Label htmlFor="increment" className="text-xs">
-                                Incremento
-                                <Tooltip content="Segundos adicionados por mensagem." />
+                          <div className="space-y-3">
+                            <div className="flex items-center justify-between">
+                              <Label htmlFor="increment" className="text-sm font-medium text-gray-700">
+                                Incremento por Mensagem
+                                <span className="block text-xs font-normal text-gray-500 mt-0.5">Segundos adicionados</span>
                               </Label>
-                              <span className="text-xs font-semibold text-indigo-600">{groupedRules.delay.config.increment_per_message || 0.5}</span>
+                              <span className="text-lg font-bold text-indigo-600 min-w-[3rem] text-right">
+                                +{groupedRules.delay.config.increment_per_message || 0.5}s
+                              </span>
                             </div>
                             <Slider
                               value={groupedRules.delay.config.increment_per_message || 0.5}
@@ -379,50 +400,57 @@ export default function Blindage() {
                               max={2}
                               step={0.1}
                               onChange={(value) => updateRuleConfig(groupedRules.delay!.id, 'increment_per_message', value)}
+                              className="w-full"
                             />
                           </div>
                         </div>
                       )}
                       
-                      <div className="pt-2 border-t border-gray-100">
+                      <div className="pt-4 border-t-2 border-gray-100">
                         <Button
-                          size="sm"
                           onClick={() => handleSave(groupedRules.delay!.id)}
                           disabled={saving}
-                          className="w-full bg-gradient-to-r from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600 text-white text-xs py-1.5 rounded-lg"
+                          className="w-full bg-gradient-to-r from-blue-500 to-cyan-500 hover:from-blue-600 hover:to-cyan-600 text-white font-medium py-2.5 rounded-xl shadow-md"
                         >
-                          {saving ? 'Salvando...' : 'Salvar'}
+                          {saving ? 'Salvando...' : 'Salvar Configuração'}
                         </Button>
                       </div>
                     </div>
                   )}
                 </>
               ) : (
-                <p className="text-gray-400 text-xs">Regra não encontrada</p>
+                <p className="text-gray-400 text-sm text-center py-4">Regra não encontrada</p>
               )}
             </CardContent>
           </Card>
 
           {/* 2. Limite de Mensagens */}
-          <Card className="border border-gray-200 hover:border-indigo-300 hover:shadow-md transition-all duration-200 rounded-lg overflow-hidden bg-white">
-            <CardHeader className="bg-gradient-to-br from-gray-50 to-white border-b border-gray-100 py-2.5 px-3">
+          <Card className="border-2 border-gray-200 hover:border-green-300 hover:shadow-lg transition-all duration-300 rounded-2xl overflow-hidden bg-white shadow-md">
+            <CardHeader className="bg-gradient-to-br from-green-50 to-emerald-50 border-b-2 border-gray-100 px-6 py-4">
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className="w-6 h-6 bg-gradient-to-br from-green-500 to-emerald-500 rounded-lg flex items-center justify-center flex-shrink-0">
-                    <BarChart3 className="h-3.5 w-3.5 text-white" />
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-gradient-to-br from-green-500 to-emerald-500 rounded-xl flex items-center justify-center shadow-md">
+                    <BarChart3 className="h-5 w-5 text-white" />
                   </div>
-                  <CardTitle className="text-sm font-semibold text-gray-900">
-                    Limite de Mensagens
-                  </CardTitle>
+                  <div>
+                    <CardTitle className="text-lg font-bold text-gray-900">
+                      Limite de Mensagens
+                    </CardTitle>
+                    <CardDescription className="text-xs text-gray-600 mt-0.5">
+                      Controle o volume de envios
+                    </CardDescription>
+                  </div>
                 </div>
-                <Tooltip content="Define limites máximos de mensagens que podem ser enviadas por hora e por dia. Ajuda a evitar bloqueios por excesso de envios." />
+                <Tooltip content="Define limites máximos de mensagens que podem ser enviadas por hora e por dia. Ajuda a evitar bloqueios por excesso de envios.">
+                  <Info className="h-5 w-5 text-gray-400 hover:text-green-600 cursor-help" />
+                </Tooltip>
               </div>
             </CardHeader>
-            <CardContent className="p-3 space-y-2.5">
+            <CardContent className="p-6 space-y-6">
               {groupedRules.limit ? (
                 <>
-                  <div className="flex items-center justify-between py-0.5">
-                    <Label className="text-xs mb-0">Habilitar</Label>
+                  <div className="flex items-center justify-between py-2">
+                    <Label className="text-sm font-medium text-gray-700">Habilitar Regra</Label>
                     <Switch
                       checked={groupedRules.limit.enabled}
                       onCheckedChange={(checked) => updateRule(groupedRules.limit!.id, { enabled: checked })}
@@ -430,14 +458,16 @@ export default function Blindage() {
                   </div>
                   
                   {groupedRules.limit.enabled && (
-                    <div className="space-y-2 pt-2 border-t border-gray-100">
-                      <div>
-                        <div className="flex items-center justify-between mb-1">
-                          <Label htmlFor="max_hour" className="text-xs">
-                            Por Hora
-                            <Tooltip content="Máximo de mensagens por hora. Recomendado: 30-50." />
+                    <div className="space-y-6 pt-4 border-t-2 border-gray-100">
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <Label htmlFor="max_hour" className="text-sm font-medium text-gray-700">
+                            Limite por Hora
+                            <span className="block text-xs font-normal text-gray-500 mt-0.5">Máximo de mensagens/hora</span>
                           </Label>
-                          <span className="text-xs font-semibold text-indigo-600">{groupedRules.limit.config.max_per_hour || 50}</span>
+                          <span className="text-lg font-bold text-green-600 min-w-[4rem] text-right">
+                            {groupedRules.limit.config.max_per_hour || 50}
+                          </span>
                         </div>
                         <Slider
                           value={groupedRules.limit.config.max_per_hour || 50}
@@ -445,16 +475,19 @@ export default function Blindage() {
                           max={1000}
                           step={1}
                           onChange={(value) => updateRuleConfig(groupedRules.limit!.id, 'max_per_hour', value)}
+                          className="w-full"
                         />
                       </div>
                       
-                      <div>
-                        <div className="flex items-center justify-between mb-1">
-                          <Label htmlFor="max_day" className="text-xs">
-                            Por Dia
-                            <Tooltip content="Máximo de mensagens por dia. Recomendado: 300-500." />
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <Label htmlFor="max_day" className="text-sm font-medium text-gray-700">
+                            Limite por Dia
+                            <span className="block text-xs font-normal text-gray-500 mt-0.5">Máximo de mensagens/dia</span>
                           </Label>
-                          <span className="text-xs font-semibold text-indigo-600">{groupedRules.limit.config.max_per_day || 500}</span>
+                          <span className="text-lg font-bold text-green-600 min-w-[4rem] text-right">
+                            {groupedRules.limit.config.max_per_day || 500}
+                          </span>
                         </div>
                         <Slider
                           value={groupedRules.limit.config.max_per_day || 500}
@@ -462,112 +495,55 @@ export default function Blindage() {
                           max={10000}
                           step={10}
                           onChange={(value) => updateRuleConfig(groupedRules.limit!.id, 'max_per_day', value)}
+                          className="w-full"
                         />
                       </div>
                       
-                      <div className="pt-2 border-t border-gray-100">
+                      <div className="pt-4 border-t-2 border-gray-100">
                         <Button
-                          size="sm"
                           onClick={() => handleSave(groupedRules.limit!.id)}
                           disabled={saving}
-                          className="w-full bg-gradient-to-r from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600 text-white text-xs py-1.5 rounded-lg"
+                          className="w-full bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600 text-white font-medium py-2.5 rounded-xl shadow-md"
                         >
-                          {saving ? 'Salvando...' : 'Salvar'}
+                          {saving ? 'Salvando...' : 'Salvar Configuração'}
                         </Button>
                       </div>
                     </div>
                   )}
                 </>
               ) : (
-                <p className="text-gray-400 text-xs">Regra não encontrada</p>
+                <p className="text-gray-400 text-sm text-center py-4">Regra não encontrada</p>
               )}
             </CardContent>
           </Card>
 
-          {/* 3. Rotação de Instâncias */}
-          <Card className="border border-gray-200 hover:border-indigo-300 hover:shadow-md transition-all duration-200 rounded-lg overflow-hidden bg-white">
-            <CardHeader className="bg-gradient-to-br from-gray-50 to-white border-b border-gray-100 py-2.5 px-3">
+          {/* 3. Horários Permitidos - COM SELETOR VISUAL */}
+          <Card className="border-2 border-gray-200 hover:border-amber-300 hover:shadow-lg transition-all duration-300 rounded-2xl overflow-hidden bg-white shadow-md">
+            <CardHeader className="bg-gradient-to-br from-amber-50 to-orange-50 border-b-2 border-gray-100 px-6 py-4">
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className="w-6 h-6 bg-gradient-to-br from-purple-500 to-pink-500 rounded-lg flex items-center justify-center flex-shrink-0">
-                    <RotateCcw className="h-3.5 w-3.5 text-white" />
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-gradient-to-br from-amber-500 to-orange-500 rounded-xl flex items-center justify-center shadow-md">
+                    <Calendar className="h-5 w-5 text-white" />
                   </div>
-                  <CardTitle className="text-sm font-semibold text-gray-900">
-                    Rotação de Instâncias
-                  </CardTitle>
+                  <div>
+                    <CardTitle className="text-lg font-bold text-gray-900">
+                      Horários Permitidos
+                    </CardTitle>
+                    <CardDescription className="text-xs text-gray-600 mt-0.5">
+                      Configure o período de envio
+                    </CardDescription>
+                  </div>
                 </div>
-                <Tooltip content="Distribui mensagens entre todas as instâncias conectadas, evitando sobrecarga em uma única instância. Funciona em modo round-robin (rodízio)." />
+                <Tooltip content="Define em quais horários as mensagens podem ser enviadas. Bloqueia envios em horários de risco (madrugada) e permite apenas em horários comerciais.">
+                  <Info className="h-5 w-5 text-gray-400 hover:text-amber-600 cursor-help" />
+                </Tooltip>
               </div>
             </CardHeader>
-            <CardContent className="p-3 space-y-2.5">
-              {groupedRules.rotation ? (
-                <>
-                  <div className="flex items-center justify-between py-0.5">
-                    <Label className="text-xs mb-0">Habilitar</Label>
-                    <Switch
-                      checked={groupedRules.rotation.enabled}
-                      onCheckedChange={(checked) => updateRule(groupedRules.rotation!.id, { enabled: checked })}
-                    />
-                  </div>
-                  
-                  {groupedRules.rotation.enabled && (
-                    <div className="space-y-2 pt-2 border-t border-gray-100">
-                      <div>
-                        <div className="flex items-center justify-between mb-1">
-                          <Label htmlFor="min_delay_instances" className="text-xs">
-                            Delay Entre Instâncias (s)
-                            <Tooltip content="Tempo mínimo entre usar instâncias diferentes." />
-                          </Label>
-                          <span className="text-xs font-semibold text-indigo-600">{groupedRules.rotation.config.min_delay_between_instances || 1}</span>
-                        </div>
-                        <Slider
-                          value={groupedRules.rotation.config.min_delay_between_instances || 1}
-                          min={0}
-                          max={60}
-                          step={1}
-                          onChange={(value) => updateRuleConfig(groupedRules.rotation!.id, 'min_delay_between_instances', value)}
-                        />
-                      </div>
-                      
-                      <div className="pt-2 border-t border-gray-100">
-                        <Button
-                          size="sm"
-                          onClick={() => handleSave(groupedRules.rotation!.id)}
-                          disabled={saving}
-                          className="w-full bg-gradient-to-r from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600 text-white text-xs py-1.5 rounded-lg"
-                        >
-                          {saving ? 'Salvando...' : 'Salvar'}
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-                </>
-              ) : (
-                <p className="text-gray-400 text-xs">Regra não encontrada</p>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* 4. Horários Permitidos */}
-          <Card className="border border-gray-200 hover:border-indigo-300 hover:shadow-md transition-all duration-200 rounded-lg overflow-hidden bg-white">
-            <CardHeader className="bg-gradient-to-br from-gray-50 to-white border-b border-gray-100 py-2.5 px-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className="w-6 h-6 bg-gradient-to-br from-amber-500 to-orange-500 rounded-lg flex items-center justify-center flex-shrink-0">
-                    <Calendar className="h-3.5 w-3.5 text-white" />
-                  </div>
-                  <CardTitle className="text-sm font-semibold text-gray-900">
-                    Horários Permitidos
-                  </CardTitle>
-                </div>
-                <Tooltip content="Define em quais horários as mensagens podem ser enviadas. Bloqueia envios em horários de risco (madrugada) e permite apenas em horários comerciais." />
-              </div>
-            </CardHeader>
-            <CardContent className="p-3 space-y-2.5">
+            <CardContent className="p-6 space-y-6">
               {groupedRules.hours ? (
                 <>
-                  <div className="flex items-center justify-between py-0.5">
-                    <Label className="text-xs mb-0">Habilitar</Label>
+                  <div className="flex items-center justify-between py-2">
+                    <Label className="text-sm font-medium text-gray-700">Habilitar Regra</Label>
                     <Switch
                       checked={groupedRules.hours.enabled}
                       onCheckedChange={(checked) => updateRule(groupedRules.hours!.id, { enabled: checked })}
@@ -575,65 +551,190 @@ export default function Blindage() {
                   </div>
                   
                   {groupedRules.hours.enabled && (
-                    <div className="space-y-2 pt-2 border-t border-gray-100">
-                      <Label className="text-xs mb-1 block">
-                        Horários (0-23, separados por vírgula)
-                        <Tooltip content="Exemplo: 8,9,10,11,12,13,14,15,16,17,18,19,20 permite envios das 8h às 20h." />
-                      </Label>
-                      <Input
-                        placeholder="8,9,10,11,12,13,14,15,16,17,18,19,20"
-                        value={Array.isArray(groupedRules.hours.config.allowed_hours) 
-                          ? groupedRules.hours.config.allowed_hours.join(',') 
-                          : ''}
-                        onChange={(e) => {
-                          const hours = e.target.value
-                            .split(',')
-                            .map(h => parseInt(h.trim()))
-                            .filter(h => !isNaN(h) && h >= 0 && h <= 23);
-                          updateRuleConfig(groupedRules.hours!.id, 'allowed_hours', hours);
-                        }}
-                        className="h-8 text-xs"
-                      />
+                    <div className="space-y-6 pt-4 border-t-2 border-gray-100">
+                      <div className="space-y-4">
+                        <Label className="text-sm font-medium text-gray-700 block">
+                          Período de Envio
+                          <span className="block text-xs font-normal text-gray-500 mt-0.5">Selecione o horário inicial e final</span>
+                        </Label>
+                        
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="space-y-2">
+                            <Label htmlFor="start_hour" className="text-xs font-medium text-gray-600">
+                              Horário Inicial
+                            </Label>
+                            <div className="flex items-center gap-2">
+                              <Input
+                                type="number"
+                                id="start_hour"
+                                min={0}
+                                max={23}
+                                value={startHour}
+                                onChange={(e) => {
+                                  const hour = parseInt(e.target.value) || 0;
+                                  if (hour >= 0 && hour <= 23 && hour <= endHour) {
+                                    handleTimeRangeChange(groupedRules.hours!.id, hour, endHour);
+                                  }
+                                }}
+                                className="h-12 text-center text-lg font-bold border-2 border-gray-300 rounded-xl focus:border-amber-500"
+                              />
+                              <span className="text-gray-500 font-medium">h</span>
+                            </div>
+                          </div>
+                          
+                          <div className="space-y-2">
+                            <Label htmlFor="end_hour" className="text-xs font-medium text-gray-600">
+                              Horário Final
+                            </Label>
+                            <div className="flex items-center gap-2">
+                              <Input
+                                type="number"
+                                id="end_hour"
+                                min={0}
+                                max={23}
+                                value={endHour}
+                                onChange={(e) => {
+                                  const hour = parseInt(e.target.value) || 23;
+                                  if (hour >= 0 && hour <= 23 && hour >= startHour) {
+                                    handleTimeRangeChange(groupedRules.hours!.id, startHour, hour);
+                                  }
+                                }}
+                                className="h-12 text-center text-lg font-bold border-2 border-gray-300 rounded-xl focus:border-amber-500"
+                              />
+                              <span className="text-gray-500 font-medium">h</span>
+                            </div>
+                          </div>
+                        </div>
+                        
+                        <div className="bg-gray-50 rounded-xl p-4 border-2 border-gray-200">
+                          <p className="text-xs font-medium text-gray-600 mb-2">Horários configurados:</p>
+                          <p className="text-sm font-semibold text-gray-900">
+                            {startHour}h às {endHour}h ({endHour - startHour + 1} horas)
+                          </p>
+                          <p className="text-xs text-gray-500 mt-1">
+                            {allowedHours.join(', ')}
+                          </p>
+                        </div>
+                      </div>
                       
-                      <div className="pt-2 border-t border-gray-100">
+                      <div className="pt-4 border-t-2 border-gray-100">
                         <Button
-                          size="sm"
                           onClick={() => handleSave(groupedRules.hours!.id)}
                           disabled={saving}
-                          className="w-full bg-gradient-to-r from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600 text-white text-xs py-1.5 rounded-lg"
+                          className="w-full bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white font-medium py-2.5 rounded-xl shadow-md"
                         >
-                          {saving ? 'Salvando...' : 'Salvar'}
+                          {saving ? 'Salvando...' : 'Salvar Configuração'}
                         </Button>
                       </div>
                     </div>
                   )}
                 </>
               ) : (
-                <p className="text-gray-400 text-xs">Regra não encontrada</p>
+                <p className="text-gray-400 text-sm text-center py-4">Regra não encontrada</p>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* 4. Rotação de Instâncias */}
+          <Card className="border-2 border-gray-200 hover:border-purple-300 hover:shadow-lg transition-all duration-300 rounded-2xl overflow-hidden bg-white shadow-md">
+            <CardHeader className="bg-gradient-to-br from-purple-50 to-pink-50 border-b-2 border-gray-100 px-6 py-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-gradient-to-br from-purple-500 to-pink-500 rounded-xl flex items-center justify-center shadow-md">
+                    <RotateCcw className="h-5 w-5 text-white" />
+                  </div>
+                  <div>
+                    <CardTitle className="text-lg font-bold text-gray-900">
+                      Rotação de Instâncias
+                    </CardTitle>
+                    <CardDescription className="text-xs text-gray-600 mt-0.5">
+                      Distribua mensagens entre instâncias
+                    </CardDescription>
+                  </div>
+                </div>
+                <Tooltip content="Distribui mensagens entre todas as instâncias conectadas, evitando sobrecarga em uma única instância. Funciona em modo round-robin (rodízio).">
+                  <Info className="h-5 w-5 text-gray-400 hover:text-purple-600 cursor-help" />
+                </Tooltip>
+              </div>
+            </CardHeader>
+            <CardContent className="p-6 space-y-6">
+              {groupedRules.rotation ? (
+                <>
+                  <div className="flex items-center justify-between py-2">
+                    <Label className="text-sm font-medium text-gray-700">Habilitar Regra</Label>
+                    <Switch
+                      checked={groupedRules.rotation.enabled}
+                      onCheckedChange={(checked) => updateRule(groupedRules.rotation!.id, { enabled: checked })}
+                    />
+                  </div>
+                  
+                  {groupedRules.rotation.enabled && (
+                    <div className="space-y-6 pt-4 border-t-2 border-gray-100">
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <Label htmlFor="min_delay_instances" className="text-sm font-medium text-gray-700">
+                            Delay Entre Instâncias
+                            <span className="block text-xs font-normal text-gray-500 mt-0.5">Tempo mínimo entre trocas</span>
+                          </Label>
+                          <span className="text-lg font-bold text-purple-600 min-w-[3rem] text-right">
+                            {groupedRules.rotation.config.min_delay_between_instances || 1}s
+                          </span>
+                        </div>
+                        <Slider
+                          value={groupedRules.rotation.config.min_delay_between_instances || 1}
+                          min={0}
+                          max={60}
+                          step={1}
+                          onChange={(value) => updateRuleConfig(groupedRules.rotation!.id, 'min_delay_between_instances', value)}
+                          className="w-full"
+                        />
+                      </div>
+                      
+                      <div className="pt-4 border-t-2 border-gray-100">
+                        <Button
+                          onClick={() => handleSave(groupedRules.rotation!.id)}
+                          disabled={saving}
+                          className="w-full bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white font-medium py-2.5 rounded-xl shadow-md"
+                        >
+                          {saving ? 'Salvando...' : 'Salvar Configuração'}
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <p className="text-gray-400 text-sm text-center py-4">Regra não encontrada</p>
               )}
             </CardContent>
           </Card>
 
           {/* 5. Health Check */}
-          <Card className="border border-gray-200 hover:border-indigo-300 hover:shadow-md transition-all duration-200 rounded-lg overflow-hidden bg-white">
-            <CardHeader className="bg-gradient-to-br from-gray-50 to-white border-b border-gray-100 py-2.5 px-3">
+          <Card className="border-2 border-gray-200 hover:border-red-300 hover:shadow-lg transition-all duration-300 rounded-2xl overflow-hidden bg-white shadow-md">
+            <CardHeader className="bg-gradient-to-br from-red-50 to-rose-50 border-b-2 border-gray-100 px-6 py-4">
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className="w-6 h-6 bg-gradient-to-br from-red-500 to-rose-500 rounded-lg flex items-center justify-center flex-shrink-0">
-                    <Heart className="h-3.5 w-3.5 text-white" />
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-gradient-to-br from-red-500 to-rose-500 rounded-xl flex items-center justify-center shadow-md">
+                    <Heart className="h-5 w-5 text-white" />
                   </div>
-                  <CardTitle className="text-sm font-semibold text-gray-900">
-                    Health Check
-                  </CardTitle>
+                  <div>
+                    <CardTitle className="text-lg font-bold text-gray-900">
+                      Health Check
+                    </CardTitle>
+                    <CardDescription className="text-xs text-gray-600 mt-0.5">
+                      Monitoramento automático
+                    </CardDescription>
+                  </div>
                 </div>
-                <Tooltip content="Monitora a saúde das instâncias e pausa envios automaticamente se uma instância estiver com problemas (degradada ou down)." />
+                <Tooltip content="Monitora a saúde das instâncias e pausa envios automaticamente se uma instância estiver com problemas (degradada ou down).">
+                  <Info className="h-5 w-5 text-gray-400 hover:text-red-600 cursor-help" />
+                </Tooltip>
               </div>
             </CardHeader>
-            <CardContent className="p-3 space-y-2.5">
+            <CardContent className="p-6 space-y-6">
               {groupedRules.health ? (
                 <>
-                  <div className="flex items-center justify-between py-0.5">
-                    <Label className="text-xs mb-0">Habilitar</Label>
+                  <div className="flex items-center justify-between py-2">
+                    <Label className="text-sm font-medium text-gray-700">Habilitar Regra</Label>
                     <Switch
                       checked={groupedRules.health.enabled}
                       onCheckedChange={(checked) => updateRule(groupedRules.health!.id, { enabled: checked })}
@@ -641,62 +742,74 @@ export default function Blindage() {
                   </div>
                   
                   {groupedRules.health.enabled && (
-                    <div className="space-y-2 pt-2 border-t border-gray-100">
-                      <div className="flex items-center justify-between py-0.5">
-                        <Label className="text-xs mb-0">Pausar se Degradada</Label>
+                    <div className="space-y-4 pt-4 border-t-2 border-gray-100">
+                      <div className="flex items-center justify-between py-3 bg-gray-50 rounded-xl px-4">
+                        <Label className="text-sm font-medium text-gray-700">
+                          Pausar se Degradada
+                          <span className="block text-xs font-normal text-gray-500 mt-0.5">Instância com problemas</span>
+                        </Label>
                         <Switch
                           checked={groupedRules.health.config.pause_if_degraded !== false}
                           onCheckedChange={(checked) => updateRuleConfig(groupedRules.health!.id, 'pause_if_degraded', checked)}
                         />
                       </div>
                       
-                      <div className="flex items-center justify-between py-0.5">
-                        <Label className="text-xs mb-0">Pausar se Down</Label>
+                      <div className="flex items-center justify-between py-3 bg-gray-50 rounded-xl px-4">
+                        <Label className="text-sm font-medium text-gray-700">
+                          Pausar se Down
+                          <span className="block text-xs font-normal text-gray-500 mt-0.5">Instância offline</span>
+                        </Label>
                         <Switch
                           checked={groupedRules.health.config.pause_if_down !== false}
                           onCheckedChange={(checked) => updateRuleConfig(groupedRules.health!.id, 'pause_if_down', checked)}
                         />
                       </div>
                       
-                      <div className="pt-2 border-t border-gray-100">
+                      <div className="pt-4 border-t-2 border-gray-100">
                         <Button
-                          size="sm"
                           onClick={() => handleSave(groupedRules.health!.id)}
                           disabled={saving}
-                          className="w-full bg-gradient-to-r from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600 text-white text-xs py-1.5 rounded-lg"
+                          className="w-full bg-gradient-to-r from-red-500 to-rose-500 hover:from-red-600 hover:to-rose-600 text-white font-medium py-2.5 rounded-xl shadow-md"
                         >
-                          {saving ? 'Salvando...' : 'Salvar'}
+                          {saving ? 'Salvando...' : 'Salvar Configuração'}
                         </Button>
                       </div>
                     </div>
                   )}
                 </>
               ) : (
-                <p className="text-gray-400 text-xs">Regra não encontrada</p>
+                <p className="text-gray-400 text-sm text-center py-4">Regra não encontrada</p>
               )}
             </CardContent>
           </Card>
 
           {/* 6. Validação de Conteúdo */}
-          <Card className="border border-gray-200 hover:border-indigo-300 hover:shadow-md transition-all duration-200 rounded-lg overflow-hidden bg-white">
-            <CardHeader className="bg-gradient-to-br from-gray-50 to-white border-b border-gray-100 py-2.5 px-3">
+          <Card className="border-2 border-gray-200 hover:border-indigo-300 hover:shadow-lg transition-all duration-300 rounded-2xl overflow-hidden bg-white shadow-md">
+            <CardHeader className="bg-gradient-to-br from-indigo-50 to-blue-50 border-b-2 border-gray-100 px-6 py-4">
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className="w-6 h-6 bg-gradient-to-br from-indigo-500 to-blue-500 rounded-lg flex items-center justify-center flex-shrink-0">
-                    <FileText className="h-3.5 w-3.5 text-white" />
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-gradient-to-br from-indigo-500 to-blue-500 rounded-xl flex items-center justify-center shadow-md">
+                    <FileText className="h-5 w-5 text-white" />
                   </div>
-                  <CardTitle className="text-sm font-semibold text-gray-900">
-                    Validação de Conteúdo
-                  </CardTitle>
+                  <div>
+                    <CardTitle className="text-lg font-bold text-gray-900">
+                      Validação de Conteúdo
+                    </CardTitle>
+                    <CardDescription className="text-xs text-gray-600 mt-0.5">
+                      Controle de qualidade
+                    </CardDescription>
+                  </div>
                 </div>
-                <Tooltip content="Valida o conteúdo das mensagens antes do envio. Pode bloquear mensagens muito longas ou com palavras proibidas." />
+                <Tooltip content="Valida o conteúdo das mensagens antes do envio. Pode bloquear mensagens muito longas ou com palavras proibidas.">
+                  <Info className="h-5 w-5 text-gray-400 hover:text-indigo-600 cursor-help" />
+                </Tooltip>
               </div>
             </CardHeader>
-            <CardContent className="p-3 space-y-2.5">
+            <CardContent className="p-6 space-y-6">
               {groupedRules.content ? (
                 <>
-                  <div className="flex items-center justify-between py-0.5">
-                    <Label className="text-xs mb-0">Habilitar</Label>
+                  <div className="flex items-center justify-between py-2">
+                    <Label className="text-sm font-medium text-gray-700">Habilitar Regra</Label>
                     <Switch
                       checked={groupedRules.content.enabled}
                       onCheckedChange={(checked) => updateRule(groupedRules.content!.id, { enabled: checked })}
@@ -704,14 +817,16 @@ export default function Blindage() {
                   </div>
                   
                   {groupedRules.content.enabled && (
-                    <div className="space-y-2 pt-2 border-t border-gray-100">
-                      <div>
-                        <div className="flex items-center justify-between mb-1">
-                          <Label htmlFor="max_length" className="text-xs">
-                            Tamanho Máximo (caracteres)
-                            <Tooltip content="WhatsApp permite até 4096 caracteres." />
+                    <div className="space-y-6 pt-4 border-t-2 border-gray-100">
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <Label htmlFor="max_length" className="text-sm font-medium text-gray-700">
+                            Tamanho Máximo
+                            <span className="block text-xs font-normal text-gray-500 mt-0.5">Caracteres permitidos</span>
                           </Label>
-                          <span className="text-xs font-semibold text-indigo-600">{groupedRules.content.config.max_length || 4096}</span>
+                          <span className="text-lg font-bold text-indigo-600 min-w-[4rem] text-right">
+                            {groupedRules.content.config.max_length || 4096}
+                          </span>
                         </div>
                         <Slider
                           value={groupedRules.content.config.max_length || 4096}
@@ -719,19 +834,20 @@ export default function Blindage() {
                           max={4096}
                           step={50}
                           onChange={(value) => updateRuleConfig(groupedRules.content!.id, 'max_length', value)}
+                          className="w-full"
                         />
                       </div>
                       
-                      <div>
-                        <Label htmlFor="blocked_words" className="text-xs mb-1">
+                      <div className="space-y-2">
+                        <Label htmlFor="blocked_words" className="text-sm font-medium text-gray-700">
                           Palavras Bloqueadas
-                          <Tooltip content="Separadas por vírgula. Deixe vazio para não bloquear." />
+                          <span className="block text-xs font-normal text-gray-500 mt-0.5">Separadas por vírgula</span>
                         </Label>
                         <Input
                           id="blocked_words"
-                          placeholder="palavra1,palavra2,palavra3"
+                          placeholder="Ex: palavra1, palavra2, palavra3"
                           value={Array.isArray(groupedRules.content.config.blocked_words) 
-                            ? groupedRules.content.config.blocked_words.join(',') 
+                            ? groupedRules.content.config.blocked_words.join(', ') 
                             : ''}
                           onChange={(e) => {
                             const words = e.target.value
@@ -740,49 +856,55 @@ export default function Blindage() {
                               .filter(w => w.length > 0);
                             updateRuleConfig(groupedRules.content!.id, 'blocked_words', words);
                           }}
-                          className="h-8 text-xs"
+                          className="h-12 text-sm border-2 border-gray-300 rounded-xl focus:border-indigo-500"
                         />
                       </div>
                       
-                      <div className="pt-2 border-t border-gray-100">
+                      <div className="pt-4 border-t-2 border-gray-100">
                         <Button
-                          size="sm"
                           onClick={() => handleSave(groupedRules.content!.id)}
                           disabled={saving}
-                          className="w-full bg-gradient-to-r from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600 text-white text-xs py-1.5 rounded-lg"
+                          className="w-full bg-gradient-to-r from-indigo-500 to-blue-500 hover:from-indigo-600 hover:to-blue-600 text-white font-medium py-2.5 rounded-xl shadow-md"
                         >
-                          {saving ? 'Salvando...' : 'Salvar'}
+                          {saving ? 'Salvando...' : 'Salvar Configuração'}
                         </Button>
                       </div>
                     </div>
                   )}
                 </>
               ) : (
-                <p className="text-gray-400 text-xs">Regra não encontrada</p>
+                <p className="text-gray-400 text-sm text-center py-4">Regra não encontrada</p>
               )}
             </CardContent>
           </Card>
 
           {/* 7. Validação de Número */}
-          <Card className="border border-gray-200 hover:border-indigo-300 hover:shadow-md transition-all duration-200 rounded-lg overflow-hidden bg-white">
-            <CardHeader className="bg-gradient-to-br from-gray-50 to-white border-b border-gray-100 py-2.5 px-3">
+          <Card className="border-2 border-gray-200 hover:border-teal-300 hover:shadow-lg transition-all duration-300 rounded-2xl overflow-hidden bg-white shadow-md">
+            <CardHeader className="bg-gradient-to-br from-teal-50 to-cyan-50 border-b-2 border-gray-100 px-6 py-4">
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className="w-6 h-6 bg-gradient-to-br from-teal-500 to-cyan-500 rounded-lg flex items-center justify-center flex-shrink-0">
-                    <Phone className="h-3.5 w-3.5 text-white" />
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-gradient-to-br from-teal-500 to-cyan-500 rounded-xl flex items-center justify-center shadow-md">
+                    <Phone className="h-5 w-5 text-white" />
                   </div>
-                  <CardTitle className="text-sm font-semibold text-gray-900">
-                    Validação de Número
-                  </CardTitle>
+                  <div>
+                    <CardTitle className="text-lg font-bold text-gray-900">
+                      Validação de Número
+                    </CardTitle>
+                    <CardDescription className="text-xs text-gray-600 mt-0.5">
+                      Verificação de telefones
+                    </CardDescription>
+                  </div>
                 </div>
-                <Tooltip content="Valida o formato do número de telefone e verifica se está cadastrado no WhatsApp antes de enviar. Usa cache para melhor performance." />
+                <Tooltip content="Valida o formato do número de telefone e verifica se está cadastrado no WhatsApp antes de enviar. Usa cache para melhor performance.">
+                  <Info className="h-5 w-5 text-gray-400 hover:text-teal-600 cursor-help" />
+                </Tooltip>
               </div>
             </CardHeader>
-            <CardContent className="p-3 space-y-2.5">
+            <CardContent className="p-6 space-y-6">
               {groupedRules.number ? (
                 <>
-                  <div className="flex items-center justify-between py-0.5">
-                    <Label className="text-xs mb-0">Habilitar</Label>
+                  <div className="flex items-center justify-between py-2">
+                    <Label className="text-sm font-medium text-gray-700">Habilitar Regra</Label>
                     <Switch
                       checked={groupedRules.number.enabled}
                       onCheckedChange={(checked) => updateRule(groupedRules.number!.id, { enabled: checked })}
@@ -790,38 +912,49 @@ export default function Blindage() {
                   </div>
                   
                   {groupedRules.number.enabled && (
-                    <div className="space-y-2 pt-2 border-t border-gray-100">
-                      <div className="flex items-center justify-between py-0.5">
-                        <Label className="text-xs mb-0">Validar Formato</Label>
+                    <div className="space-y-4 pt-4 border-t-2 border-gray-100">
+                      <div className="flex items-center justify-between py-3 bg-gray-50 rounded-xl px-4">
+                        <Label className="text-sm font-medium text-gray-700">
+                          Validar Formato
+                          <span className="block text-xs font-normal text-gray-500 mt-0.5">Verificar estrutura do número</span>
+                        </Label>
                         <Switch
                           checked={groupedRules.number.config.validate_format !== false}
                           onCheckedChange={(checked) => updateRuleConfig(groupedRules.number!.id, 'validate_format', checked)}
                         />
                       </div>
                       
-                      <div className="flex items-center justify-between py-0.5">
-                        <Label className="text-xs mb-0">Verificar WhatsApp</Label>
+                      <div className="flex items-center justify-between py-3 bg-gray-50 rounded-xl px-4">
+                        <Label className="text-sm font-medium text-gray-700">
+                          Verificar WhatsApp
+                          <span className="block text-xs font-normal text-gray-500 mt-0.5">Confirmar se tem WhatsApp</span>
+                        </Label>
                         <Switch
                           checked={groupedRules.number.config.check_whatsapp !== false}
                           onCheckedChange={(checked) => updateRuleConfig(groupedRules.number!.id, 'check_whatsapp', checked)}
                         />
                       </div>
                       
-                      <div className="flex items-center justify-between py-0.5">
-                        <Label className="text-xs mb-0">Verificação Obrigatória</Label>
+                      <div className="flex items-center justify-between py-3 bg-gray-50 rounded-xl px-4">
+                        <Label className="text-sm font-medium text-gray-700">
+                          Verificação Obrigatória
+                          <span className="block text-xs font-normal text-gray-500 mt-0.5">Bloquear se não verificar</span>
+                        </Label>
                         <Switch
                           checked={groupedRules.number.config.require_whatsapp_check === true}
                           onCheckedChange={(checked) => updateRuleConfig(groupedRules.number!.id, 'require_whatsapp_check', checked)}
                         />
                       </div>
                       
-                      <div>
-                        <div className="flex items-center justify-between mb-1">
-                          <Label htmlFor="cache_hours" className="text-xs">
-                            Cache (horas)
-                            <Tooltip content="Tempo que o resultado da verificação fica em cache." />
+                      <div className="space-y-3 pt-2">
+                        <div className="flex items-center justify-between">
+                          <Label htmlFor="cache_hours" className="text-sm font-medium text-gray-700">
+                            Cache de Validação
+                            <span className="block text-xs font-normal text-gray-500 mt-0.5">Tempo de cache em horas</span>
                           </Label>
-                          <span className="text-xs font-semibold text-indigo-600">{groupedRules.number.config.cache_hours || 24}</span>
+                          <span className="text-lg font-bold text-teal-600 min-w-[3rem] text-right">
+                            {groupedRules.number.config.cache_hours || 24}h
+                          </span>
                         </div>
                         <Slider
                           value={groupedRules.number.config.cache_hours || 24}
@@ -829,48 +962,55 @@ export default function Blindage() {
                           max={168}
                           step={1}
                           onChange={(value) => updateRuleConfig(groupedRules.number!.id, 'cache_hours', value)}
+                          className="w-full"
                         />
                       </div>
                       
-                      <div className="pt-2 border-t border-gray-100">
+                      <div className="pt-4 border-t-2 border-gray-100">
                         <Button
-                          size="sm"
                           onClick={() => handleSave(groupedRules.number!.id)}
                           disabled={saving}
-                          className="w-full bg-gradient-to-r from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600 text-white text-xs py-1.5 rounded-lg"
+                          className="w-full bg-gradient-to-r from-teal-500 to-cyan-500 hover:from-teal-600 hover:to-cyan-600 text-white font-medium py-2.5 rounded-xl shadow-md"
                         >
-                          {saving ? 'Salvando...' : 'Salvar'}
+                          {saving ? 'Salvando...' : 'Salvar Configuração'}
                         </Button>
                       </div>
                     </div>
                   )}
                 </>
               ) : (
-                <p className="text-gray-400 text-xs">Regra não encontrada</p>
+                <p className="text-gray-400 text-sm text-center py-4">Regra não encontrada</p>
               )}
             </CardContent>
           </Card>
 
           {/* 8. Seleção de Instâncias */}
-          <Card className="border border-gray-200 hover:border-indigo-300 hover:shadow-md transition-all duration-200 rounded-lg overflow-hidden bg-white">
-            <CardHeader className="bg-gradient-to-br from-gray-50 to-white border-b border-gray-100 py-2.5 px-3">
+          <Card className="border-2 border-gray-200 hover:border-violet-300 hover:shadow-lg transition-all duration-300 rounded-2xl overflow-hidden bg-white shadow-md lg:col-span-2">
+            <CardHeader className="bg-gradient-to-br from-violet-50 to-purple-50 border-b-2 border-gray-100 px-6 py-4">
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className="w-6 h-6 bg-gradient-to-br from-violet-500 to-purple-500 rounded-lg flex items-center justify-center flex-shrink-0">
-                    <Server className="h-3.5 w-3.5 text-white" />
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-gradient-to-br from-violet-500 to-purple-500 rounded-xl flex items-center justify-center shadow-md">
+                    <Server className="h-5 w-5 text-white" />
                   </div>
-                  <CardTitle className="text-sm font-semibold text-gray-900">
-                    Seleção de Instâncias
-                  </CardTitle>
+                  <div>
+                    <CardTitle className="text-lg font-bold text-gray-900">
+                      Seleção de Instâncias
+                    </CardTitle>
+                    <CardDescription className="text-xs text-gray-600 mt-0.5">
+                      Escolha quais instâncias participarão dos disparos
+                    </CardDescription>
+                  </div>
                 </div>
-                <Tooltip content="Escolha quais instâncias participarão dos disparos. Quando uma instância cair, o sistema automaticamente trocará para outra disponível." />
+                <Tooltip content="Escolha quais instâncias participarão dos disparos. Quando uma instância cair, o sistema automaticamente trocará para outra disponível.">
+                  <Info className="h-5 w-5 text-gray-400 hover:text-violet-600 cursor-help" />
+                </Tooltip>
               </div>
             </CardHeader>
-            <CardContent className="p-3 space-y-2.5">
+            <CardContent className="p-6 space-y-6">
               {groupedRules.selection ? (
                 <>
-                  <div className="flex items-center justify-between py-0.5">
-                    <Label className="text-xs mb-0">Habilitar</Label>
+                  <div className="flex items-center justify-between py-2">
+                    <Label className="text-sm font-medium text-gray-700">Habilitar Regra</Label>
                     <Switch
                       checked={groupedRules.selection.enabled}
                       onCheckedChange={(checked) => updateRule(groupedRules.selection!.id, { enabled: checked })}
@@ -878,14 +1018,16 @@ export default function Blindage() {
                   </div>
                   
                   {groupedRules.selection.enabled && (
-                    <div className="space-y-2 pt-2 border-t border-gray-100">
-                      <div>
-                        <div className="flex items-center justify-between mb-1">
-                          <Label htmlFor="max_instances" className="text-xs">
-                            Máximo Simultâneas
-                            <Tooltip content="Quantas instâncias usar simultaneamente nos disparos." />
+                    <div className="space-y-6 pt-4 border-t-2 border-gray-100">
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <Label htmlFor="max_instances" className="text-sm font-medium text-gray-700">
+                            Máximo de Instâncias Simultâneas
+                            <span className="block text-xs font-normal text-gray-500 mt-0.5">Quantas usar ao mesmo tempo</span>
                           </Label>
-                          <span className="text-xs font-semibold text-indigo-600">{groupedRules.selection.config.max_simultaneous || 1}</span>
+                          <span className="text-lg font-bold text-violet-600 min-w-[3rem] text-right">
+                            {groupedRules.selection.config.max_simultaneous || 1}
+                          </span>
                         </div>
                         <Slider
                           value={groupedRules.selection.config.max_simultaneous || 1}
@@ -893,85 +1035,96 @@ export default function Blindage() {
                           max={allInstances.length || 10}
                           step={1}
                           onChange={(value) => updateRuleConfig(groupedRules.selection!.id, 'max_simultaneous', value)}
+                          className="w-full"
                         />
                       </div>
                       
-                      <div>
-                        <Label className="text-xs mb-1.5 block">
-                          Instâncias Selecionadas
-                          <Tooltip content="Marque as instâncias que participarão dos disparos." />
+                      <div className="space-y-3">
+                        <Label className="text-sm font-medium text-gray-700 block">
+                          Instâncias Disponíveis
+                          <span className="block text-xs font-normal text-gray-500 mt-0.5">Marque as que participarão dos disparos</span>
                         </Label>
-                        <div className="max-h-40 overflow-y-auto space-y-1.5 p-2 bg-gray-50 rounded-lg border border-gray-100">
+                        <div className="max-h-64 overflow-y-auto space-y-2 p-4 bg-gray-50 rounded-xl border-2 border-gray-200">
                           {allInstances.length === 0 ? (
-                            <p className="text-xs text-gray-400">Carregando instâncias...</p>
+                            <p className="text-sm text-gray-400 text-center py-4">Carregando instâncias...</p>
                           ) : (
-                            allInstances.map((inst) => {
-                              const selectedIds = Array.isArray(groupedRules.selection?.config.selected_instance_ids) 
-                                ? groupedRules.selection.config.selected_instance_ids 
-                                : [];
-                              const isSelected = selectedIds.includes(inst.id);
-                              
-                              return (
-                                <div key={inst.id} className="flex items-center gap-2 p-1.5 hover:bg-white rounded">
-                                  <input
-                                    type="checkbox"
-                                    id={`instance-${inst.id}`}
-                                    checked={isSelected}
-                                    onChange={(e) => {
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                              {allInstances.map((inst) => {
+                                const selectedIds = Array.isArray(groupedRules.selection?.config.selected_instance_ids) 
+                                  ? groupedRules.selection.config.selected_instance_ids 
+                                  : [];
+                                const isSelected = selectedIds.includes(inst.id);
+                                
+                                return (
+                                  <div 
+                                    key={inst.id} 
+                                    className={`flex items-center gap-3 p-3 rounded-xl border-2 transition-all cursor-pointer ${
+                                      isSelected 
+                                        ? 'bg-violet-50 border-violet-300' 
+                                        : 'bg-white border-gray-200 hover:border-gray-300'
+                                    }`}
+                                    onClick={() => {
                                       const currentIds = Array.isArray(groupedRules.selection?.config.selected_instance_ids) 
                                         ? groupedRules.selection.config.selected_instance_ids 
                                         : [];
-                                      const newIds = e.target.checked
+                                      const newIds = !isSelected
                                         ? [...currentIds, inst.id]
                                         : currentIds.filter((id: number) => id !== inst.id);
                                       updateRuleConfig(groupedRules.selection!.id, 'selected_instance_ids', newIds);
                                     }}
-                                    className="w-3.5 h-3.5 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500"
-                                  />
-                                  <label 
-                                    htmlFor={`instance-${inst.id}`} 
-                                    className="flex-1 text-xs cursor-pointer flex items-center gap-1.5"
                                   >
-                                    <span className="font-medium text-gray-700">{inst.name}</span>
-                                    <span className={`text-xs px-1.5 py-0.5 rounded-full ${
-                                      inst.status === 'connected' 
-                                        ? 'bg-green-100 text-green-700' 
-                                        : inst.status === 'connecting'
-                                        ? 'bg-yellow-100 text-yellow-700'
-                                        : 'bg-gray-100 text-gray-500'
-                                    }`}>
-                                      {inst.status === 'connected' ? 'Conectado' : inst.status === 'connecting' ? 'Conectando' : 'Desconectado'}
-                                    </span>
-                                  </label>
-                                </div>
-                              );
-                            })
+                                    <input
+                                      type="checkbox"
+                                      id={`instance-${inst.id}`}
+                                      checked={isSelected}
+                                      onChange={() => {}}
+                                      className="w-5 h-5 text-violet-600 rounded border-gray-300 focus:ring-violet-500 cursor-pointer"
+                                    />
+                                    <label 
+                                      htmlFor={`instance-${inst.id}`} 
+                                      className="flex-1 cursor-pointer"
+                                    >
+                                      <div className="flex items-center gap-2">
+                                        <span className="font-semibold text-gray-900">{inst.name}</span>
+                                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                                          inst.status === 'connected' 
+                                            ? 'bg-green-100 text-green-700' 
+                                            : inst.status === 'connecting'
+                                            ? 'bg-yellow-100 text-yellow-700'
+                                            : 'bg-gray-100 text-gray-500'
+                                        }`}>
+                                          {inst.status === 'connected' ? 'Conectado' : inst.status === 'connecting' ? 'Conectando' : 'Desconectado'}
+                                        </span>
+                                      </div>
+                                    </label>
+                                  </div>
+                                );
+                              })}
+                            </div>
                           )}
                         </div>
                       </div>
                       
-                      <div className="pt-2 border-t border-gray-100">
+                      <div className="pt-4 border-t-2 border-gray-100">
                         <Button
-                          size="sm"
                           onClick={() => handleSave(groupedRules.selection!.id)}
                           disabled={saving}
-                          className="w-full bg-gradient-to-r from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600 text-white text-xs py-1.5 rounded-lg"
+                          className="w-full bg-gradient-to-r from-violet-500 to-purple-500 hover:from-violet-600 hover:to-purple-600 text-white font-medium py-2.5 rounded-xl shadow-md"
                         >
-                          {saving ? 'Salvando...' : 'Salvar'}
+                          {saving ? 'Salvando...' : 'Salvar Configuração'}
                         </Button>
                       </div>
                     </div>
                   )}
                 </>
               ) : (
-                <p className="text-gray-400 text-xs">Regra não encontrada</p>
+                <p className="text-gray-400 text-sm text-center py-4">Regra não encontrada</p>
               )}
             </CardContent>
           </Card>
         </div>
       </div>
 
-      {/* Toast Notification - Renderizado fora do container */}
       {toast && (
         <Toast
           message={toast.message}
