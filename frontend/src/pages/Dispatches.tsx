@@ -566,17 +566,65 @@ export default function Dispatches() {
                   {formData.media_type && (
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
-                        URL da Mídia *
+                        {formData.media_url ? 'URL da Mídia' : 'Upload de Arquivo'}
                       </label>
-                      <input
-                        type="url"
-                        value={formData.media_url || ''}
-                        onChange={(e) => setFormData({ ...formData, media_url: e.target.value })}
-                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                        placeholder={`Cole a URL da ${formData.media_type === 'image' ? 'imagem' : formData.media_type === 'pdf' ? 'PDF' : 'documento'}...`}
-                      />
+                      <div className="space-y-2">
+                        <input
+                          type="file"
+                          accept={formData.media_type === 'image' ? 'image/*' : formData.media_type === 'pdf' ? '.pdf' : '.pdf,.doc,.docx'}
+                          onChange={async (e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              try {
+                                const formDataUpload = new FormData();
+                                formDataUpload.append('media', file);
+                                
+                                const response = await api.post('/dispatches/upload-media', formDataUpload, {
+                                  headers: {
+                                    'Content-Type': 'multipart/form-data',
+                                  },
+                                });
+                                
+                                setFormData({
+                                  ...formData,
+                                  media_url: response.data.media_url,
+                                  media_type: response.data.media_type,
+                                });
+                                setToast({ message: 'Arquivo enviado com sucesso!', type: 'success' });
+                              } catch (error: any) {
+                                setToast({
+                                  message: error.response?.data?.error || 'Erro ao fazer upload',
+                                  type: 'error'
+                                });
+                              }
+                            }
+                          }}
+                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                        />
+                        {formData.media_url && (
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="url"
+                              value={formData.media_url}
+                              onChange={(e) => setFormData({ ...formData, media_url: e.target.value })}
+                              className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                              placeholder="Ou cole a URL manualmente..."
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setFormData({ ...formData, media_url: '', media_type: undefined })}
+                              className="px-3 py-2 text-red-600 hover:text-red-700"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        )}
+                      </div>
                       <p className="text-xs text-gray-500 mt-1">
-                        Cole a URL completa da mídia (ex: https://exemplo.com/imagem.jpg)
+                        {formData.media_url 
+                          ? `Arquivo: ${formData.media_url.split('/').pop()}`
+                          : `Faça upload de um arquivo ${formData.media_type === 'image' ? 'de imagem' : formData.media_type === 'pdf' ? 'PDF' : 'documento'} ou cole a URL manualmente`
+                        }
                       </p>
                     </div>
                   )}

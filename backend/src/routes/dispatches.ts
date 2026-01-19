@@ -1,5 +1,8 @@
 import express from 'express';
 import axios from 'axios';
+import multer from 'multer';
+import path from 'path';
+import fs from 'fs';
 import { pool } from '../database';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { applyBlindage } from '../services/blindage';
