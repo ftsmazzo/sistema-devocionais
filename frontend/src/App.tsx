@@ -7,6 +7,7 @@ import Blindage from './pages/Blindage';
 import Contacts from './pages/Contacts';
 import Tags from './pages/Tags';
 import Lists from './pages/Lists';
+import Dispatches from './pages/Dispatches';
 import Layout from './components/Layout';
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
@@ -75,6 +76,14 @@ function App() {
           element={
             <PrivateRoute>
               <Lists />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/dispatches"
+          element={
+            <PrivateRoute>
+              <Dispatches />
             </PrivateRoute>
           }
         />

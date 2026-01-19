@@ -11,6 +11,7 @@ import {
   Users,
   Tag,
   List,
+  Send,
 } from 'lucide-react';
 import { useState } from 'react';
 
@@ -29,8 +30,8 @@ export default function Layout({ children }: LayoutProps) {
     { name: 'Contatos', href: '/contacts', icon: Users },
     { name: 'Tags', href: '/tags', icon: Tag },
     { name: 'Listas', href: '/lists', icon: List },
+    { name: 'Disparos', href: '/dispatches', icon: Send },
     // Futuras páginas:
-    // { name: 'Disparos', href: '/dispatches', icon: Send },
     // { name: 'Mensagens', href: '/messages', icon: Inbox },
     // { name: 'Estatísticas', href: '/stats', icon: BarChart3 },
   ];
