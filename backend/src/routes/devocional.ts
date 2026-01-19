@@ -448,8 +448,9 @@ router.get('/', async (req: express.Request, res: express.Response) => {
 /**
  * Buscar devocional por ID
  * GET /api/devocional/:id
+ * IMPORTANTE: Esta rota deve vir DEPOIS das rotas específicas (/config, /date/:date)
  */
-router.get('/:id', async (req, res) => {
+router.get('/:id', async (req: express.Request, res: express.Response) => {
   try {
     const { id } = req.params;
 
