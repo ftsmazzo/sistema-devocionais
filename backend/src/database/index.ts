@@ -128,6 +128,12 @@ export async function initializeDatabase() {
         delivered_at TIMESTAMP,
         failed_at TIMESTAMP,
         failed_reason TEXT,
+        dispatch_id INTEGER REFERENCES dispatches(id),
+        dispatch_type VARCHAR(50),
+        contact_id INTEGER REFERENCES contacts(id),
+        devocional_id INTEGER REFERENCES devocionais(id),
+        message_category VARCHAR(50),
+        tags TEXT[],
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
