@@ -453,6 +453,15 @@ router.delete('/:id', async (req: AuthRequest, res) => {
       });
     }
 
+    // Deletar em cascata: primeiro dispatch_contacts (se não tiver CASCADE automático)
+    // As outras tabelas já têm ON DELETE CASCADE configurado
+    try {
+      await pool.query(`DELETE FROM dispatch_contacts WHERE dispatch_id = $1`, [id]);
+    } catch (error: any) {
+      // Ignorar se já foi deletado ou não existe
+      console.log(`   ℹ️ dispatch_contacts já deletado ou não existe para dispatch ${id}`);
+    }
+    
     await pool.query(`DELETE FROM dispatches WHERE id = $1`, [id]);
 
     res.json({ 
