@@ -302,19 +302,11 @@ export async function processMarketingDispatch(params: MarketingDispatchParams):
     console.log(`   📊 Média: ${Math.ceil(totalTime / contacts.length)}ms por contato`);
 
     // Enviar notificação de conclusão (se configurado)
-    // Buscar configuração de marketing ou usar a mesma do devocional
-    const marketingConfigResult = await pool.query(
-      `SELECT notification_phone FROM marketing_ai_config WHERE enabled = true ORDER BY id DESC LIMIT 1`
+    // Buscar telefone de notificação do devocional (marketing não tem notification_phone)
+    const devocionalConfigResult = await pool.query(
+      `SELECT notification_phone FROM devocional_config ORDER BY id DESC LIMIT 1`
     );
-    let notificationPhone = marketingConfigResult.rows[0]?.notification_phone;
-    
-    // Se não tiver no marketing, buscar do devocional
-    if (!notificationPhone) {
-      const devocionalConfigResult = await pool.query(
-        `SELECT notification_phone FROM devocional_config ORDER BY id DESC LIMIT 1`
-      );
-      notificationPhone = devocionalConfigResult.rows[0]?.notification_phone;
-    }
+    const notificationPhone = devocionalConfigResult.rows[0]?.notification_phone;
     
     if (notificationPhone) {
       try {

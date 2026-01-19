@@ -277,19 +277,26 @@ async function processMessageReceived(instanceId: number, eventData: any) {
 
       // Se a mensagem foi recebida dentro de 48 horas após o envio do marketing, verificar intenção
       if (hoursSinceSent <= 48 && lastMarketing.dispatch_id) {
-        console.log(`   📢 Resposta a disparo de marketing detectada (${hoursSinceSent.toFixed(2)}h desde o envio)`);
+        console.log(`\n   ========================================`);
+        console.log(`   📢 RESPOSTA A MARKETING DETECTADA!`);
+        console.log(`   ========================================`);
+        console.log(`   Contato: ${contactId} (${fromNumber})`);
+        console.log(`   Disparo: ${lastMarketing.dispatch_id}`);
+        console.log(`   Tempo desde envio: ${hoursSinceSent.toFixed(2)}h`);
         
         // Extrair texto da mensagem em diferentes formatos
         const messageText = messageBody?.conversation || 
                            messageBody?.extendedTextMessage?.text ||
-                           message.body || 
-                           message.message?.conversation || 
-                           message.message?.extendedTextMessage?.text ||
-                           message.data?.message?.conversation ||
-                           eventData.data?.message?.conversation ||
+                           messageBody?.imageMessage?.caption ||
+                           message?.body || 
+                           message?.message?.conversation || 
+                           message?.message?.extendedTextMessage?.text ||
+                           message?.data?.message?.conversation ||
+                           eventData?.data?.message?.conversation ||
                            '';
         
-        console.log(`   💬 Texto da mensagem: "${messageText}"`);
+        console.log(`   💬 Texto extraído: "${messageText}"`);
+        console.log(`   📋 Estrutura completa:`, JSON.stringify({ messageBody, message, eventData: { data: eventData.data } }, null, 2));
         
         if (messageText.trim().length > 0) {
           // Detectar intenção positiva
@@ -300,15 +307,16 @@ async function processMessageReceived(instanceId: number, eventData: any) {
             lastMarketing.dispatch_id
           );
 
-          console.log(`   📊 Resultado da detecção:`, {
+          console.log(`   📊 Resultado da detecção:`, JSON.stringify({
             isPositive: detection.isPositive,
             confidence: detection.confidence,
             method: detection.method,
             detectedKeywords: detection.detectedKeywords,
-          });
+          }, null, 2));
 
           if (detection.isPositive && detection.confidence > 0.5) {
-            console.log(`   ✅ Intenção positiva detectada para contato ${contactId} (confiança: ${detection.confidence})`);
+            console.log(`   ✅ INTENÇÃO POSITIVA DETECTADA!`);
+            console.log(`   🚀 Chamando webhook do N8N...`);
             
             // Ativar IA externa
             await triggerAIInteraction(
@@ -322,6 +330,7 @@ async function processMessageReceived(instanceId: number, eventData: any) {
         } else {
           console.log(`   ⚠️ Mensagem vazia, não processando`);
         }
+        console.log(`   ========================================\n`);
       } else {
         console.log(`   ⚠️ Mensagem recebida após 48h do disparo (${hoursSinceSent.toFixed(2)}h)`);
       }

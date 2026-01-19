@@ -235,7 +235,12 @@ export async function triggerAIInteraction(
     };
 
     // Chamar webhook da IA
-    console.log(`   📤 [AI Trigger] Enviando payload para webhook:`, JSON.stringify(payload, null, 2));
+    console.log(`\n   ========================================`);
+    console.log(`   📤 CHAMANDO WEBHOOK DO N8N`);
+    console.log(`   ========================================`);
+    console.log(`   URL: ${aiWebhookUrl}`);
+    console.log(`   Payload:`, JSON.stringify(payload, null, 2));
+    console.log(`   ========================================\n`);
     
     try {
       const response = await axios.post(
@@ -249,12 +254,22 @@ export async function triggerAIInteraction(
         }
       );
       
-      console.log(`   ✅ [AI Trigger] Webhook chamado com sucesso! Status: ${response.status}`);
+      console.log(`\n   ✅ WEBHOOK CHAMADO COM SUCESSO!`);
+      console.log(`   Status: ${response.status}`);
+      console.log(`   Resposta:`, JSON.stringify(response.data, null, 2));
+      console.log(`\n`);
     } catch (error: any) {
-      console.error(`   ❌ [AI Trigger] Erro ao chamar webhook:`, error.message);
+      console.error(`\n   ❌ ERRO AO CHAMAR WEBHOOK DO N8N!`);
+      console.error(`   URL: ${aiWebhookUrl}`);
+      console.error(`   Erro:`, error.message);
       if (error.response) {
-        console.error(`   📄 [AI Trigger] Resposta do erro:`, error.response.data);
+        console.error(`   Status: ${error.response.status}`);
+        console.error(`   Resposta:`, JSON.stringify(error.response.data, null, 2));
       }
+      if (error.request) {
+        console.error(`   Request enviado mas sem resposta do servidor`);
+      }
+      console.error(`\n`);
       throw error;
     }
 
