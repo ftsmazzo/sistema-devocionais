@@ -29,6 +29,22 @@ interface ContactList {
   list_type: string;
 }
 
+interface Devocional {
+  id: number;
+  title: string;
+  date: string;
+  text: string;
+  versiculo_principal?: {
+    texto: string;
+    referencia: string;
+  };
+  versiculo_apoio?: {
+    texto: string;
+    referencia: string;
+  };
+  metadata?: any;
+}
+
 export default function DevocionalConfig() {
   const [config, setConfig] = useState<DevocionalConfig>({
     dispatch_hour: 6,
@@ -37,6 +53,7 @@ export default function DevocionalConfig() {
     enabled: true,
   });
   const [lists, setLists] = useState<ContactList[]>([]);
+  const [todayDevocional, setTodayDevocional] = useState<Devocional | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
@@ -52,6 +69,9 @@ export default function DevocionalConfig() {
       const response = await api.get('/devocional/config');
       if (response.data.config) {
         setConfig(response.data.config);
+      }
+      if (response.data.today_devocional) {
+        setTodayDevocional(response.data.today_devocional);
       }
     } catch (error: any) {
       console.error('Erro ao carregar configuração:', error);

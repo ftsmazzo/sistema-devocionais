@@ -123,7 +123,7 @@ router.post('/webhook', async (req, res) => {
  * - Palavras-chave
  * - Contexto histórico formatado
  */
-router.get('/context/para-ia', async (req, res) => {
+router.get('/context/para-ia', async (req: express.Request, res: express.Response) => {
   try {
     const days = parseInt(req.query.days as string) || 30;
     
@@ -225,7 +225,7 @@ router.get('/context/para-ia', async (req, res) => {
  * Listar devocionais
  * GET /api/devocional?limit=10&offset=0&startDate=&endDate=
  */
-router.get('/', async (req, res) => {
+router.get('/', async (req: express.Request, res: express.Response) => {
   try {
     const limit = parseInt(req.query.limit as string) || 10;
     const offset = parseInt(req.query.offset as string) || 0;
@@ -380,7 +380,7 @@ router.get('/:id', async (req, res) => {
  * Buscar devocional por data
  * GET /api/devocional/date/:date (YYYY-MM-DD)
  */
-router.get('/date/:date', async (req, res) => {
+router.get('/date/:date', async (req: express.Request, res: express.Response) => {
   try {
     const { date } = req.params;
 
