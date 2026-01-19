@@ -89,12 +89,29 @@ export default function Lists() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
+      setLoading(true);
+      
+      // Validar se lista dinâmica tem pelo menos uma tag selecionada
+      if ((formData.list_type === 'dynamic' || formData.list_type === 'hybrid') && 
+          (!formData.filter_config.tags || formData.filter_config.tags.length === 0)) {
+        setToast({
+          message: 'Listas dinâmicas precisam ter pelo menos uma tag selecionada',
+          type: 'error'
+        });
+        setLoading(false);
+        return;
+      }
+
       if (editingList) {
         await api.put(`/lists/${editingList.id}`, formData);
         setToast({ message: 'Lista atualizada com sucesso!', type: 'success' });
       } else {
-        await api.post('/lists', formData);
-        setToast({ message: 'Lista criada com sucesso!', type: 'success' });
+        const response = await api.post('/lists', formData);
+        const createdList = response.data.list;
+        setToast({ 
+          message: `Lista criada com sucesso! ${createdList.total_contacts || 0} contatos encontrados.`, 
+          type: 'success' 
+        });
       }
       setShowModal(false);
       setEditingList(null);
@@ -110,12 +127,15 @@ export default function Lists() {
           whatsapp_validated: undefined,
         },
       });
-      loadLists();
+      await loadLists();
     } catch (error: any) {
+      console.error('Erro ao salvar lista:', error);
       setToast({
-        message: error.response?.data?.error || 'Erro ao salvar lista',
+        message: error.response?.data?.error || error.response?.data?.message || 'Erro ao salvar lista',
         type: 'error'
       });
+    } finally {
+      setLoading(false);
     }
   };
 

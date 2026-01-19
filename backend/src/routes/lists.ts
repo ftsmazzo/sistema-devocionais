@@ -174,33 +174,55 @@ router.post('/', async (req: AuthRequest, res) => {
 
     // Calcular total_contacts para listas dinâmicas/híbridas
     if (list_type === 'dynamic' || list_type === 'hybrid') {
-      const params: any[] = [];
-      const countQuery = buildDynamicListQuery(filter_config, 1, params);
-      const countResult = await pool.query(
-        countQuery.replace(/SELECT DISTINCT.*FROM/, 'SELECT COUNT(DISTINCT c.id) as total FROM').replace(/GROUP BY.*/, ''),
-        params
-      );
-      const dynamicCount = parseInt(countResult.rows[0]?.total || '0');
-      
-      if (list_type === 'hybrid') {
-        // Híbrida: contagem será atualizada quando contatos forem adicionados
+      try {
+        // Garantir que whatsapp_validated seja true por padrão e opt_out seja false
+        const finalFilterConfig = {
+          ...filter_config,
+          whatsapp_validated: filter_config.whatsapp_validated !== undefined ? filter_config.whatsapp_validated : true,
+          opt_in: filter_config.opt_in !== undefined ? filter_config.opt_in : true,
+          opt_out: filter_config.opt_out !== undefined ? filter_config.opt_out : false
+        };
+
+        const params: any[] = [];
+        const countQuery = buildDynamicListQuery(finalFilterConfig, 1, params);
+        
+        // Construir query de contagem corretamente - remover SELECT e GROUP BY
+        let countQueryFinal = countQuery
+          .replace(/SELECT DISTINCT[\s\S]*?FROM/, 'SELECT COUNT(DISTINCT c.id) as total FROM')
+          .replace(/GROUP BY[\s\S]*$/, '');
+        
+        console.log('📊 Query de contagem:', countQueryFinal);
+        console.log('📊 Parâmetros:', params);
+        
+        const countResult = await pool.query(countQueryFinal, params);
+        const dynamicCount = parseInt(countResult.rows[0]?.total || '0');
+        
+        console.log('📊 Total encontrado:', dynamicCount);
+        
+        // Atualizar filter_config e total_contacts
         await pool.query(
-          `UPDATE contact_lists SET total_contacts = $1 WHERE id = $2`,
-          [dynamicCount, list.id]
+          `UPDATE contact_lists SET filter_config = $1, total_contacts = $2 WHERE id = $3`,
+          [JSON.stringify(finalFilterConfig), dynamicCount, list.id]
         );
-      } else {
+        
+        // Buscar lista atualizada
+        const updatedResult = await pool.query(
+          `SELECT * FROM contact_lists WHERE id = $1`,
+          [list.id]
+        );
+        list.total_contacts = parseInt(updatedResult.rows[0]?.total_contacts || '0');
+        list.filter_config = finalFilterConfig;
+      } catch (error: any) {
+        console.error('❌ Erro ao calcular total_contacts:', error);
+        console.error('Filter config:', filter_config);
+        console.error('Error details:', error.message);
+        // Definir total como 0 em caso de erro
         await pool.query(
-          `UPDATE contact_lists SET total_contacts = $1 WHERE id = $2`,
-          [dynamicCount, list.id]
+          `UPDATE contact_lists SET total_contacts = 0 WHERE id = $1`,
+          [list.id]
         );
+        list.total_contacts = 0;
       }
-      
-      // Buscar lista atualizada
-      const updatedResult = await pool.query(
-        `SELECT * FROM contact_lists WHERE id = $1`,
-        [list.id]
-      );
-      list.total_contacts = parseInt(updatedResult.rows[0]?.total_contacts || '0');
     }
 
     res.json({ list });
