@@ -33,6 +33,15 @@ interface Dispatch {
   created_at: string;
 }
 
+interface FormData {
+  name: string;
+  list_id: string;
+  message_template: string;
+  instance_ids: number[];
+  media_url?: string;
+  media_type?: 'image' | 'pdf' | 'document';
+}
+
 export default function Dispatches() {
   const [dispatches, setDispatches] = useState<Dispatch[]>([]);
   const [loading, setLoading] = useState(true);

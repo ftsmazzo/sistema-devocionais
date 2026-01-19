@@ -38,9 +38,27 @@ export async function processMarketingDispatch(params: MarketingDispatchParams):
 
     const dispatch = dispatchResult.rows[0];
 
-    if (dispatch.status !== 'pending') {
+    // Verificar se já está processando ou concluído
+    if (dispatch.status === 'completed' || dispatch.status === 'stopped') {
       console.log(`   ⚠️ Disparo já está em status: ${dispatch.status}`);
       return;
+    }
+
+    // Se já está running, verificar se realmente está processando ou se precisa continuar
+    if (dispatch.status === 'running') {
+      // Verificar se há mensagens já enviadas (indica que está processando)
+      const messagesCheck = await pool.query(
+        `SELECT COUNT(*) as count FROM dispatch_contacts WHERE dispatch_id = $1`,
+        [dispatchId]
+      );
+      const messagesSent = parseInt(messagesCheck.rows[0]?.count || '0');
+      
+      if (messagesSent > 0) {
+        console.log(`   ⚠️ Disparo já está sendo processado (${messagesSent} mensagens enviadas)`);
+        return;
+      }
+      // Se não há mensagens, pode ser que o processamento anterior falhou, então continuar
+      console.log(`   ℹ️ Disparo em status 'running' mas sem mensagens, continuando processamento...`);
     }
 
     // Atualizar status para running
