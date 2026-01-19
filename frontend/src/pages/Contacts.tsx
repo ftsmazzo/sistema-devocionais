@@ -63,6 +63,8 @@ export default function Contacts() {
   const [viewMode, setViewMode] = useState<'cards' | 'list'>('cards');
   const [selectedContacts, setSelectedContacts] = useState<number[]>([]);
   const [showBulkTagModal, setShowBulkTagModal] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importTags, setImportTags] = useState<number[]>([]);
 
   useEffect(() => {
     loadContacts();
