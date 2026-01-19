@@ -258,18 +258,30 @@ async function processMessageReceived(instanceId: number, eventData: any) {
       }
     }
 
-    // Verificar se é resposta a um disparo de marketing
-    const lastMarketingResult = await pool.query(
-      `SELECT m.id, m.dispatch_id, m.created_at, d.dispatch_type
-       FROM messages m
-       JOIN dispatches d ON m.dispatch_id = d.id
-       WHERE m.contact_id = $1 
-         AND m.dispatch_type = 'marketing'
-         AND m.from_me = true
-       ORDER BY m.created_at DESC
-       LIMIT 1`,
-      [contactId]
-    );
+             // Verificar se é resposta a um disparo de marketing
+             console.log(`   🔍 Buscando último disparo de marketing para contato ${contactId}...`);
+             addLog('debug', `[Webhook] Buscando último disparo de marketing para contato ${contactId}`, { contactId, fromNumber });
+             
+             const lastMarketingResult = await pool.query(
+               `SELECT m.id, m.dispatch_id, m.created_at, d.dispatch_type
+                FROM messages m
+                JOIN dispatches d ON m.dispatch_id = d.id
+                WHERE m.contact_id = $1 
+                  AND m.dispatch_type = 'marketing'
+                  AND m.from_me = true
+                ORDER BY m.created_at DESC
+                LIMIT 1`,
+               [contactId]
+             );
+             
+             console.log(`   📊 Resultado da busca: ${lastMarketingResult.rows.length} disparo(s) encontrado(s)`);
+             if (lastMarketingResult.rows.length > 0) {
+               console.log(`   📋 Último disparo: ID ${lastMarketingResult.rows[0].dispatch_id}, enviado em ${lastMarketingResult.rows[0].created_at}`);
+               addLog('debug', `[Webhook] Último disparo encontrado: ID ${lastMarketingResult.rows[0].dispatch_id}`, { contactId, dispatchId: lastMarketingResult.rows[0].dispatch_id, sentAt: lastMarketingResult.rows[0].created_at });
+             } else {
+               console.log(`   ⚠️ Nenhum disparo de marketing encontrado para este contato`);
+               addLog('info', `[Webhook] Nenhum disparo de marketing encontrado para contato ${contactId}`, { contactId });
+             }
 
     if (lastMarketingResult.rows.length > 0) {
       const lastMarketing = lastMarketingResult.rows[0];

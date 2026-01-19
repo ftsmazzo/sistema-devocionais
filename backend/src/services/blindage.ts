@@ -1,5 +1,6 @@
 import { pool } from '../database';
 import axios from 'axios';
+import { addLog } from '../routes/logs';
 
 export interface BlindageRule {
   id: number;
@@ -112,19 +113,27 @@ export async function applyBlindage(
       return timeCheck;
     }
 
-    // 8. Calcular delay necessário
+    // 8. Calcular delay necessário (global)
     const delay = await calculateDelay(instanceSelection.selectedInstanceId!, rules);
 
-    // 8. Registrar ação de blindagem
+    // 9. Somar delay entre instâncias (se houver)
+    let totalDelay = delay;
+    if (instanceSelection.delay && instanceSelection.delay > 0) {
+      totalDelay = delay + instanceSelection.delay;
+      console.log(`   🔄 Delay entre instâncias: ${instanceSelection.delay}ms | Delay global: ${delay}ms | Total: ${totalDelay}ms`);
+      addLog('info', `[Blindage] Delay entre instâncias: ${instanceSelection.delay}ms + Delay global: ${delay}ms = Total: ${totalDelay}ms`);
+    }
+
+    // 10. Registrar ação de blindagem
     await logBlindageAction(instanceSelection.selectedInstanceId!, {
       action_type: 'blindage_applied',
-      delay_applied: delay,
+      delay_applied: totalDelay,
       rules_applied: rules.map(r => r.rule_type),
     });
 
     return {
       canSend: true,
-      delay,
+      delay: totalDelay,
       selectedInstanceId: instanceSelection.selectedInstanceId,
     };
   } catch (error: any) {
@@ -534,12 +543,19 @@ async function selectInstance(
       const secondsSinceLastSent = (Date.now() - new Date(lastSent).getTime()) / 1000;
       if (secondsSinceLastSent < config.min_delay_between_instances) {
         const delayNeeded = config.min_delay_between_instances - secondsSinceLastSent;
+        const delayMs = Math.ceil(delayNeeded * 1000);
+        console.log(`   🔄 Delay entre instâncias necessário: ${delayNeeded.toFixed(2)}s (${delayMs}ms) para instância ${selectedInstance.id}`);
+        addLog('info', `[Blindage] Delay entre instâncias: ${delayNeeded.toFixed(2)}s necessário para instância ${selectedInstance.id}`);
         return {
           canSend: true,
           selectedInstanceId: selectedInstance.id,
-          delay: Math.ceil(delayNeeded * 1000), // em milissegundos
+          delay: delayMs, // em milissegundos
         };
+      } else {
+        console.log(`   ✅ Instância ${selectedInstance.id} pode enviar (${secondsSinceLastSent.toFixed(2)}s desde última mensagem, mínimo: ${config.min_delay_between_instances}s)`);
       }
+    } else {
+      console.log(`   ✅ Instância ${selectedInstance.id} nunca enviou mensagem, sem delay entre instâncias necessário`);
     }
   }
 

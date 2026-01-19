@@ -193,17 +193,26 @@ export async function triggerAIInteraction(
     const dispatchResult = await pool.query(
       `SELECT d.*, c.phone_number, c.name
        FROM dispatches d
-       JOIN contacts c ON c.id = $1
-       WHERE d.id = $2`,
+       CROSS JOIN contacts c
+       WHERE c.id = $1 AND d.id = $2`,
       [contactId, dispatchId]
     );
 
     if (dispatchResult.rows.length === 0) {
-      console.error(`❌ Disparo ${dispatchId} ou contato ${contactId} não encontrado`);
+      const errorMsg = `❌ Disparo ${dispatchId} ou contato ${contactId} não encontrado`;
+      console.error(errorMsg);
+      addLog('error', errorMsg, { dispatchId, contactId });
       return;
     }
 
-    const { dispatch, phone_number, name } = dispatchResult.rows[0];
+    const row = dispatchResult.rows[0];
+    const dispatch = {
+      name: row.name,
+      message_template: row.message_template,
+      metadata: row.metadata,
+    };
+    const phone_number = row.phone_number;
+    const name = row.name;
 
     // Buscar configuração de IA
     const configResult = await pool.query(
