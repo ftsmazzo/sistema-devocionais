@@ -48,6 +48,7 @@ export function personalizeDevocionalMessage(
 
 /**
  * Formatar devocional completo com versículos
+ * O texto do devocional já vem completo do N8N, então não adicionamos versículos se já estiverem no texto
  */
 export function formatDevocionalMessage(devocional: {
   title: string;
@@ -63,15 +64,25 @@ export function formatDevocionalMessage(devocional: {
 }): string {
   let message = `*${devocional.title}*\n\n`;
 
-  if (devocional.versiculo_principal) {
+  // Verificar se o versículo principal já está no texto
+  const versiculoPrincipalNoTexto = devocional.versiculo_principal && 
+    devocional.text.includes(devocional.versiculo_principal.referencia);
+
+  // Verificar se o versículo de apoio já está no texto
+  const versiculoApoioNoTexto = devocional.versiculo_apoio && 
+    devocional.text.includes(devocional.versiculo_apoio.referencia);
+
+  // Adicionar versículo principal apenas se não estiver no texto
+  if (devocional.versiculo_principal && !versiculoPrincipalNoTexto) {
     message += `📖 *${devocional.versiculo_principal.referencia}*\n`;
     message += `${devocional.versiculo_principal.texto}\n\n`;
   }
 
-  message += `${devocional.text}\n`;
+  message += `${devocional.text}`;
 
-  if (devocional.versiculo_apoio) {
-    message += `\n📖 *${devocional.versiculo_apoio.referencia}*\n`;
+  // Adicionar versículo de apoio apenas se não estiver no texto
+  if (devocional.versiculo_apoio && !versiculoApoioNoTexto) {
+    message += `\n\n📖 *${devocional.versiculo_apoio.referencia}*\n`;
     message += `${devocional.versiculo_apoio.texto}`;
   }
 
