@@ -222,6 +222,132 @@ router.get('/context/para-ia', async (req: express.Request, res: express.Respons
 });
 
 /**
+ * Configuração do Devocional
+ * GET /api/devocional/config
+ * IMPORTANTE: Esta rota deve vir ANTES de /:id para não ser capturada
+ */
+router.get('/config', authenticateToken, async (req: AuthRequest, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT * FROM devocional_config ORDER BY id DESC LIMIT 1`
+    );
+
+    let config;
+    if (result.rows.length === 0) {
+      // Criar configuração padrão
+      const defaultConfig = await pool.query(
+        `INSERT INTO devocional_config (
+          dispatch_hour, dispatch_minute, timezone, enabled
+        ) VALUES ($1, $2, $3, $4)
+        RETURNING *`,
+        [6, 0, 'America/Sao_Paulo', true]
+      );
+      config = defaultConfig.rows[0];
+    } else {
+      config = result.rows[0];
+    }
+
+    // Buscar devocional do dia
+    const today = new Date().toISOString().split('T')[0];
+    const devocionalResult = await pool.query(
+      `SELECT id, title, date, text, versiculo_principal, versiculo_apoio, metadata
+       FROM devocionais 
+       WHERE date = $1`,
+      [today]
+    );
+
+    let todayDevocional = null;
+    if (devocionalResult.rows.length > 0) {
+      const row = devocionalResult.rows[0];
+      todayDevocional = {
+        id: row.id,
+        title: row.title,
+        date: row.date,
+        text: row.text,
+        versiculo_principal: typeof row.versiculo_principal === 'string'
+          ? JSON.parse(row.versiculo_principal)
+          : row.versiculo_principal,
+        versiculo_apoio: typeof row.versiculo_apoio === 'string'
+          ? JSON.parse(row.versiculo_apoio)
+          : row.versiculo_apoio,
+        metadata: typeof row.metadata === 'string'
+          ? JSON.parse(row.metadata)
+          : row.metadata,
+      };
+    }
+
+    res.json({ 
+      config,
+      today_devocional: todayDevocional
+    });
+  } catch (error: any) {
+    console.error('❌ Erro ao buscar configuração do devocional:', error);
+    res.status(500).json({ 
+      error: 'Erro ao buscar configuração',
+      message: error.message 
+    });
+  }
+});
+
+/**
+ * Buscar devocional por data
+ * GET /api/devocional/date/:date (YYYY-MM-DD)
+ * IMPORTANTE: Esta rota deve vir ANTES de /:id para não ser capturada
+ */
+router.get('/date/:date', async (req: express.Request, res: express.Response) => {
+  try {
+    const { date } = req.params;
+
+    const result = await pool.query(
+      `SELECT 
+        id,
+        text,
+        title,
+        date,
+        versiculo_principal,
+        versiculo_apoio,
+        metadata,
+        created_at,
+        updated_at
+       FROM devocionais
+       WHERE date = $1`,
+      [date]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Devocional não encontrado para esta data' });
+    }
+
+    const row = result.rows[0];
+    const devocional = {
+      id: row.id,
+      text: row.text,
+      title: row.title,
+      date: row.date,
+      versiculo_principal: typeof row.versiculo_principal === 'string'
+        ? JSON.parse(row.versiculo_principal)
+        : row.versiculo_principal,
+      versiculo_apoio: typeof row.versiculo_apoio === 'string'
+        ? JSON.parse(row.versiculo_apoio)
+        : row.versiculo_apoio,
+      metadata: typeof row.metadata === 'string'
+        ? JSON.parse(row.metadata)
+        : row.metadata,
+      created_at: row.created_at,
+      updated_at: row.updated_at
+    };
+
+    res.json({ devocional });
+  } catch (error: any) {
+    console.error('❌ Erro ao buscar devocional por data:', error);
+    res.status(500).json({ 
+      error: 'Erro ao buscar devocional',
+      message: error.message 
+    });
+  }
+});
+
+/**
  * Listar devocionais
  * GET /api/devocional?limit=10&offset=0&startDate=&endDate=
  */
