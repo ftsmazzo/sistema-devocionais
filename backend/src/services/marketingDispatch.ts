@@ -290,7 +290,46 @@ export async function processMarketingDispatch(params: MarketingDispatchParams):
       [contacts.length, successCount, failedCount, dispatchId]
     );
 
-    console.log(`   ✅ Disparo concluído: ${successCount} sucesso, ${failedCount} falhas`);
+    const totalTime = Date.now() - startTime;
+    const totalTimeSeconds = Math.ceil(totalTime / 1000);
+    console.log(`\n   ✅ Disparo concluído: ${successCount} sucesso, ${failedCount} falhas`);
+    console.log(`   ⏱️ Tempo total: ${totalTimeSeconds}s (${totalTime}ms)`);
+    console.log(`   📊 Média: ${Math.ceil(totalTime / contacts.length)}ms por contato`);
+
+    // Enviar notificação de conclusão (se configurado)
+    const marketingConfigResult = await pool.query(
+      `SELECT notification_phone FROM marketing_ai_config WHERE enabled = true ORDER BY id DESC LIMIT 1`
+    );
+    const notificationPhone = marketingConfigResult.rows[0]?.notification_phone;
+    
+    if (notificationPhone) {
+      try {
+        // Buscar uma instância para enviar notificação
+        const instanceResult = await pool.query(
+          `SELECT instance_name, api_url, api_key FROM instances WHERE status = 'connected' LIMIT 1`
+        );
+        
+        if (instanceResult.rows.length > 0) {
+          const instance = instanceResult.rows[0];
+          await axios.post(
+            `${instance.api_url}/message/sendText/${instance.instance_name}`,
+            {
+              number: notificationPhone,
+              text: `✅ Disparo de Marketing "${dispatch.name}" concluído:\n\n📊 ${successCount} enviados\n❌ ${failedCount} falhas\n⏱️ Tempo total: ${totalTimeSeconds}s\n📈 Média: ${Math.ceil(totalTime / contacts.length)}ms por contato`,
+            },
+            {
+              headers: {
+                'apikey': instance.api_key,
+                'Content-Type': 'application/json',
+              },
+            }
+          );
+          console.log(`   📲 Notificação de conclusão enviada para ${notificationPhone}`);
+        }
+      } catch (error: any) {
+        console.error(`   ⚠️ Erro ao enviar notificação:`, error.message);
+      }
+    }
 
   } catch (error: any) {
     console.error(`❌ Erro ao processar disparo de marketing:`, error);
