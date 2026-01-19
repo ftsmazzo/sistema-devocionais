@@ -16,6 +16,9 @@ import {
   XCircle,
   Phone,
   Mail,
+  Grid3x3,
+  List as ListIcon,
+  X,
 } from 'lucide-react';
 
 interface Contact {
