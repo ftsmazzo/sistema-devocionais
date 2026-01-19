@@ -1054,7 +1054,7 @@ export default function Contacts() {
                             type="button"
                             onClick={() => {
                               if (isSelected) {
-                                setImportTags(importTags.filter(id => id !== tag.id));
+                                setImportTags(importTags.filter((id: number) => id !== tag.id));
                               } else {
                                 setImportTags([...importTags, tag.id]);
                               }
