@@ -260,7 +260,7 @@ async function processMessageReceived(instanceId: number, eventData: any) {
 
              // Verificar se é resposta a um disparo de marketing
              console.log(`   🔍 Buscando último disparo de marketing para contato ${contactId}...`);
-             addLog('debug', `[Webhook] Buscando último disparo de marketing para contato ${contactId}`, { contactId, fromNumber });
+             addLog('debug', `[Webhook] Buscando último disparo de marketing para contato ${contactId} (${fromNumber})`);
              
              const lastMarketingResult = await pool.query(
                `SELECT m.id, m.dispatch_id, m.created_at, d.dispatch_type
@@ -277,10 +277,10 @@ async function processMessageReceived(instanceId: number, eventData: any) {
              console.log(`   📊 Resultado da busca: ${lastMarketingResult.rows.length} disparo(s) encontrado(s)`);
              if (lastMarketingResult.rows.length > 0) {
                console.log(`   📋 Último disparo: ID ${lastMarketingResult.rows[0].dispatch_id}, enviado em ${lastMarketingResult.rows[0].created_at}`);
-               addLog('debug', `[Webhook] Último disparo encontrado: ID ${lastMarketingResult.rows[0].dispatch_id}`, { contactId, dispatchId: lastMarketingResult.rows[0].dispatch_id, sentAt: lastMarketingResult.rows[0].created_at });
+               addLog('debug', `[Webhook] Último disparo encontrado: ID ${lastMarketingResult.rows[0].dispatch_id} para contato ${contactId} enviado em ${lastMarketingResult.rows[0].created_at}`);
              } else {
                console.log(`   ⚠️ Nenhum disparo de marketing encontrado para este contato`);
-               addLog('info', `[Webhook] Nenhum disparo de marketing encontrado para contato ${contactId}`, { contactId });
+               addLog('info', `[Webhook] Nenhum disparo de marketing encontrado para contato ${contactId}`);
              }
 
     if (lastMarketingResult.rows.length > 0) {

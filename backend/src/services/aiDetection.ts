@@ -201,7 +201,7 @@ export async function triggerAIInteraction(
     if (dispatchResult.rows.length === 0) {
       const errorMsg = `❌ Disparo ${dispatchId} ou contato ${contactId} não encontrado`;
       console.error(errorMsg);
-      addLog('error', errorMsg, { dispatchId, contactId });
+      addLog('error', errorMsg);
       return;
     }
 
