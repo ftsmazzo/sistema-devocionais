@@ -66,10 +66,8 @@ function buildDynamicListQuery(filterConfig: any, startParam: number, params: an
     query += ` AND c.whatsapp_validated = $${paramCount}`;
     params.push(filterConfig.whatsapp_validated);
     paramCount++;
-  } else {
-    // Por padrão, listas dinâmicas devem incluir apenas contatos com WhatsApp validado
-    query += ` AND c.whatsapp_validated = TRUE`;
   }
+  // Removido filtro obrigatório de whatsapp_validated - deixar opcional para o usuário escolher
 
   if (filterConfig.last_message_sent_after) {
     query += ` AND c.last_message_sent_at >= $${paramCount}`;
@@ -175,11 +173,11 @@ router.post('/', async (req: AuthRequest, res) => {
     // Calcular total_contacts para listas dinâmicas/híbridas
     if (list_type === 'dynamic' || list_type === 'hybrid') {
       try {
-        // Garantir que whatsapp_validated seja true por padrão e opt_out seja false
+        // Aplicar filtros apenas se especificados pelo usuário
         const finalFilterConfig = {
           ...filter_config,
-          whatsapp_validated: filter_config.whatsapp_validated !== undefined ? filter_config.whatsapp_validated : true,
-          opt_in: filter_config.opt_in !== undefined ? filter_config.opt_in : true,
+          // Não forçar whatsapp_validated - deixar o usuário escolher
+          opt_in: filter_config.opt_in !== undefined ? filter_config.opt_in : undefined,
           opt_out: filter_config.opt_out !== undefined ? filter_config.opt_out : false
         };
 
