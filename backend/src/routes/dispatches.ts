@@ -343,26 +343,7 @@ router.post('/:id/start', async (req: AuthRequest, res) => {
         console.error(`❌ Erro ao processar disparo de marketing ${id}:`, error);
       });
     } else if (dispatch.dispatch_type === 'devocional') {
-      // Disparo manual de devocional - processar imediatamente
-      // Buscar devocional do dia
-      const today = new Date().toISOString().split('T')[0];
-      const devocionalResult = await pool.query(
-        `SELECT id FROM devocionais WHERE date = $1`,
-        [today]
-      );
-
-      if (devocionalResult.rows.length === 0) {
-        await pool.query(
-          `UPDATE dispatches SET status = 'failed', completed_at = CURRENT_TIMESTAMP WHERE id = $1`,
-          [id]
-        );
-        return res.status(404).json({ 
-          error: 'Nenhum devocional encontrado para hoje',
-          message: 'O N8N deve criar o devocional às 3:30 da manhã'
-        });
-      }
-
-      // Processar disparo manual de devocional em background
+      // Disparo manual de devocional - processar imediatamente em background
       processDevocionalDispatchManually(parseInt(id)).catch((error) => {
         console.error(`❌ Erro ao processar disparo manual de devocional ${id}:`, error);
       });
