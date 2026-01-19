@@ -559,37 +559,6 @@ router.get('/date/:date', async (req: express.Request, res: express.Response) =>
   }
 });
 
-/**
- * Configuração do Devocional
- * GET /api/devocional/config
- */
-router.get('/config', authenticateToken, async (req: AuthRequest, res) => {
-  try {
-    const result = await pool.query(
-      `SELECT * FROM devocional_config ORDER BY id DESC LIMIT 1`
-    );
-
-    if (result.rows.length === 0) {
-      // Criar configuração padrão
-      const defaultConfig = await pool.query(
-        `INSERT INTO devocional_config (
-          dispatch_hour, dispatch_minute, timezone, enabled
-        ) VALUES ($1, $2, $3, $4)
-        RETURNING *`,
-        [6, 0, 'America/Sao_Paulo', true]
-      );
-      return res.json({ config: defaultConfig.rows[0] });
-    }
-
-    res.json({ config: result.rows[0] });
-  } catch (error: any) {
-    console.error('❌ Erro ao buscar configuração do devocional:', error);
-    res.status(500).json({ 
-      error: 'Erro ao buscar configuração',
-      message: error.message 
-    });
-  }
-});
 
 /**
  * Atualizar configuração do Devocional
