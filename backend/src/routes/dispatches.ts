@@ -4,6 +4,9 @@ import { pool } from '../database';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { applyBlindage } from '../services/blindage';
 import { processMarketingDispatch } from '../services/marketingDispatch';
+import { executeDevocionalDispatch } from '../services/devocionalScheduler';
+import { personalizeDevocionalMessage, formatDevocionalMessage } from '../services/devocionalPersonalization';
+import { canReceiveDevocional, updateDevocionalScore } from '../services/devocionalScoring';
 
 const router = express.Router();
 
@@ -340,8 +343,29 @@ router.post('/:id/start', async (req: AuthRequest, res) => {
         console.error(`❌ Erro ao processar disparo de marketing ${id}:`, error);
       });
     } else if (dispatch.dispatch_type === 'devocional') {
-      // Devocional já tem seu próprio scheduler, mas pode ser iniciado manualmente também
-      // Por enquanto, apenas atualiza status
+      // Disparo manual de devocional - processar imediatamente
+      // Buscar devocional do dia
+      const today = new Date().toISOString().split('T')[0];
+      const devocionalResult = await pool.query(
+        `SELECT id FROM devocionais WHERE date = $1`,
+        [today]
+      );
+
+      if (devocionalResult.rows.length === 0) {
+        await pool.query(
+          `UPDATE dispatches SET status = 'failed', completed_at = CURRENT_TIMESTAMP WHERE id = $1`,
+          [id]
+        );
+        return res.status(404).json({ 
+          error: 'Nenhum devocional encontrado para hoje',
+          message: 'O N8N deve criar o devocional às 3:30 da manhã'
+        });
+      }
+
+      // Processar disparo manual de devocional em background
+      processDevocionalDispatchManually(parseInt(id)).catch((error) => {
+        console.error(`❌ Erro ao processar disparo manual de devocional ${id}:`, error);
+      });
     }
 
     res.json({ 
