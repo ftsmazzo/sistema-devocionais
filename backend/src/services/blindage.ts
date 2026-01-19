@@ -746,7 +746,7 @@ async function calculateDelay(instanceId: number, rules: BlindageRule[]): Promis
   }
 
   const config = delayRule.config || {};
-  let delay = config.min_delay_seconds || 3;
+  let minDelaySeconds = config.min_delay_seconds || 3;
 
   // Delay progressivo
   if (config.progressive) {
@@ -765,14 +765,14 @@ async function calculateDelay(instanceId: number, rules: BlindageRule[]): Promis
     );
 
     const messagesThisHour = metrics.rows[0]?.messages_sent || 0;
-    const baseDelay = config.base_delay || delay;
+    const baseDelay = config.base_delay || minDelaySeconds;
     const increment = config.increment_per_message || 0.5;
 
-    delay = baseDelay + (messagesThisHour * increment);
+    minDelaySeconds = baseDelay + (messagesThisHour * increment);
 
     // Limitar delay máximo
-    if (config.max_delay_seconds && delay > config.max_delay_seconds) {
-      delay = config.max_delay_seconds;
+    if (config.max_delay_seconds && minDelaySeconds > config.max_delay_seconds) {
+      minDelaySeconds = config.max_delay_seconds;
     }
   }
 
@@ -782,17 +782,25 @@ async function calculateDelay(instanceId: number, rules: BlindageRule[]): Promis
     [instanceId]
   );
 
+  let delayNeeded = 0;
   if (instanceResult.rows[0]?.last_message_sent_at) {
     const lastSent = new Date(instanceResult.rows[0].last_message_sent_at);
     const secondsSinceLastSent = (Date.now() - lastSent.getTime()) / 1000;
 
-    if (secondsSinceLastSent < delay) {
-      const delayNeeded = (delay - secondsSinceLastSent) * 1000; // em milissegundos
-      return Math.ceil(delayNeeded);
+    if (secondsSinceLastSent < minDelaySeconds) {
+      // Precisa esperar mais tempo
+      delayNeeded = (minDelaySeconds - secondsSinceLastSent) * 1000; // em milissegundos
+    } else {
+      // Já passou o tempo mínimo, mas ainda aplicar um pequeno delay para garantir
+      // Aplicar pelo menos 1 segundo de delay entre mensagens
+      delayNeeded = 1000; // 1 segundo mínimo
     }
+  } else {
+    // Primeira mensagem desta instância, aplicar delay mínimo
+    delayNeeded = minDelaySeconds * 1000;
   }
 
-  return 0; // Não precisa de delay
+  return Math.ceil(delayNeeded);
 }
 
 /**

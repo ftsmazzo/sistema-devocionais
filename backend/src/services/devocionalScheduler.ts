@@ -320,7 +320,12 @@ export async function executeDevocionalDispatch(): Promise<void> {
 
         // Aplicar delay
         if (blindageResult.delay && blindageResult.delay > 0) {
+          const delaySeconds = Math.ceil(blindageResult.delay / 1000);
+          console.log(`   ⏳ Aplicando delay de ${delaySeconds}s antes de enviar para ${contact.phone_number}`);
           await new Promise(resolve => setTimeout(resolve, blindageResult.delay));
+          console.log(`   ✅ Delay concluído, enviando mensagem...`);
+        } else {
+          console.log(`   ⚠️ Nenhum delay configurado para ${contact.phone_number}`);
         }
 
         // Enviar mensagem
