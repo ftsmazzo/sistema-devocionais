@@ -8,6 +8,9 @@ import {
   LogOut,
   Menu,
   X,
+  Users,
+  Tag,
+  List,
 } from 'lucide-react';
 import { useState } from 'react';
 
@@ -23,11 +26,13 @@ export default function Layout({ children }: LayoutProps) {
   const navigation = [
     { name: 'Instâncias', href: '/', icon: MessageSquare },
     { name: 'Blindagens', href: '/blindage', icon: Shield },
+    { name: 'Contatos', href: '/contacts', icon: Users },
+    { name: 'Tags', href: '/tags', icon: Tag },
+    { name: 'Listas', href: '/lists', icon: List },
     // Futuras páginas:
     // { name: 'Disparos', href: '/dispatches', icon: Send },
     // { name: 'Mensagens', href: '/messages', icon: Inbox },
     // { name: 'Estatísticas', href: '/stats', icon: BarChart3 },
-    // { name: 'Configurações', href: '/settings', icon: Settings },
   ];
 
   const isActive = (path: string) => {

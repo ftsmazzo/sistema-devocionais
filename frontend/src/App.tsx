@@ -4,6 +4,9 @@ import { useAuthStore } from './store/authStore';
 import Login from './pages/Login';
 import Instances from './pages/Instances';
 import Blindage from './pages/Blindage';
+import Contacts from './pages/Contacts';
+import Tags from './pages/Tags';
+import Lists from './pages/Lists';
 import Layout from './components/Layout';
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
@@ -48,6 +51,30 @@ function App() {
           element={
             <PrivateRoute>
               <Blindage />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/contacts"
+          element={
+            <PrivateRoute>
+              <Contacts />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/tags"
+          element={
+            <PrivateRoute>
+              <Tags />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/lists"
+          element={
+            <PrivateRoute>
+              <Lists />
             </PrivateRoute>
           }
         />
