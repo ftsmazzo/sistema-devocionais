@@ -238,18 +238,53 @@ async function processMessageReceived(instanceId: number, eventData: any) {
     console.log(`   ${fromNumberLog}`);
     addLog('info', fromNumberLog);
 
-    // Buscar contato pelo número
-    const contactResult = await pool.query(
-      `SELECT id FROM contacts WHERE phone_number = $1`,
-      [fromNumber]
+    // Normalizar número para busca (remover +, espaços, hífens, parênteses)
+    const normalizedNumber = fromNumber.replace(/[\s\+\-\(\)]/g, '');
+    
+    // Buscar contato pelo número (tentar diferentes formatos)
+    let contactResult = await pool.query(
+      `SELECT id FROM contacts WHERE phone_number = $1 OR phone_number = $2 OR phone_number = $3 OR phone_number = $4`,
+      [fromNumber, normalizedNumber, `+${normalizedNumber}`, normalizedNumber.replace(/^55/, '')]
     );
     
+    // Se ainda não encontrou, tentar buscar sem os primeiros dígitos (código do país)
+    if (contactResult.rows.length === 0 && normalizedNumber.startsWith('55')) {
+      const numberWithoutCountry = normalizedNumber.substring(2);
+      contactResult = await pool.query(
+        `SELECT id FROM contacts WHERE phone_number = $1 OR phone_number = $2 OR phone_number = $3`,
+        [numberWithoutCountry, `+55${numberWithoutCountry}`, `55${numberWithoutCountry}`]
+      );
+    }
+    
     if (contactResult.rows.length === 0) {
-      const noContactLog = `⚠️ Contato ${fromNumber} não encontrado no banco. Mensagem será ignorada.`;
+      const noContactLog = `⚠️ Contato ${fromNumber} (normalizado: ${normalizedNumber}) não encontrado no banco. Tentando criar automaticamente...`;
       console.log(`   ${noContactLog}`);
       addLog('warning', noContactLog);
-      console.log(`   ========================================\n`);
-      return; // Contato não encontrado
+      
+      // Criar contato automaticamente se não existir
+      try {
+        const createResult = await pool.query(
+          `INSERT INTO contacts (phone_number, name, whatsapp_validated, whatsapp_validated_at, opt_in, opt_in_at, created_at, updated_at)
+           VALUES ($1, $2, true, CURRENT_TIMESTAMP, true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+           ON CONFLICT (phone_number) DO UPDATE SET whatsapp_validated = true, whatsapp_validated_at = CURRENT_TIMESTAMP
+           RETURNING id`,
+          [normalizedNumber, eventData.data?.pushName || eventData.pushName || 'Contato Automático']
+        );
+        
+        const newContactId = createResult.rows[0].id;
+        const createdLog = `✅ Contato criado automaticamente: ID ${newContactId} (${normalizedNumber})`;
+        console.log(`   ${createdLog}`);
+        addLog('info', createdLog);
+        
+        // Usar o contato recém-criado
+        contactResult = { rows: [{ id: newContactId }] };
+      } catch (createError: any) {
+        const createErrorLog = `❌ Erro ao criar contato automaticamente: ${createError.message}`;
+        console.error(`   ${createErrorLog}`);
+        addLog('error', createErrorLog);
+        console.log(`   ========================================\n`);
+        return;
+      }
     }
     
     const contactId = contactResult.rows[0].id;
