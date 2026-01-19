@@ -200,6 +200,51 @@ async function processMessageReceived(instanceId: number, eventData: any) {
       }
     }
 
+    // Verificar se é resposta a um disparo de marketing
+    const lastMarketingResult = await pool.query(
+      `SELECT m.id, m.dispatch_id, m.created_at, d.dispatch_type
+       FROM messages m
+       JOIN dispatches d ON m.dispatch_id = d.id
+       WHERE m.contact_id = $1 
+         AND m.dispatch_type = 'marketing'
+         AND m.from_me = true
+       ORDER BY m.created_at DESC
+       LIMIT 1`,
+      [contactId]
+    );
+
+    if (lastMarketingResult.rows.length > 0) {
+      const lastMarketing = lastMarketingResult.rows[0];
+      const lastSentTime = new Date(lastMarketing.created_at);
+      const now = new Date();
+      const hoursSinceSent = (now.getTime() - lastSentTime.getTime()) / (1000 * 60 * 60);
+
+      // Se a mensagem foi recebida dentro de 48 horas após o envio do marketing, verificar intenção
+      if (hoursSinceSent <= 48 && lastMarketing.dispatch_id) {
+        const messageText = message.body || message.message?.conversation || message.message?.extendedTextMessage?.text || '';
+        
+        if (messageText.trim().length > 0) {
+          // Detectar intenção positiva
+          const detection = await detectPositiveIntent(
+            messageText,
+            contactId,
+            lastMarketing.dispatch_id
+          );
+
+          if (detection.isPositive && detection.confidence > 0.5) {
+            console.log(`   ✅ Intenção positiva detectada para contato ${contactId} (confiança: ${detection.confidence})`);
+            
+            // Ativar IA externa
+            await triggerAIInteraction(
+              lastMarketing.dispatch_id,
+              contactId,
+              messageText
+            );
+          }
+        }
+      }
+    }
+
     // Atualizar última mensagem recebida do contato
     await pool.query(
       `UPDATE contacts
