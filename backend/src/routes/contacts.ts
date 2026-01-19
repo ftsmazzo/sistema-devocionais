@@ -21,8 +21,58 @@ router.get('/', async (req: AuthRequest, res) => {
     const whatsappValidated = req.query.whatsappValidated as string;
     const tags = req.query.tags as string; // IDs separados por vírgula
 
+    // Primeiro, buscar IDs de contatos que atendem aos filtros
+    let baseQuery = `
+      SELECT DISTINCT c.id
+      FROM contacts c
+      LEFT JOIN contact_tag_relations ctr ON c.id = ctr.contact_id
+      LEFT JOIN contact_tags t ON ctr.tag_id = t.id
+      WHERE 1=1
+    `;
+    const baseParams: any[] = [];
+    let baseParamCount = 1;
+
+    if (search) {
+      baseQuery += ` AND (c.name ILIKE $${baseParamCount} OR c.phone_number ILIKE $${baseParamCount} OR c.email ILIKE $${baseParamCount})`;
+      baseParams.push(`%${search}%`);
+      baseParamCount++;
+    }
+
+    if (optIn === 'true') {
+      baseQuery += ` AND c.opt_in = TRUE`;
+    } else if (optIn === 'false') {
+      baseQuery += ` AND c.opt_in = FALSE`;
+    }
+
+    if (optOut === 'true') {
+      baseQuery += ` AND c.opt_out = TRUE`;
+    } else if (optOut === 'false') {
+      baseQuery += ` AND c.opt_out = FALSE`;
+    }
+
+    if (whatsappValidated === 'true') {
+      baseQuery += ` AND c.whatsapp_validated = TRUE`;
+    } else if (whatsappValidated === 'false') {
+      baseQuery += ` AND c.whatsapp_validated = FALSE`;
+    }
+
+    // Filtro por tags
+    if (tags) {
+      const tagIds = tags.split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id));
+      if (tagIds.length > 0) {
+        baseQuery += ` AND EXISTS (
+          SELECT 1 FROM contact_tag_relations ctr2 
+          WHERE ctr2.contact_id = c.id 
+          AND ctr2.tag_id = ANY($${baseParamCount}::int[])
+        )`;
+        baseParams.push(tagIds);
+        baseParamCount++;
+      }
+    }
+
+    // Agora buscar os contatos completos com tags
     let query = `
-      SELECT DISTINCT
+      SELECT 
         c.*,
         COALESCE(
           json_agg(
@@ -33,61 +83,26 @@ router.get('/', async (req: AuthRequest, res) => {
               'category', t.category
             )
           ) FILTER (WHERE t.id IS NOT NULL),
-          '[]'
+          '[]'::json
         ) as tags
       FROM contacts c
       LEFT JOIN contact_tag_relations ctr ON c.id = ctr.contact_id
       LEFT JOIN contact_tags t ON ctr.tag_id = t.id
-      WHERE 1=1
+      WHERE c.id IN (${baseQuery})
+      GROUP BY c.id, c.phone_number, c.name, c.email, c.whatsapp_validated, c.whatsapp_validated_at,
+               c.opt_in, c.opt_in_at, c.opt_out, c.opt_out_at, c.opt_out_reason, c.source, c.metadata,
+               c.created_at, c.updated_at, c.last_message_sent_at, c.last_message_received_at,
+               c.total_messages_sent, c.total_messages_received
+      ORDER BY c.created_at DESC LIMIT $${baseParamCount} OFFSET $${baseParamCount + 1}
     `;
-    const params: any[] = [];
-    let paramCount = 1;
-
-    if (search) {
-      query += ` AND (c.name ILIKE $${paramCount} OR c.phone_number ILIKE $${paramCount} OR c.email ILIKE $${paramCount})`;
-      params.push(`%${search}%`);
-      paramCount++;
-    }
-
-    if (optIn === 'true') {
-      query += ` AND c.opt_in = TRUE`;
-    } else if (optIn === 'false') {
-      query += ` AND c.opt_in = FALSE`;
-    }
-
-    if (optOut === 'true') {
-      query += ` AND c.opt_out = TRUE`;
-    } else if (optOut === 'false') {
-      query += ` AND c.opt_out = FALSE`;
-    }
-
-    if (whatsappValidated === 'true') {
-      query += ` AND c.whatsapp_validated = TRUE`;
-    } else if (whatsappValidated === 'false') {
-      query += ` AND c.whatsapp_validated = FALSE`;
-    }
-
-    query += ` GROUP BY c.id`;
-
-    // Filtro por tags
-    if (tags) {
-      const tagIds = tags.split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id));
-      if (tagIds.length > 0) {
-        query += ` HAVING COUNT(CASE WHEN t.id IN (${tagIds.join(',')}) THEN 1 END) > 0`;
-      }
-    }
-
-    query += ` ORDER BY c.created_at DESC LIMIT $${paramCount} OFFSET $${paramCount + 1}`;
-    params.push(limit, offset);
+    const params = [...baseParams, limit, offset];
 
     const result = await pool.query(query, params);
 
-    // Contar total
+    // Contar total (usar mesma query base, mas sem JOIN de tags para performance)
     let countQuery = `
       SELECT COUNT(DISTINCT c.id) as total
       FROM contacts c
-      LEFT JOIN contact_tag_relations ctr ON c.id = ctr.contact_id
-      LEFT JOIN contact_tags t ON ctr.tag_id = t.id
       WHERE 1=1
     `;
     const countParams: any[] = [];
@@ -120,14 +135,18 @@ router.get('/', async (req: AuthRequest, res) => {
     if (tags) {
       const tagIds = tags.split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id));
       if (tagIds.length > 0) {
-        countQuery += ` GROUP BY c.id HAVING COUNT(CASE WHEN t.id IN (${tagIds.join(',')}) THEN 1 END) > 0`;
+        countQuery += ` AND EXISTS (
+          SELECT 1 FROM contact_tag_relations ctr 
+          WHERE ctr.contact_id = c.id 
+          AND ctr.tag_id = ANY($${countParamCount}::int[])
+        )`;
+        countParams.push(tagIds);
+        countParamCount++;
       }
     }
 
     const countResult = await pool.query(countQuery, countParams);
-    const total = countResult.rows.length > 0 
-      ? parseInt(countResult.rows[0].total) 
-      : (countResult.rows.length === 1 ? parseInt(countResult.rows[0].total) : 0);
+    const total = parseInt(countResult.rows[0]?.total || '0');
 
     const contacts = result.rows.map(row => ({
       id: row.id,
