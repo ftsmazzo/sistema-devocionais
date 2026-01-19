@@ -582,7 +582,7 @@ export default function Contacts() {
                     </span>
                   )}
                 </span>
-                <div className="flex gap-2">
+                <div className="flex gap-2 flex-wrap">
                   <Button
                     size="sm"
                     variant="outline"
@@ -590,6 +590,68 @@ export default function Contacts() {
                   >
                     <Tag className="h-4 w-4 mr-1" />
                     Adicionar Tags
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={async () => {
+                      try {
+                        setLoading(true);
+                        await api.post('/contacts/bulk-update', {
+                          contact_ids: selectedContacts,
+                          whatsapp_validated: true
+                        });
+                        setToast({
+                          message: `${selectedContacts.length} contato(s) marcado(s) como WhatsApp validado!`,
+                          type: 'success'
+                        });
+                        setSelectedContacts([]);
+                        await loadContacts();
+                      } catch (error: any) {
+                        setToast({
+                          message: error.response?.data?.error || 'Erro ao validar WhatsApp',
+                          type: 'error'
+                        });
+                      } finally {
+                        setLoading(false);
+                      }
+                    }}
+                    className="text-green-600 hover:text-green-700 hover:border-green-300"
+                    title="Marcar contatos selecionados como WhatsApp validado"
+                  >
+                    <CheckCircle2 className="h-4 w-4 mr-1" />
+                    Validar WhatsApp
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={async () => {
+                      try {
+                        setLoading(true);
+                        await api.post('/contacts/bulk-update', {
+                          contact_ids: selectedContacts,
+                          opt_in: true
+                        });
+                        setToast({
+                          message: `${selectedContacts.length} contato(s) marcado(s) como opt-in!`,
+                          type: 'success'
+                        });
+                        setSelectedContacts([]);
+                        await loadContacts();
+                      } catch (error: any) {
+                        setToast({
+                          message: error.response?.data?.error || 'Erro ao ativar opt-in',
+                          type: 'error'
+                        });
+                      } finally {
+                        setLoading(false);
+                      }
+                    }}
+                    className="text-blue-600 hover:text-blue-700 hover:border-blue-300"
+                    title="Marcar contatos selecionados como opt-in ativo"
+                  >
+                    <CheckCircle2 className="h-4 w-4 mr-1" />
+                    Ativar Opt-in
                   </Button>
                   <Button
                     size="sm"

@@ -558,11 +558,13 @@ export default function Lists() {
                     </div>
 
                     <div className="space-y-3">
-                      <div className="bg-yellow-50 border-2 border-yellow-200 rounded-xl p-4 mb-4">
-                        <p className="text-sm text-yellow-900 font-medium mb-2">ℹ️ Informação Importante</p>
-                        <p className="text-xs text-yellow-700">
-                          <strong>Recomendação:</strong> Para melhor entregabilidade, considere filtrar apenas contatos com <strong>WhatsApp validado</strong> e <strong>opt-in ativo</strong>. Use os filtros abaixo para configurar.
-                        </p>
+                      <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-4 mb-4">
+                        <p className="text-sm text-blue-900 font-medium mb-2">ℹ️ Como funciona a validação</p>
+                        <div className="text-xs text-blue-700 space-y-1">
+                          <p><strong>Opt-in:</strong> Por padrão, contatos importados já têm opt-in = TRUE. Use o filtro apenas se quiser garantir.</p>
+                          <p><strong>WhatsApp Validado:</strong> Contatos importados começam com whatsapp_validated = FALSE. Você precisa validá-los manualmente na página de Contatos (selecionar e clicar em "Validar WhatsApp") ou eles serão validados automaticamente quando receberem mensagens via webhook.</p>
+                          <p className="mt-2 font-semibold">💡 Dica: Selecione contatos na página de Contatos e use "Validar WhatsApp" em massa para criar listas válidas rapidamente!</p>
+                        </div>
                       </div>
                       <div className="flex items-center justify-between">
                         <label className="text-sm font-medium text-gray-700">
