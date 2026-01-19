@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import cron from 'node-cron';
 import { initializeDatabase } from './database';
 import authRoutes from './routes/auth';
 import instanceRoutes from './routes/instances';
@@ -14,6 +15,7 @@ import listRoutes from './routes/lists';
 import marketingRoutes from './routes/marketing';
 import dispatchRoutes from './routes/dispatches';
 import { errorHandler } from './middleware/errorHandler';
+import { executeDevocionalDispatch } from './services/devocionalScheduler';
 
 dotenv.config();
 
@@ -99,6 +101,18 @@ async function start() {
       console.log(`🚀 Servidor rodando na porta ${PORT}`);
       console.log(`✅ Health check disponível em http://0.0.0.0:${PORT}/health`);
       startTime = Date.now();
+
+      // Iniciar cron job para disparo automático de devocional
+      // Executa a cada minuto para verificar se é o horário configurado
+      cron.schedule('* * * * *', async () => {
+        try {
+          await executeDevocionalDispatch();
+        } catch (error: any) {
+          console.error('❌ Erro no cron job de devocional:', error);
+        }
+      });
+      
+      console.log('📅 Cron job de devocional iniciado (verifica a cada minuto)');
     });
 
     // Manter o processo vivo
