@@ -66,6 +66,9 @@ function buildDynamicListQuery(filterConfig: any, startParam: number, params: an
     query += ` AND c.whatsapp_validated = $${paramCount}`;
     params.push(filterConfig.whatsapp_validated);
     paramCount++;
+  } else {
+    // Por padrão, listas dinâmicas devem incluir apenas contatos com WhatsApp validado
+    query += ` AND c.whatsapp_validated = TRUE`;
   }
 
   if (filterConfig.last_message_sent_after) {

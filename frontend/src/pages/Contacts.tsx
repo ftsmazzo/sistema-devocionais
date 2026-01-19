@@ -227,9 +227,13 @@ export default function Contacts() {
   };
 
 
-  const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    await processImportFile(file);
+  };
+
+  const processImportFile = async (file: File) => {
 
     try {
       setLoading(true);
@@ -346,7 +350,10 @@ export default function Contacts() {
         return;
       }
 
-      const response = await api.post('/contacts/import', { contacts: contactsToImport });
+      const response = await api.post('/contacts/import', { 
+        contacts: contactsToImport,
+        tags: importTags.length > 0 ? tags.filter(t => importTags.includes(t.id)).map(t => t.name) : []
+      });
       
       const errorsCount = response.data.results.errors?.length || 0;
       const tagsApplied = response.data.results.tagsApplied || 0;
@@ -363,8 +370,11 @@ export default function Contacts() {
         type: errorsCount > 0 ? 'warning' : 'success'
       });
       
-      // Limpar input para permitir reimportar o mesmo arquivo
-      e.target.value = '';
+      // Limpar input e modal
+      const input = document.getElementById('csv-import') as HTMLInputElement;
+      if (input) input.value = '';
+      setShowImportModal(false);
+      setImportTags([]);
       loadContacts();
     } catch (error: any) {
       setToast({
@@ -405,10 +415,7 @@ export default function Contacts() {
               variant="outline"
               className="flex items-center gap-2 cursor-pointer"
               onClick={() => {
-                const input = document.getElementById('csv-import') as HTMLInputElement;
-                if (input) {
-                  input.click();
-                }
+                setShowImportModal(true);
               }}
             >
               <Upload className="h-4 w-4" />

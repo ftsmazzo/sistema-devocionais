@@ -538,6 +538,12 @@ export default function Lists() {
                     </div>
 
                     <div className="space-y-3">
+                      <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-4 mb-4">
+                        <p className="text-sm text-blue-900 font-medium mb-2">ℹ️ Informação Importante</p>
+                        <p className="text-xs text-blue-700">
+                          Listas dinâmicas incluem automaticamente apenas contatos com <strong>WhatsApp validado</strong> e <strong>opt-in ativo</strong> para garantir entregabilidade.
+                        </p>
+                      </div>
                       <div className="flex items-center justify-between">
                         <label className="text-sm font-medium text-gray-700">
                           Apenas opt-in
