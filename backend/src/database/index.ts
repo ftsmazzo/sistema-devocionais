@@ -145,7 +145,12 @@ export async function initializeDatabase() {
       BEGIN 
         IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
                        WHERE table_name = 'messages' AND column_name = 'dispatch_id') THEN
-          ALTER TABLE messages ADD COLUMN dispatch_id INTEGER REFERENCES dispatches(id);
+          ALTER TABLE messages ADD COLUMN dispatch_id INTEGER REFERENCES dispatches(id) ON DELETE SET NULL;
+        ELSE
+          -- Se a coluna já existe, atualizar a constraint para permitir DELETE
+          ALTER TABLE messages DROP CONSTRAINT IF EXISTS messages_dispatch_id_fkey;
+          ALTER TABLE messages ADD CONSTRAINT messages_dispatch_id_fkey 
+            FOREIGN KEY (dispatch_id) REFERENCES dispatches(id) ON DELETE SET NULL;
         END IF;
         IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
                        WHERE table_name = 'messages' AND column_name = 'dispatch_type') THEN
