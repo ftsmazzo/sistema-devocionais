@@ -20,7 +20,9 @@ export async function processMarketingDispatch(params: MarketingDispatchParams):
   const { dispatchId, instanceIds } = params;
 
   try {
-    console.log(`📢 Iniciando processamento de disparo de marketing ID ${dispatchId}`);
+    const logMsg = `📢 Iniciando processamento de disparo de marketing ID ${dispatchId}`;
+    console.log(logMsg);
+    addLog('info', logMsg);
 
     // Buscar dados do disparo
     const dispatchResult = await pool.query(
@@ -172,10 +174,14 @@ export async function processMarketingDispatch(params: MarketingDispatchParams):
           messageType: 'marketing',
         });
         const blindageTime = Date.now() - blindageStartTime;
-        console.log(`      🛡️ Blindagem aplicada em ${blindageTime}ms`);
+        const blindageLog = `🛡️ Blindagem aplicada em ${blindageTime}ms`;
+        console.log(`      ${blindageLog}`);
+        addLog('info', `[Marketing ${dispatchId}] ${blindageLog}`);
 
         if (!blindageResult.canSend) {
-          console.log(`      ⛔ BLOQUEADO pela blindagem: ${blindageResult.reason}`);
+          const blockLog = `⛔ BLOQUEADO pela blindagem: ${blindageResult.reason}`;
+          console.log(`      ${blockLog}`);
+          addLog('warning', `[Marketing ${dispatchId}] ${blockLog} - Contato: ${contact.phone_number}`);
           failedCount++;
           continue;
         }
@@ -274,8 +280,12 @@ export async function processMarketingDispatch(params: MarketingDispatchParams):
         const avgTimePerContact = totalElapsed / contactIndex;
         const estimatedRemaining = Math.ceil((avgTimePerContact * (contacts.length - contactIndex)) / 1000);
         
-        console.log(`      ✅ SUCESSO! Tempo total: ${contactTotalTime}ms`);
-        console.log(`      📊 Progresso: ${successCount}/${contacts.length} enviados | Tempo médio: ${Math.ceil(avgTimePerContact)}ms | Estimativa restante: ~${estimatedRemaining}s`);
+        const successLog = `✅ SUCESSO! Tempo total: ${contactTotalTime}ms`;
+        const progressLog = `📊 Progresso: ${successCount}/${contacts.length} enviados | Tempo médio: ${Math.ceil(avgTimePerContact)}ms | Estimativa restante: ~${estimatedRemaining}s`;
+        console.log(`      ${successLog}`);
+        console.log(`      ${progressLog}`);
+        addLog('success', `[Marketing ${dispatchId}] ${successLog} - Contato: ${contact.phone_number}`);
+        addLog('info', `[Marketing ${dispatchId}] ${progressLog}`);
 
         // Atualizar última mensagem enviada da instância
         await pool.query(
@@ -306,9 +316,15 @@ export async function processMarketingDispatch(params: MarketingDispatchParams):
 
     const totalTime = Date.now() - startTime;
     const totalTimeSeconds = Math.ceil(totalTime / 1000);
-    console.log(`\n   ✅ Disparo concluído: ${successCount} sucesso, ${failedCount} falhas`);
-    console.log(`   ⏱️ Tempo total: ${totalTimeSeconds}s (${totalTime}ms)`);
-    console.log(`   📊 Média: ${Math.ceil(totalTime / contacts.length)}ms por contato`);
+    const completeLog = `✅ Disparo concluído: ${successCount} sucesso, ${failedCount} falhas`;
+    const timeLog = `⏱️ Tempo total: ${totalTimeSeconds}s (${totalTime}ms)`;
+    const avgLog = `📊 Média: ${Math.ceil(totalTime / contacts.length)}ms por contato`;
+    console.log(`\n   ${completeLog}`);
+    console.log(`   ${timeLog}`);
+    console.log(`   ${avgLog}`);
+    addLog('success', `[Marketing ${dispatchId}] ${completeLog}`);
+    addLog('info', `[Marketing ${dispatchId}] ${timeLog}`);
+    addLog('info', `[Marketing ${dispatchId}] ${avgLog}`);
 
     // Enviar notificação de conclusão (se configurado)
     // Buscar telefone de notificação do devocional (marketing não tem notification_phone)

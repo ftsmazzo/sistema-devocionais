@@ -3,6 +3,7 @@ import axios from 'axios';
 import { applyBlindage } from './blindage';
 import { personalizeDevocionalMessage, formatDevocionalMessage } from './devocionalPersonalization';
 import { canReceiveDevocional, updateDevocionalScore } from './devocionalScoring';
+import { addLog } from '../routes/logs';
 
 /**
  * Serviço de agendamento para disparo automático de devocionais
@@ -323,17 +324,25 @@ export async function executeDevocionalDispatch(): Promise<void> {
         if (blindageResult.delay && blindageResult.delay > 0) {
           const delaySeconds = Math.ceil(blindageResult.delay / 1000);
           const delayStartTime = Date.now();
-          console.log(`   ⏳ [DELAY] Aguardando ${delaySeconds}s (${blindageResult.delay}ms) antes de enviar para ${contact.phone_number}`);
+          const delayLog = `⏳ [DELAY] Aguardando ${delaySeconds}s (${blindageResult.delay}ms) antes de enviar para ${contact.phone_number}`;
+          console.log(`   ${delayLog}`);
+          addLog('info', `[Devocional] ${delayLog}`);
           await new Promise(resolve => setTimeout(resolve, blindageResult.delay));
           const actualDelay = Date.now() - delayStartTime;
           const delayDiff = actualDelay - blindageResult.delay;
           if (Math.abs(delayDiff) > 100) {
-            console.log(`   ⚠️ [DELAY] ATENÇÃO: Esperado ${blindageResult.delay}ms, mas levou ${actualDelay}ms (diferença: ${delayDiff > 0 ? '+' : ''}${delayDiff}ms)`);
+            const delayWarn = `⚠️ [DELAY] ATENÇÃO: Esperado ${blindageResult.delay}ms, mas levou ${actualDelay}ms (diferença: ${delayDiff > 0 ? '+' : ''}${delayDiff}ms)`;
+            console.log(`   ${delayWarn}`);
+            addLog('warning', `[Devocional] ${delayWarn}`);
           } else {
-            console.log(`   ✅ [DELAY] Concluído corretamente: ${actualDelay}ms`);
+            const delayOk = `✅ [DELAY] Concluído corretamente: ${actualDelay}ms`;
+            console.log(`   ${delayOk}`);
+            addLog('success', `[Devocional] ${delayOk}`);
           }
         } else {
-          console.log(`   ⚠️ [DELAY] NENHUM DELAY CONFIGURADO - Enviando imediatamente para ${contact.phone_number}!`);
+          const noDelayWarn = `⚠️ [DELAY] NENHUM DELAY CONFIGURADO - Enviando imediatamente para ${contact.phone_number}!`;
+          console.log(`   ${noDelayWarn}`);
+          addLog('warning', `[Devocional] ${noDelayWarn}`);
         }
 
         // Enviar mensagem
