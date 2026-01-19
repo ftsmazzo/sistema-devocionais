@@ -533,6 +533,25 @@ export default function Contacts() {
         </Card>
       ) : (
         <>
+          {!showAll && total > limit && (
+            <Card className="mb-4 border-2 border-yellow-200 bg-yellow-50 rounded-xl">
+              <CardContent className="p-4 flex items-center justify-between">
+                <span className="text-sm font-medium text-yellow-900">
+                  Mostrando apenas {limit} de {total} contatos
+                </span>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setShowAll(true);
+                    setOffset(0);
+                  }}
+                >
+                  Carregar todos ({total})
+                </Button>
+              </CardContent>
+            </Card>
+          )}
           {selectedContacts.length > 0 && (
             <Card className="mb-4 border-2 border-blue-200 bg-blue-50 rounded-xl">
               <CardContent className="p-4 flex items-center justify-between">
