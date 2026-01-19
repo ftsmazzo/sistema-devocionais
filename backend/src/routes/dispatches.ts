@@ -864,4 +864,84 @@ async function processDevocionalDispatchManually(dispatchId: number): Promise<vo
   }
 }
 
+/**
+ * Configurar multer para upload de arquivos
+ */
+const uploadsDir = path.join(__dirname, '../../uploads');
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, uploadsDir);
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    const ext = path.extname(file.originalname);
+    cb(null, file.fieldname + '-' + uniqueSuffix + ext);
+  }
+});
+
+const upload = multer({
+  storage: storage,
+  limits: {
+    fileSize: 50 * 1024 * 1024 // 50MB
+  },
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = /jpeg|jpg|png|gif|pdf|doc|docx/;
+    const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
+    const mimetype = allowedTypes.test(file.mimetype);
+    
+    if (mimetype && extname) {
+      return cb(null, true);
+    } else {
+      cb(new Error('Tipo de arquivo não permitido. Use: jpeg, jpg, png, gif, pdf, doc, docx'));
+    }
+  }
+});
+
+/**
+ * Upload de arquivo de mídia
+ * POST /api/dispatches/upload-media
+ */
+router.post('/upload-media', upload.single('media'), async (req: AuthRequest, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'Nenhum arquivo enviado' });
+    }
+
+    // Determinar tipo de mídia baseado na extensão
+    const ext = path.extname(req.file.originalname).toLowerCase();
+    let mediaType = 'document';
+    if (['.jpg', '.jpeg', '.png', '.gif'].includes(ext)) {
+      mediaType = 'image';
+    } else if (ext === '.pdf') {
+      mediaType = 'pdf';
+    }
+
+    // Construir URL (assumindo que o backend está servindo arquivos estáticos)
+    // Em produção, você pode usar um CDN ou serviço de storage
+    const baseUrl = process.env.WEBHOOK_BASE_URL || process.env.API_BASE_URL || 'http://localhost:3001';
+    // Remover /api do baseUrl se existir, pois /uploads está na raiz
+    const cleanBaseUrl = baseUrl.replace('/api', '');
+    const mediaUrl = `${cleanBaseUrl}/uploads/${req.file.filename}`;
+
+    res.json({
+      success: true,
+      media_url: mediaUrl,
+      media_type: mediaType,
+      filename: req.file.filename,
+      original_name: req.file.originalname,
+      size: req.file.size
+    });
+  } catch (error: any) {
+    console.error('❌ Erro ao fazer upload:', error);
+    res.status(500).json({
+      error: 'Erro ao fazer upload',
+      message: error.message
+    });
+  }
+});
+
 export default router;
