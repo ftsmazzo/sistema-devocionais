@@ -432,4 +432,93 @@ router.get('/date/:date', async (req, res) => {
   }
 });
 
+/**
+ * Configuração do Devocional
+ * GET /api/devocional/config
+ */
+router.get('/config', authenticateToken, async (req: AuthRequest, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT * FROM devocional_config ORDER BY id DESC LIMIT 1`
+    );
+
+    if (result.rows.length === 0) {
+      // Criar configuração padrão
+      const defaultConfig = await pool.query(
+        `INSERT INTO devocional_config (
+          dispatch_hour, dispatch_minute, timezone, enabled
+        ) VALUES ($1, $2, $3, $4)
+        RETURNING *`,
+        [6, 0, 'America/Sao_Paulo', true]
+      );
+      return res.json({ config: defaultConfig.rows[0] });
+    }
+
+    res.json({ config: result.rows[0] });
+  } catch (error: any) {
+    console.error('❌ Erro ao buscar configuração do devocional:', error);
+    res.status(500).json({ 
+      error: 'Erro ao buscar configuração',
+      message: error.message 
+    });
+  }
+});
+
+/**
+ * Atualizar configuração do Devocional
+ * PUT /api/devocional/config
+ */
+router.put('/config', authenticateToken, async (req: AuthRequest, res) => {
+  try {
+    const { list_id, dispatch_hour, dispatch_minute, timezone, notification_phone, enabled } = req.body;
+
+    // Buscar configuração existente
+    const existing = await pool.query(
+      `SELECT id FROM devocional_config ORDER BY id DESC LIMIT 1`
+    );
+
+    let result;
+    if (existing.rows.length === 0) {
+      // Criar nova configuração
+      result = await pool.query(
+        `INSERT INTO devocional_config (
+          list_id, dispatch_hour, dispatch_minute, timezone, 
+          notification_phone, enabled
+        ) VALUES ($1, $2, $3, $4, $5, $6)
+        RETURNING *`,
+        [list_id || null, dispatch_hour || 6, dispatch_minute || 0, 
+         timezone || 'America/Sao_Paulo', notification_phone || null, enabled !== false]
+      );
+    } else {
+      // Atualizar configuração existente
+      result = await pool.query(
+        `UPDATE devocional_config 
+         SET list_id = COALESCE($1, list_id),
+             dispatch_hour = COALESCE($2, dispatch_hour),
+             dispatch_minute = COALESCE($3, dispatch_minute),
+             timezone = COALESCE($4, timezone),
+             notification_phone = COALESCE($5, notification_phone),
+             enabled = COALESCE($6, enabled),
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $7
+         RETURNING *`,
+        [list_id, dispatch_hour, dispatch_minute, timezone, 
+         notification_phone, enabled, existing.rows[0].id]
+      );
+    }
+
+    res.json({ 
+      success: true,
+      config: result.rows[0],
+      message: 'Configuração salva com sucesso'
+    });
+  } catch (error: any) {
+    console.error('❌ Erro ao atualizar configuração do devocional:', error);
+    res.status(500).json({ 
+      error: 'Erro ao atualizar configuração',
+      message: error.message 
+    });
+  }
+});
+
 export default router;
