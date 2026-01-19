@@ -14,6 +14,7 @@ import tagRoutes from './routes/tags';
 import listRoutes from './routes/lists';
 import marketingRoutes from './routes/marketing';
 import dispatchRoutes from './routes/dispatches';
+import logsRoutes from './routes/logs';
 import { errorHandler } from './middleware/errorHandler';
 import { executeDevocionalDispatch } from './services/devocionalScheduler';
 
