@@ -278,12 +278,11 @@ async function processMessageReceived(instanceId: number, eventData: any) {
 
       // Se a mensagem foi recebida dentro de 48 horas após o envio do marketing, verificar intenção
       if (hoursSinceSent <= 48 && lastMarketing.dispatch_id) {
+        const marketingLog = `📢 RESPOSTA A MARKETING DETECTADA! Contato: ${contactId} (${fromNumber}) | Disparo: ${lastMarketing.dispatch_id} | Tempo: ${hoursSinceSent.toFixed(2)}h`;
         console.log(`\n   ========================================`);
-        console.log(`   📢 RESPOSTA A MARKETING DETECTADA!`);
+        console.log(`   ${marketingLog}`);
         console.log(`   ========================================`);
-        console.log(`   Contato: ${contactId} (${fromNumber})`);
-        console.log(`   Disparo: ${lastMarketing.dispatch_id}`);
-        console.log(`   Tempo desde envio: ${hoursSinceSent.toFixed(2)}h`);
+        addLog('info', marketingLog);
         
         // Extrair texto da mensagem em diferentes formatos
         const messageText = messageBody?.conversation || 
@@ -296,28 +295,40 @@ async function processMessageReceived(instanceId: number, eventData: any) {
                            eventData?.data?.message?.conversation ||
                            '';
         
-        console.log(`   💬 Texto extraído: "${messageText}"`);
-        console.log(`   📋 Estrutura completa:`, JSON.stringify({ messageBody, message, eventData: { data: eventData.data } }, null, 2));
+        const textLog = `💬 Texto extraído: "${messageText}"`;
+        console.log(`   ${textLog}`);
+        addLog('info', textLog);
         
         if (messageText.trim().length > 0) {
           // Detectar intenção positiva
-          console.log(`   🔍 Verificando intenção positiva...`);
+          const detectLog = `🔍 Verificando intenção positiva para: "${messageText}"`;
+          console.log(`   ${detectLog}`);
+          addLog('info', detectLog);
+          
           const detection = await detectPositiveIntent(
             messageText,
             contactId,
             lastMarketing.dispatch_id
           );
 
-          console.log(`   📊 Resultado da detecção:`, JSON.stringify({
+          const detectionResult = JSON.stringify({
             isPositive: detection.isPositive,
             confidence: detection.confidence,
             method: detection.method,
             detectedKeywords: detection.detectedKeywords,
-          }, null, 2));
+          }, null, 2);
+          
+          console.log(`   📊 Resultado da detecção:`, detectionResult);
+          addLog('info', `📊 Resultado da detecção: ${detectionResult}`);
 
           if (detection.isPositive && detection.confidence > 0.5) {
-            console.log(`   ✅ INTENÇÃO POSITIVA DETECTADA!`);
-            console.log(`   🚀 Chamando webhook do N8N...`);
+            const positiveLog = `✅ INTENÇÃO POSITIVA DETECTADA! Confiança: ${detection.confidence} | Palavras-chave: ${detection.detectedKeywords?.join(', ') || 'nenhuma'}`;
+            console.log(`   ${positiveLog}`);
+            addLog('success', positiveLog);
+            
+            const webhookLog = `🚀 Chamando webhook do N8N para contato ${contactId}...`;
+            console.log(`   ${webhookLog}`);
+            addLog('info', webhookLog);
             
             // Ativar IA externa
             await triggerAIInteraction(
@@ -326,10 +337,14 @@ async function processMessageReceived(instanceId: number, eventData: any) {
               messageText
             );
           } else {
-            console.log(`   ⚠️ Intenção não detectada ou confiança baixa (${detection.confidence})`);
+            const noIntentLog = `⚠️ Intenção não detectada ou confiança baixa (${detection.confidence})`;
+            console.log(`   ${noIntentLog}`);
+            addLog('warning', noIntentLog);
           }
         } else {
-          console.log(`   ⚠️ Mensagem vazia, não processando`);
+          const emptyLog = `⚠️ Mensagem vazia, não processando`;
+          console.log(`   ${emptyLog}`);
+          addLog('warning', emptyLog);
         }
         console.log(`   ========================================\n`);
       } else {
