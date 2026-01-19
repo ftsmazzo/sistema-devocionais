@@ -139,6 +139,37 @@ export async function initializeDatabase() {
       )
     `);
 
+    // Adicionar colunas de disparo se não existirem (migração)
+    await client.query(`
+      DO $$ 
+      BEGIN 
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                       WHERE table_name = 'messages' AND column_name = 'dispatch_id') THEN
+          ALTER TABLE messages ADD COLUMN dispatch_id INTEGER REFERENCES dispatches(id);
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                       WHERE table_name = 'messages' AND column_name = 'dispatch_type') THEN
+          ALTER TABLE messages ADD COLUMN dispatch_type VARCHAR(50);
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                       WHERE table_name = 'messages' AND column_name = 'contact_id') THEN
+          ALTER TABLE messages ADD COLUMN contact_id INTEGER REFERENCES contacts(id);
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                       WHERE table_name = 'messages' AND column_name = 'devocional_id') THEN
+          ALTER TABLE messages ADD COLUMN devocional_id INTEGER REFERENCES devocionais(id);
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                       WHERE table_name = 'messages' AND column_name = 'message_category') THEN
+          ALTER TABLE messages ADD COLUMN message_category VARCHAR(50);
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                       WHERE table_name = 'messages' AND column_name = 'tags') THEN
+          ALTER TABLE messages ADD COLUMN tags TEXT[];
+        END IF;
+      END $$;
+    `);
+
     // Índices para messages
     await client.query(`
       CREATE INDEX IF NOT EXISTS idx_messages_instance_id ON messages(instance_id);
@@ -148,6 +179,11 @@ export async function initializeDatabase() {
       CREATE INDEX IF NOT EXISTS idx_messages_from_me ON messages(from_me);
       CREATE INDEX IF NOT EXISTS idx_messages_instance_status ON messages(instance_id, status);
       CREATE INDEX IF NOT EXISTS idx_messages_message_id ON messages(message_id);
+      CREATE INDEX IF NOT EXISTS idx_messages_dispatch ON messages(dispatch_id);
+      CREATE INDEX IF NOT EXISTS idx_messages_dispatch_type ON messages(dispatch_type);
+      CREATE INDEX IF NOT EXISTS idx_messages_contact ON messages(contact_id);
+      CREATE INDEX IF NOT EXISTS idx_messages_devocional ON messages(devocional_id);
+      CREATE INDEX IF NOT EXISTS idx_messages_category ON messages(message_category);
     `);
 
     // Criar tabela de métricas
