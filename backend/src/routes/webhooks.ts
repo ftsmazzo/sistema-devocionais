@@ -2,6 +2,7 @@ import express from 'express';
 import axios from 'axios';
 import { pool } from '../database';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
+import { updateDevocionalScore } from '../services/devocionalScoring';
 
 const router = express.Router();
 
@@ -103,7 +104,7 @@ async function processWebhookEvent(instanceId: number, eventType: string, eventD
 
       case 'messages.update':
         // Status de mensagem atualizado (enviada, entregue, lida, etc.)
-        console.log(`   📨 Status de mensagem atualizado para instância ${instanceId}`);
+        await processMessageUpdate(instanceId, eventData);
         break;
 
       case 'logout.instance':
@@ -143,6 +144,162 @@ async function processWebhookEvent(instanceId: number, eventType: string, eventD
     }
   } catch (error: any) {
     console.error(`   ❌ Erro ao processar evento ${eventType}:`, error);
+  }
+}
+
+// Processar mensagem recebida
+async function processMessageReceived(instanceId: number, eventData: any) {
+  try {
+    const message = eventData.messages?.[0] || eventData.message;
+    if (!message || message.fromMe) {
+      return; // Ignorar mensagens enviadas por nós
+    }
+
+    const fromNumber = message.key?.remoteJid?.replace('@s.whatsapp.net', '') || 
+                       message.from?.replace('@s.whatsapp.net', '') ||
+                       message.remoteJid?.replace('@s.whatsapp.net', '');
+
+    if (!fromNumber) {
+      return;
+    }
+
+    // Buscar contato pelo número
+    const contactResult = await pool.query(
+      `SELECT id FROM contacts WHERE phone_number = $1`,
+      [fromNumber]
+    );
+
+    if (contactResult.rows.length === 0) {
+      return; // Contato não encontrado
+    }
+
+    const contactId = contactResult.rows[0].id;
+
+    // Buscar último devocional enviado para este contato
+    const lastDevocionalResult = await pool.query(
+      `SELECT id, dispatch_id, created_at
+       FROM messages
+       WHERE contact_id = $1 
+         AND dispatch_type = 'devocional'
+         AND from_me = true
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [contactId]
+    );
+
+    if (lastDevocionalResult.rows.length > 0) {
+      const lastDevocional = lastDevocionalResult.rows[0];
+      const lastSentTime = new Date(lastDevocional.created_at);
+      const now = new Date();
+      const hoursSinceSent = (now.getTime() - lastSentTime.getTime()) / (1000 * 60 * 60);
+
+      // Se a mensagem foi recebida dentro de 24 horas após o envio do devocional, considerar interação
+      if (hoursSinceSent <= 24) {
+        await updateDevocionalScore(contactId, 'interaction');
+        console.log(`   💬 Interação detectada com devocional para contato ${contactId}`);
+      }
+    }
+
+    // Atualizar última mensagem recebida do contato
+    await pool.query(
+      `UPDATE contacts
+       SET last_message_received_at = CURRENT_TIMESTAMP,
+           total_messages_received = COALESCE(total_messages_received, 0) + 1,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $1`,
+      [contactId]
+    );
+  } catch (error: any) {
+    console.error(`   ❌ Erro ao processar mensagem recebida:`, error);
+  }
+}
+
+// Processar atualização de status de mensagem
+async function processMessageUpdate(instanceId: number, eventData: any) {
+  try {
+    const messageId = eventData.key?.id || eventData.messageId || eventData.id;
+    const status = eventData.update?.status || eventData.status;
+
+    if (!messageId || !status) {
+      return;
+    }
+
+    // Buscar mensagem no banco
+    const messageResult = await pool.query(
+      `SELECT id, contact_id, dispatch_id, dispatch_type, devocional_id
+       FROM messages
+       WHERE message_id = $1 AND instance_id = $2`,
+      [messageId, instanceId]
+    );
+
+    if (messageResult.rows.length === 0) {
+      return; // Mensagem não encontrada ou não é do nosso sistema
+    }
+
+    const message = messageResult.rows[0];
+
+    // Atualizar status da mensagem
+    const statusUpdates: string[] = [];
+    const params: any[] = [];
+    let paramCount = 1;
+
+    switch (status) {
+      case 'DELIVERY_ACK':
+      case 'delivered':
+        statusUpdates.push(`status = 'delivered'`);
+        statusUpdates.push(`delivered_at = CURRENT_TIMESTAMP`);
+        if (message.contact_id && message.dispatch_type === 'devocional') {
+          await updateDevocionalScore(message.contact_id, 'delivered');
+        }
+        break;
+
+      case 'READ':
+      case 'read':
+        statusUpdates.push(`status = 'read'`);
+        statusUpdates.push(`read_at = CURRENT_TIMESTAMP`);
+        if (message.contact_id && message.dispatch_type === 'devocional') {
+          await updateDevocionalScore(message.contact_id, 'read');
+        }
+        break;
+
+      case 'ERROR':
+      case 'FAILED':
+      case 'failed':
+        statusUpdates.push(`status = 'failed'`);
+        statusUpdates.push(`failed_at = CURRENT_TIMESTAMP`);
+        if (message.contact_id && message.dispatch_type === 'devocional') {
+          await updateDevocionalScore(message.contact_id, 'failed');
+        }
+        break;
+    }
+
+    if (statusUpdates.length > 0) {
+      statusUpdates.push(`status_updated_at = CURRENT_TIMESTAMP`);
+      statusUpdates.push(`updated_at = CURRENT_TIMESTAMP`);
+      params.push(message.id);
+
+      await pool.query(
+        `UPDATE messages
+         SET ${statusUpdates.join(', ')}
+         WHERE id = $${paramCount}`,
+        params
+      );
+    }
+
+    // Se for mensagem recebida (resposta), verificar se é interação com devocional
+    if (eventData.message && !eventData.message.fromMe && message.contact_id && message.dispatch_type === 'devocional') {
+      // Verificar se a mensagem recebida é uma resposta ao devocional
+      const receivedMessage = eventData.message.body || eventData.message.message?.conversation || '';
+      
+      // Se houver texto na mensagem recebida, considerar como interação
+      if (receivedMessage.trim().length > 0) {
+        await updateDevocionalScore(message.contact_id, 'interaction');
+      }
+    }
+
+    console.log(`   ✅ Status de mensagem ${messageId} atualizado: ${status}`);
+  } catch (error: any) {
+    console.error(`   ❌ Erro ao processar atualização de mensagem:`, error);
   }
 }
 
