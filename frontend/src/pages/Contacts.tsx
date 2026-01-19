@@ -377,21 +377,26 @@ export default function Contacts() {
           </div>
           
           <div className="flex items-center gap-3">
-            <label className="cursor-pointer">
-              <input
-                type="file"
-                accept=".csv,.txt"
-                onChange={handleImport}
-                className="hidden"
-              />
-              <Button
-                variant="outline"
-                className="flex items-center gap-2"
-              >
-                <Upload className="h-4 w-4" />
-                Importar
-              </Button>
-            </label>
+            <input
+              type="file"
+              id="csv-import"
+              accept=".csv,.txt"
+              onChange={handleImport}
+              className="hidden"
+            />
+            <Button
+              variant="outline"
+              className="flex items-center gap-2 cursor-pointer"
+              onClick={() => {
+                const input = document.getElementById('csv-import') as HTMLInputElement;
+                if (input) {
+                  input.click();
+                }
+              }}
+            >
+              <Upload className="h-4 w-4" />
+              Importar CSV
+            </Button>
             <Button
               onClick={() => {
                 setEditingContact(null);
