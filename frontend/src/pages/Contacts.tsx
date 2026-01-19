@@ -56,6 +56,9 @@ export default function Contacts() {
   const [total, setTotal] = useState(0);
   const [limit] = useState(50);
   const [offset, setOffset] = useState(0);
+  const [viewMode, setViewMode] = useState<'cards' | 'list'>('cards');
+  const [selectedContacts, setSelectedContacts] = useState<number[]>([]);
+  const [showBulkTagModal, setShowBulkTagModal] = useState(false);
 
   useEffect(() => {
     loadContacts();
@@ -257,6 +260,8 @@ export default function Contacts() {
             columnMap['name'] = index;
           } else if (header.includes('email') || header.includes('e-mail')) {
             columnMap['email'] = index;
+          } else if (header.includes('tag')) {
+            columnMap['tags'] = index;
           }
         });
       }
@@ -293,11 +298,14 @@ export default function Contacts() {
           if (columnMap['email'] !== undefined) {
             contact.email = parts[columnMap['email']] || '';
           }
+          if (columnMap['tags'] !== undefined) {
+            contact.tags = parts[columnMap['tags']] || '';
+          }
           
           // Adicionar campos extras ao metadata
           const metadata: any = {};
           parts.forEach((part, index) => {
-            if (index !== columnMap['phone'] && index !== columnMap['name'] && index !== columnMap['email'] && part) {
+            if (index !== columnMap['phone'] && index !== columnMap['name'] && index !== columnMap['email'] && index !== columnMap['tags'] && part) {
               metadata[`col_${index}`] = part;
             }
           });
@@ -336,7 +344,11 @@ export default function Contacts() {
       const response = await api.post('/contacts/import', { contacts: contactsToImport });
       
       const errorsCount = response.data.results.errors?.length || 0;
+      const tagsApplied = response.data.results.tagsApplied || 0;
       let message = `${response.data.results.created} criados, ${response.data.results.updated} atualizados`;
+      if (tagsApplied > 0) {
+        message += `, ${tagsApplied} tags aplicadas`;
+      }
       if (errorsCount > 0) {
         message += `, ${errorsCount} erros`;
       }
@@ -397,6 +409,34 @@ export default function Contacts() {
               <Upload className="h-4 w-4" />
               Importar CSV
             </Button>
+            {selectedContacts.length > 0 && (
+              <Button
+                variant="outline"
+                className="flex items-center gap-2"
+                onClick={() => setShowBulkTagModal(true)}
+              >
+                <Tag className="h-4 w-4" />
+                Adicionar Tags ({selectedContacts.length})
+              </Button>
+            )}
+            <div className="flex items-center gap-1 border rounded-lg p-1">
+              <Button
+                variant={viewMode === 'cards' ? 'default' : 'ghost'}
+                size="sm"
+                onClick={() => setViewMode('cards')}
+                className="h-8 w-8 p-0"
+              >
+                <Grid3x3 className="h-4 w-4" />
+              </Button>
+              <Button
+                variant={viewMode === 'list' ? 'default' : 'ghost'}
+                size="sm"
+                onClick={() => setViewMode('list')}
+                className="h-8 w-8 p-0"
+              >
+                <ListIcon className="h-4 w-4" />
+              </Button>
+            </div>
             <Button
               onClick={() => {
                 setEditingContact(null);
@@ -488,9 +528,252 @@ export default function Contacts() {
         </Card>
       ) : (
         <>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
-            {contacts.map(contact => (
-              <Card key={contact.id} className="border-2 border-gray-200 hover:border-blue-300 hover:shadow-lg transition-all duration-300 rounded-2xl overflow-hidden bg-white shadow-md">
+          {selectedContacts.length > 0 && (
+            <Card className="mb-4 border-2 border-blue-200 bg-blue-50 rounded-xl">
+              <CardContent className="p-4 flex items-center justify-between">
+                <span className="text-sm font-medium text-blue-900">
+                  {selectedContacts.length} contato(s) selecionado(s)
+                </span>
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setShowBulkTagModal(true)}
+                  >
+                    <Tag className="h-4 w-4 mr-1" />
+                    Adicionar Tags
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setSelectedContacts([])}
+                  >
+                    <X className="h-4 w-4 mr-1" />
+                    Limpar
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+          {viewMode === 'cards' ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
+              {contacts.map(contact => (
+                <Card key={contact.id} className="border-2 border-gray-200 hover:border-blue-300 hover:shadow-lg transition-all duration-300 rounded-2xl overflow-hidden bg-white shadow-md">
+                  <CardHeader className="bg-gradient-to-br from-blue-50 to-cyan-50 border-b-2 border-gray-100 px-6 py-4">
+                    <div className="flex items-start justify-between">
+                      <div className="flex items-start gap-2 flex-1">
+                        <input
+                          type="checkbox"
+                          checked={selectedContacts.includes(contact.id)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedContacts([...selectedContacts, contact.id]);
+                            } else {
+                              setSelectedContacts(selectedContacts.filter(id => id !== contact.id));
+                            }
+                          }}
+                          className="mt-1 h-4 w-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
+                        />
+                        <div className="flex-1">
+                          <CardTitle className="text-lg font-bold text-gray-900 mb-1">
+                            {contact.name || 'Sem nome'}
+                          </CardTitle>
+                          <div className="flex items-center gap-2 text-sm text-gray-600">
+                            <Phone className="h-4 w-4" />
+                            <span>{contact.phone_number}</span>
+                          </div>
+                          {contact.email && (
+                            <div className="flex items-center gap-2 text-sm text-gray-600 mt-1">
+                              <Mail className="h-4 w-4" />
+                              <span>{contact.email}</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {contact.whatsapp_validated && (
+                          <div title="WhatsApp validado">
+                            <CheckCircle2 className="h-5 w-5 text-green-500" />
+                          </div>
+                        )}
+                        {contact.opt_out && (
+                          <div title="Opt-out">
+                            <XCircle className="h-5 w-5 text-red-500" />
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="p-6">
+                    <div className="space-y-4">
+                      {/* Tags */}
+                      <div>
+                        <div className="flex flex-wrap gap-2 mb-2">
+                          {contact.tags && contact.tags.length > 0 ? (
+                            contact.tags.map(tag => (
+                              <div key={tag.id} className="flex items-center gap-1">
+                                <span
+                                  className="px-2 py-1 rounded-lg text-xs font-medium text-white"
+                                  style={{ backgroundColor: tag.color }}
+                                >
+                                  {tag.name}
+                                </span>
+                                <button
+                                  onClick={() => handleRemoveTag(contact.id, tag.id)}
+                                  className="text-white hover:text-red-200 transition-colors"
+                                  title="Remover tag"
+                                >
+                                  <X className="h-3 w-3" />
+                                </button>
+                              </div>
+                            ))
+                          ) : (
+                            <span className="text-xs text-gray-400">Sem tags</span>
+                          )}
+                        </div>
+                        
+                        {/* Adicionar tag */}
+                        <div className="flex flex-wrap gap-1">
+                          {tags.filter(t => !contact.tags?.some(ct => ct.id === t.id)).slice(0, 3).map(tag => (
+                            <button
+                              key={tag.id}
+                              onClick={() => handleAddTag(contact.id, tag.id)}
+                              className="px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors"
+                              style={{ borderLeft: `3px solid ${tag.color}` }}
+                            >
+                              + {tag.name}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Ações */}
+                      <div className="flex items-center gap-2 pt-4 border-t border-gray-100">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleEdit(contact)}
+                          className="flex-1"
+                        >
+                          <Edit className="h-4 w-4 mr-1" />
+                          Editar
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleDelete(contact.id)}
+                          className="text-red-600 hover:text-red-700 hover:border-red-300"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          ) : (
+            <Card className="mb-6 border-2 border-gray-200 rounded-2xl shadow-md">
+              <CardContent className="p-0">
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead className="bg-gradient-to-br from-blue-50 to-cyan-50 border-b-2 border-gray-200">
+                      <tr>
+                        <th className="px-4 py-3 text-left">
+                          <input
+                            type="checkbox"
+                            checked={selectedContacts.length === contacts.length && contacts.length > 0}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setSelectedContacts(contacts.map(c => c.id));
+                              } else {
+                                setSelectedContacts([]);
+                              }
+                            }}
+                            className="h-4 w-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
+                          />
+                        </th>
+                        <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Nome</th>
+                        <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Telefone</th>
+                        <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Email</th>
+                        <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Tags</th>
+                        <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Ações</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-200">
+                      {contacts.map(contact => (
+                        <tr key={contact.id} className="hover:bg-gray-50 transition-colors">
+                          <td className="px-4 py-3">
+                            <input
+                              type="checkbox"
+                              checked={selectedContacts.includes(contact.id)}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setSelectedContacts([...selectedContacts, contact.id]);
+                                } else {
+                                  setSelectedContacts(selectedContacts.filter(id => id !== contact.id));
+                                }
+                              }}
+                              className="h-4 w-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
+                            />
+                          </td>
+                          <td className="px-4 py-3 text-sm font-medium text-gray-900">
+                            {contact.name || 'Sem nome'}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-600">{contact.phone_number}</td>
+                          <td className="px-4 py-3 text-sm text-gray-600">{contact.email || '-'}</td>
+                          <td className="px-4 py-3">
+                            <div className="flex flex-wrap gap-1">
+                              {contact.tags && contact.tags.length > 0 ? (
+                                contact.tags.map(tag => (
+                                  <div key={tag.id} className="flex items-center gap-1">
+                                    <span
+                                      className="px-2 py-0.5 rounded text-xs font-medium text-white"
+                                      style={{ backgroundColor: tag.color }}
+                                    >
+                                      {tag.name}
+                                    </span>
+                                    <button
+                                      onClick={() => handleRemoveTag(contact.id, tag.id)}
+                                      className="text-gray-400 hover:text-red-500 transition-colors"
+                                      title="Remover tag"
+                                    >
+                                      <X className="h-3 w-3" />
+                                    </button>
+                                  </div>
+                                ))
+                              ) : (
+                                <span className="text-xs text-gray-400">-</span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-2">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => handleEdit(contact)}
+                              >
+                                <Edit className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => handleDelete(contact.id)}
+                                className="text-red-600 hover:text-red-700 hover:border-red-300"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </CardContent>
+            </Card>
+          )}
                 <CardHeader className="bg-gradient-to-br from-blue-50 to-cyan-50 border-b-2 border-gray-100 px-6 py-4">
                   <div className="flex items-start justify-between">
                     <div className="flex-1">

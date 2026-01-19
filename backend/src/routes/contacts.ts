@@ -545,7 +545,7 @@ router.delete('/:id/tags/:tagId', async (req: AuthRequest, res) => {
  */
 router.post('/import', async (req: AuthRequest, res) => {
   try {
-    const { contacts, source = 'import' } = req.body;
+    const { contacts, source = 'import', tags: importTags = [] } = req.body;
 
     if (!Array.isArray(contacts) || contacts.length === 0) {
       return res.status(400).json({ error: 'contacts deve ser um array não vazio' });
@@ -554,8 +554,22 @@ router.post('/import', async (req: AuthRequest, res) => {
     const results = {
       created: 0,
       updated: 0,
-      errors: [] as any[]
+      errors: [] as any[],
+      tagsApplied: 0
     };
+
+    // Buscar tags por nome se fornecido
+    const tagMap = new Map<number, string>();
+    if (Array.isArray(importTags) && importTags.length > 0) {
+      const tagNames = importTags.map((t: string) => t.trim().toLowerCase());
+      const tagsResult = await pool.query(
+        `SELECT id, LOWER(name) as name FROM contact_tags WHERE LOWER(name) = ANY($1)`,
+        [tagNames]
+      );
+      tagsResult.rows.forEach((tag: any) => {
+        tagMap.set(tag.id, tag.name);
+      });
+    }
 
     for (const contactData of contacts) {
       try {
@@ -579,11 +593,19 @@ router.post('/import', async (req: AuthRequest, res) => {
                    contactData.email_address ||
                    '';
 
+        // Processar tags do contato (coluna "tags" ou "tag" no CSV)
+        let contactTags: string[] = [];
+        if (contactData.tags) {
+          contactTags = String(contactData.tags).split(',').map((t: string) => t.trim()).filter(Boolean);
+        } else if (contactData.tag) {
+          contactTags = [String(contactData.tag).trim()].filter(Boolean);
+        }
+
         // Coletar campos extras para metadata
         const metadata: any = {};
         const knownFields = ['phone_number', 'phone', 'telefone', 'celular', 'whatsapp', 'numero',
                             'name', 'nome', 'full_name', 'nome_completo',
-                            'email', 'e_mail', 'email_address'];
+                            'email', 'e_mail', 'email_address', 'tags', 'tag'];
         
         for (const [key, value] of Object.entries(contactData)) {
           const normalizedKey = key.toLowerCase().trim();
@@ -628,10 +650,39 @@ router.post('/import', async (req: AuthRequest, res) => {
           [normalizedPhone, name, email, source, JSON.stringify(metadata)]
         );
 
-        if (result.rows[0].inserted) {
+        const contactId = result.rows[0].id;
+        const isNew = result.rows[0].inserted;
+
+        if (isNew) {
           results.created++;
         } else {
           results.updated++;
+        }
+
+        // Aplicar tags do contato
+        const allTags = [...contactTags, ...importTags];
+        if (allTags.length > 0) {
+          // Buscar IDs das tags por nome
+          const tagNames = allTags.map(t => t.trim().toLowerCase());
+          const tagsResult = await pool.query(
+            `SELECT id FROM contact_tags WHERE LOWER(name) = ANY($1)`,
+            [tagNames]
+          );
+
+          // Associar tags ao contato
+          for (const tag of tagsResult.rows) {
+            try {
+              await pool.query(
+                `INSERT INTO contact_tag_relations (contact_id, tag_id)
+                 VALUES ($1, $2)
+                 ON CONFLICT (contact_id, tag_id) DO NOTHING`,
+                [contactId, tag.id]
+              );
+              results.tagsApplied++;
+            } catch (error) {
+              // Ignorar erros de tag
+            }
+          }
         }
       } catch (error: any) {
         results.errors.push({ contact: contactData, error: error.message });
