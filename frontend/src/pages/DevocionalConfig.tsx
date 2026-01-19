@@ -237,6 +237,50 @@ export default function DevocionalConfig() {
           </label>
         </div>
 
+        {/* Devocional do Dia */}
+        {todayDevocional ? (
+          <div className="bg-gradient-to-br from-green-50 to-emerald-50 border-2 border-green-200 rounded-xl p-6">
+            <div className="flex items-center gap-3 mb-4">
+              <BookOpen className="h-6 w-6 text-green-600" />
+              <div>
+                <h3 className="text-lg font-bold text-gray-900">Devocional de Hoje</h3>
+                <p className="text-sm text-gray-600">
+                  {new Date(todayDevocional.date).toLocaleDateString('pt-BR', {
+                    weekday: 'long',
+                    year: 'numeric',
+                    month: 'long',
+                    day: 'numeric'
+                  })}
+                </p>
+              </div>
+            </div>
+            <div className="bg-white rounded-lg p-4 border border-green-200">
+              <h4 className="font-semibold text-gray-900 mb-2">{todayDevocional.title}</h4>
+              {todayDevocional.versiculo_principal && (
+                <div className="mb-2 text-sm text-gray-700">
+                  <span className="font-medium">Versículo Principal:</span>{' '}
+                  {todayDevocional.versiculo_principal.referencia}
+                </div>
+              )}
+              <div className="text-sm text-gray-600 line-clamp-3">
+                {todayDevocional.text.substring(0, 200)}...
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="bg-yellow-50 border-2 border-yellow-200 rounded-xl p-4">
+            <div className="flex items-start gap-3">
+              <AlertCircle className="h-5 w-5 text-yellow-600 mt-0.5 flex-shrink-0" />
+              <div className="text-sm text-yellow-900">
+                <p className="font-semibold">⚠️ Nenhum devocional encontrado para hoje</p>
+                <p className="text-yellow-800 mt-1">
+                  O N8N deve criar o devocional às 3:30 da manhã. Verifique se o workflow está funcionando.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Informações Importantes */}
         <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-4">
           <div className="flex items-start gap-3">
