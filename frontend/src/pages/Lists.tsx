@@ -579,6 +579,36 @@ export default function Lists() {
                           })}
                         />
                       </div>
+                      <div className="flex items-center justify-between">
+                        <label className="text-sm font-medium text-gray-700">
+                          Apenas WhatsApp validado
+                        </label>
+                        <Switch
+                          checked={formData.filter_config.whatsapp_validated === true}
+                          onCheckedChange={(checked) => setFormData({
+                            ...formData,
+                            filter_config: {
+                              ...formData.filter_config,
+                              whatsapp_validated: checked ? true : undefined
+                            }
+                          })}
+                        />
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <label className="text-sm font-medium text-gray-700">
+                          Excluir opt-out
+                        </label>
+                        <Switch
+                          checked={formData.filter_config.opt_out === false}
+                          onCheckedChange={(checked) => setFormData({
+                            ...formData,
+                            filter_config: {
+                              ...formData.filter_config,
+                              opt_out: checked ? false : undefined
+                            }
+                          })}
+                        />
+                      </div>
 
                       <div className="flex items-center justify-between">
                         <label className="text-sm font-medium text-gray-700">
