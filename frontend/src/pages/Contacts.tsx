@@ -410,7 +410,7 @@ export default function Contacts() {
               type="file"
               id="csv-import"
               accept=".csv,.txt"
-              onChange={handleImport}
+              onChange={handleImportFile}
               className="hidden"
             />
             <Button
