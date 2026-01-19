@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { pool } from '../database';
+import { addLog } from '../routes/logs';
 
 /**
  * Serviço para detectar intenção positiva em mensagens recebidas
