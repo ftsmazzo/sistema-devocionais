@@ -379,7 +379,9 @@ export async function executeDevocionalDispatch(): Promise<void> {
       } catch (error: any) {
         console.error(`   ❌ Erro ao enviar para ${contact.phone_number}:`, error.message);
         failedCount++;
-        await updateDevocionalScore(contact.id, 'failed');
+        // Só contar como falha se a mensagem foi realmente enviada mas falhou
+        // Se deu erro antes de enviar, não contar como falha de devocional
+        // (updateDevocionalScore só deve ser chamado quando a mensagem foi enviada mas não entregue/lida)
       }
     }
 
