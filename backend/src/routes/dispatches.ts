@@ -441,4 +441,385 @@ router.delete('/:id', async (req: AuthRequest, res) => {
   }
 });
 
+/**
+ * Processar disparo manual de devocional
+ */
+async function processDevocionalDispatchManually(dispatchId: number): Promise<void> {
+  try {
+    console.log(`📖 Processando disparo manual de devocional ID ${dispatchId}`);
+
+    // Buscar dados do disparo
+    const dispatchResult = await pool.query(
+      `SELECT d.*, l.total_contacts
+       FROM dispatches d
+       LEFT JOIN contact_lists l ON d.list_id = l.id
+       WHERE d.id = $1`,
+      [dispatchId]
+    );
+
+    if (dispatchResult.rows.length === 0) {
+      throw new Error(`Disparo ${dispatchId} não encontrado`);
+    }
+
+    const dispatch = dispatchResult.rows[0];
+
+    // Buscar devocional
+    if (!dispatch.devocional_id) {
+      // Se não tem devocional_id, buscar do dia
+      const today = new Date().toISOString().split('T')[0];
+      const devocionalResult = await pool.query(
+        `SELECT id, title, text, versiculo_principal, versiculo_apoio, metadata
+         FROM devocionais
+         WHERE date = $1`,
+        [today]
+      );
+
+      if (devocionalResult.rows.length === 0) {
+        await pool.query(
+          `UPDATE dispatches SET status = 'failed', completed_at = CURRENT_TIMESTAMP WHERE id = $1`,
+          [dispatchId]
+        );
+        console.log(`   ⚠️ Nenhum devocional encontrado para hoje`);
+        return;
+      }
+
+      // Atualizar dispatch com devocional_id
+      await pool.query(
+        `UPDATE dispatches SET devocional_id = $1 WHERE id = $2`,
+        [devocionalResult.rows[0].id, dispatchId]
+      );
+      dispatch.devocional_id = devocionalResult.rows[0].id;
+    }
+
+    const devocionalResult = await pool.query(
+      `SELECT id, title, text, versiculo_principal, versiculo_apoio, metadata
+       FROM devocionais
+       WHERE id = $1`,
+      [dispatch.devocional_id]
+    );
+
+    if (devocionalResult.rows.length === 0) {
+      await pool.query(
+        `UPDATE dispatches SET status = 'failed', completed_at = CURRENT_TIMESTAMP WHERE id = $1`,
+        [dispatchId]
+      );
+      console.log(`   ⚠️ Devocional ${dispatch.devocional_id} não encontrado`);
+      return;
+    }
+
+    const devocional = devocionalResult.rows[0];
+    const devocionalId = devocional.id;
+
+    // Buscar lista de contatos
+    if (!dispatch.list_id) {
+      await pool.query(
+        `UPDATE dispatches SET status = 'failed', completed_at = CURRENT_TIMESTAMP WHERE id = $1`,
+        [dispatchId]
+      );
+      console.log(`   ⚠️ Nenhuma lista configurada`);
+      return;
+    }
+
+    const listResult = await pool.query(
+      `SELECT * FROM contact_lists WHERE id = $1`,
+      [dispatch.list_id]
+    );
+
+    if (listResult.rows.length === 0) {
+      await pool.query(
+        `UPDATE dispatches SET status = 'failed', completed_at = CURRENT_TIMESTAMP WHERE id = $1`,
+        [dispatchId]
+      );
+      console.log(`   ⚠️ Lista ${dispatch.list_id} não encontrada`);
+      return;
+    }
+
+    const list = listResult.rows[0];
+
+    // Buscar contatos da lista (usar mesma lógica do scheduler automático)
+    let contactsQuery = '';
+    let contactsParams: any[] = [];
+
+    if (list.list_type === 'static') {
+      contactsQuery = `
+        SELECT DISTINCT c.id, c.phone_number, c.name
+        FROM contacts c
+        JOIN contact_list_items cli ON c.id = cli.contact_id
+        WHERE cli.list_id = $1
+          AND c.whatsapp_validated = true
+          AND c.opt_in = true
+          AND c.opt_out = false
+      `;
+      contactsParams = [list.id];
+    } else {
+      const filterConfig = typeof list.filter_config === 'string' 
+        ? JSON.parse(list.filter_config) 
+        : (list.filter_config || {});
+      
+      let whereConditions = ['c.whatsapp_validated = true', 'c.opt_in = true', 'c.opt_out = false'];
+      let joinClauses = '';
+      let paramCount = 1;
+
+      if (filterConfig.tags && Array.isArray(filterConfig.tags) && filterConfig.tags.length > 0) {
+        joinClauses += ` JOIN contact_tag_relations ctr${paramCount} ON c.id = ctr${paramCount}.contact_id`;
+        whereConditions.push(`ctr${paramCount}.tag_id = ANY($${paramCount}::int[])`);
+        contactsParams.push(filterConfig.tags);
+        paramCount++;
+      }
+
+      if (filterConfig.exclude_tags && Array.isArray(filterConfig.exclude_tags) && filterConfig.exclude_tags.length > 0) {
+        whereConditions.push(`NOT EXISTS (
+          SELECT 1 FROM contact_tag_relations ctr_ex
+          JOIN contact_tags t_ex ON ctr_ex.tag_id = t_ex.id
+          WHERE ctr_ex.contact_id = c.id
+            AND t_ex.id = ANY($${paramCount}::int[])
+        )`);
+        contactsParams.push(filterConfig.exclude_tags);
+        paramCount++;
+      }
+
+      if (list.list_type === 'hybrid') {
+        const hasDynamicFilters = (filterConfig.tags && Array.isArray(filterConfig.tags) && filterConfig.tags.length > 0) ||
+                                  (filterConfig.exclude_tags && Array.isArray(filterConfig.exclude_tags) && filterConfig.exclude_tags.length > 0);
+        
+        if (!hasDynamicFilters) {
+          contactsQuery = `
+            SELECT DISTINCT c.id, c.phone_number, c.name
+            FROM contacts c
+            JOIN contact_list_items cli ON c.id = cli.contact_id
+            WHERE cli.list_id = $1
+              AND c.whatsapp_validated = true
+              AND c.opt_in = true
+              AND c.opt_out = false
+          `;
+          contactsParams = [list.id];
+        } else {
+          contactsQuery = `
+            SELECT DISTINCT c.id, c.phone_number, c.name
+            FROM contacts c
+            WHERE (
+              c.id IN (
+                SELECT contact_id FROM contact_list_items WHERE list_id = $${paramCount}
+              )
+              OR c.id IN (
+                SELECT DISTINCT c2.id
+                FROM contacts c2
+                ${joinClauses}
+                WHERE ${whereConditions.join(' AND ')}
+              )
+            )
+          `;
+          contactsParams.push(list.id);
+        }
+      } else {
+        contactsQuery = `
+          SELECT DISTINCT c.id, c.phone_number, c.name
+          FROM contacts c
+          ${joinClauses}
+          WHERE ${whereConditions.join(' AND ')}
+        `;
+      }
+    }
+
+    const contactsResult = await pool.query(contactsQuery, contactsParams);
+    const contacts = contactsResult.rows;
+
+    console.log(`   📋 ${contacts.length} contatos encontrados na lista`);
+
+    if (contacts.length === 0) {
+      await pool.query(
+        `UPDATE dispatches SET status = 'completed', contacts_processed = 0, completed_at = CURRENT_TIMESTAMP WHERE id = $1`,
+        [dispatchId]
+      );
+      return;
+    }
+
+    // Filtrar contatos que podem receber devocional
+    const eligibleContacts = [];
+    for (const contact of contacts) {
+      const canReceive = await canReceiveDevocional(contact.id);
+      if (canReceive) {
+        eligibleContacts.push(contact);
+      }
+    }
+
+    console.log(`   ✅ ${eligibleContacts.length} contatos elegíveis após verificação de pontuação`);
+
+    if (eligibleContacts.length === 0) {
+      await pool.query(
+        `UPDATE dispatches SET status = 'completed', contacts_processed = 0, completed_at = CURRENT_TIMESTAMP WHERE id = $1`,
+        [dispatchId]
+      );
+      return;
+    }
+
+    // Buscar instâncias
+    let instances: any[] = [];
+
+    if (dispatch.instance_ids && Array.isArray(dispatch.instance_ids) && dispatch.instance_ids.length > 0) {
+      const instancesResult = await pool.query(
+        `SELECT id, instance_name, api_url, api_key, phone_number
+         FROM instances
+         WHERE id = ANY($1::int[]) AND status = 'connected'`,
+        [dispatch.instance_ids]
+      );
+      instances = instancesResult.rows;
+    } else {
+      const instancesResult = await pool.query(
+        `SELECT id, instance_name, api_url, api_key, phone_number
+         FROM instances
+         WHERE status = 'connected'
+         ORDER BY last_message_sent_at ASC NULLS FIRST`
+      );
+      instances = instancesResult.rows;
+    }
+
+    if (instances.length === 0) {
+      await pool.query(
+        `UPDATE dispatches SET status = 'failed', completed_at = CURRENT_TIMESTAMP WHERE id = $1`,
+        [dispatchId]
+      );
+      console.log('   ⚠️ Nenhuma instância conectada');
+      return;
+    }
+
+    console.log(`   📱 ${instances.length} instância(s) disponível(is)`);
+
+    // Buscar configuração para timezone
+    const configResult = await pool.query(
+      `SELECT timezone FROM devocional_config ORDER BY id DESC LIMIT 1`
+    );
+    const timezone = configResult.rows[0]?.timezone || 'America/Sao_Paulo';
+
+    // Processar envio para cada contato
+    let successCount = 0;
+    let failedCount = 0;
+    let instanceIndex = 0;
+
+    for (const contact of eligibleContacts) {
+      try {
+        const instance = instances[instanceIndex % instances.length];
+        instanceIndex++;
+
+        const formattedDevocional = formatDevocionalMessage(devocional);
+        const personalizedMessage = personalizeDevocionalMessage(
+          formattedDevocional,
+          contact.name,
+          timezone
+        );
+
+        const blindageResult = await applyBlindage({
+          to: contact.phone_number,
+          message: personalizedMessage,
+          instanceId: instance.id,
+          messageType: 'devocional',
+        });
+
+        if (!blindageResult.canSend) {
+          console.log(`   ⛔ Contato ${contact.phone_number} bloqueado pela blindagem: ${blindageResult.reason}`);
+          failedCount++;
+          await updateDevocionalScore(contact.id, 'failed');
+          continue;
+        }
+
+        if (blindageResult.delay && blindageResult.delay > 0) {
+          await new Promise(resolve => setTimeout(resolve, blindageResult.delay));
+        }
+
+        const sendMessageUrl = `${instance.api_url}/message/sendText/${instance.instance_name}`;
+        const response = await axios.post(
+          sendMessageUrl,
+          {
+            number: contact.phone_number,
+            text: personalizedMessage,
+          },
+          {
+            headers: {
+              'apikey': instance.api_key,
+              'Content-Type': 'application/json',
+            },
+          }
+        );
+
+        const messageResult = await pool.query(
+          `INSERT INTO messages (
+            instance_id, message_id, remote_jid, from_me,
+            message_type, message_body, timestamp, status,
+            dispatch_id, dispatch_type, contact_id, devocional_id
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+          RETURNING id`,
+          [
+            instance.id,
+            response.data?.key?.id || `temp-${Date.now()}`,
+            `${contact.phone_number}@s.whatsapp.net`,
+            true,
+            'text',
+            personalizedMessage,
+            new Date(),
+            'sent',
+            dispatchId,
+            'devocional',
+            contact.id,
+            devocionalId,
+          ]
+        );
+
+        await updateDevocionalScore(contact.id, 'sent');
+
+        await pool.query(
+          `INSERT INTO dispatch_contacts (
+            dispatch_id, instance_id, contact_number, contact_name,
+            message_sent_id, status, sent_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)`,
+          [
+            dispatchId,
+            instance.id,
+            contact.phone_number,
+            contact.name,
+            messageResult.rows[0].id,
+            'sent',
+          ]
+        );
+
+        successCount++;
+        console.log(`   ✅ Enviado para ${contact.phone_number} (${successCount}/${eligibleContacts.length})`);
+
+        await pool.query(
+          `UPDATE instances
+           SET last_message_sent_at = CURRENT_TIMESTAMP,
+               last_activity_at = CURRENT_TIMESTAMP
+           WHERE id = $1`,
+          [instance.id]
+        );
+
+      } catch (error: any) {
+        console.error(`   ❌ Erro ao enviar para ${contact.phone_number}:`, error.message);
+        failedCount++;
+        await updateDevocionalScore(contact.id, 'failed');
+      }
+    }
+
+    await pool.query(
+      `UPDATE dispatches
+       SET status = 'completed',
+           contacts_processed = $1,
+           contacts_success = $2,
+           contacts_failed = $3,
+           completed_at = CURRENT_TIMESTAMP
+       WHERE id = $4`,
+      [eligibleContacts.length, successCount, failedCount, dispatchId]
+    );
+
+    console.log(`   ✅ Disparo manual concluído: ${successCount} sucesso, ${failedCount} falhas`);
+
+  } catch (error: any) {
+    console.error(`❌ Erro ao processar disparo manual de devocional:`, error);
+    
+    await pool.query(
+      `UPDATE dispatches SET status = 'failed', completed_at = CURRENT_TIMESTAMP WHERE id = $1`,
+      [dispatchId]
+    );
+  }
+}
+
 export default router;
