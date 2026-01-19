@@ -68,8 +68,21 @@ export async function executeDevocionalDispatch(): Promise<void> {
 
     console.log(`   ✅ Horário de disparo detectado: ${config.dispatch_hour}:${config.dispatch_minute}`);
 
-    // Buscar devocional do dia
+    // Verificar se já existe um disparo para hoje (evitar duplicação)
     const today = new Date().toISOString().split('T')[0];
+    const existingDispatch = await pool.query(
+      `SELECT id FROM dispatches 
+       WHERE dispatch_type = 'devocional' 
+         AND devocional_id IN (SELECT id FROM devocionais WHERE date = $1)
+         AND status IN ('pending', 'running')
+         AND DATE(created_at) = $1`,
+      [today]
+    );
+
+    if (existingDispatch.rows.length > 0) {
+      console.log(`   ⚠️ Já existe um disparo de devocional para hoje (ID: ${existingDispatch.rows[0].id})`);
+      return;
+    }
     const devocionalResult = await pool.query(
       `SELECT id, title, text, versiculo_principal, versiculo_apoio, metadata
        FROM devocionais
@@ -249,7 +262,7 @@ export async function executeDevocionalDispatch(): Promise<void> {
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP)
       RETURNING id`,
       [
-        `Devocional ${today}`,
+        `Devocional ${new Date().toLocaleDateString('pt-BR', { timeZone: timezone })}`,
         formatDevocionalMessage(devocional),
         'devocional',
         config.list_id,

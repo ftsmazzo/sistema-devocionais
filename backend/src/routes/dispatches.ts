@@ -21,15 +21,19 @@ router.get('/', async (req: AuthRequest, res) => {
   try {
     const { type, status, limit = 50, offset = 0 } = req.query;
 
+    // Buscar disparos sem duplicação
     let query = `
-      SELECT 
+      SELECT DISTINCT ON (d.id)
         d.*,
         l.name as list_name,
         l.list_type as list_type,
-        COUNT(DISTINCT dc.id) as contacts_processed_count
+        COALESCE((
+          SELECT COUNT(DISTINCT dc.id) 
+          FROM dispatch_contacts dc 
+          WHERE dc.dispatch_id = d.id
+        ), 0) as contacts_processed_count
       FROM dispatches d
       LEFT JOIN contact_lists l ON d.list_id = l.id
-      LEFT JOIN dispatch_contacts dc ON d.id = dc.dispatch_id
       WHERE 1=1
     `;
     const params: any[] = [];
@@ -47,14 +51,28 @@ router.get('/', async (req: AuthRequest, res) => {
       paramCount++;
     }
 
-    query += ` GROUP BY d.id, l.name, l.list_type ORDER BY d.created_at DESC LIMIT $${paramCount} OFFSET $${paramCount + 1}`;
+    query += ` ORDER BY d.id, d.created_at DESC LIMIT $${paramCount} OFFSET $${paramCount + 1}`;
     params.push(parseInt(limit as string), parseInt(offset as string));
 
     const result = await pool.query(query, params);
 
+    // Buscar total correto (sem GROUP BY que pode causar duplicação)
+    const countQuery = `
+      SELECT COUNT(DISTINCT d.id) as total
+      FROM dispatches d
+      WHERE 1=1
+      ${type ? `AND d.dispatch_type = $1` : ''}
+      ${status ? `AND d.status = ${type ? '$2' : '$1'}` : ''}
+    `;
+    const countParams: any[] = [];
+    if (type) countParams.push(type);
+    if (status) countParams.push(status);
+    const countResult = await pool.query(countQuery, countParams);
+    const total = parseInt(countResult.rows[0]?.total || '0');
+
     res.json({ 
       dispatches: result.rows,
-      total: result.rows.length
+      total
     });
   } catch (error: any) {
     console.error('❌ Erro ao listar disparos:', error);

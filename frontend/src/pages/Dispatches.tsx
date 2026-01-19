@@ -16,6 +16,8 @@ import {
   X,
   AlertCircle,
 } from 'lucide-react';
+import { format } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
 
 interface Dispatch {
   id: number;
