@@ -556,6 +556,7 @@ export async function initializeDatabase() {
 
     await client.query(`
       CREATE INDEX IF NOT EXISTS idx_contacts_devocional_score ON contacts(devocional_score);
+    `);
 
     // Migração: Resetar falhas consecutivas e pontuação para contatos que nunca receberam devocional
     // e que foram bloqueados incorretamente
@@ -581,7 +582,6 @@ export async function initializeDatabase() {
         AND contact_id IN (
           SELECT id FROM contacts WHERE last_devocional_sent_at IS NULL
         )
-    `);
     `);
 
     // Criar tabela de tags
