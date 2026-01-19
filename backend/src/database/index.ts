@@ -489,6 +489,37 @@ export async function initializeDatabase() {
       CREATE INDEX IF NOT EXISTS idx_contacts_source ON contacts(source);
     `);
 
+    // Adicionar colunas de pontuação de devocional se não existirem
+    await client.query(`
+      DO $$ 
+      BEGIN 
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                       WHERE table_name = 'contacts' AND column_name = 'devocional_score') THEN
+          ALTER TABLE contacts ADD COLUMN devocional_score INTEGER DEFAULT 0;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                       WHERE table_name = 'contacts' AND column_name = 'last_devocional_sent_at') THEN
+          ALTER TABLE contacts ADD COLUMN last_devocional_sent_at TIMESTAMP;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                       WHERE table_name = 'contacts' AND column_name = 'last_devocional_read_at') THEN
+          ALTER TABLE contacts ADD COLUMN last_devocional_read_at TIMESTAMP;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                       WHERE table_name = 'contacts' AND column_name = 'last_devocional_interaction_at') THEN
+          ALTER TABLE contacts ADD COLUMN last_devocional_interaction_at TIMESTAMP;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                       WHERE table_name = 'contacts' AND column_name = 'consecutive_devocional_failures') THEN
+          ALTER TABLE contacts ADD COLUMN consecutive_devocional_failures INTEGER DEFAULT 0;
+        END IF;
+      END $$;
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_contacts_devocional_score ON contacts(devocional_score);
+    `);
+
     // Criar tabela de tags
     await client.query(`
       CREATE TABLE IF NOT EXISTS contact_tags (
