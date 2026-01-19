@@ -289,7 +289,7 @@ export default function Dispatches() {
           <Button
             onClick={() => {
               setShowCreateModal(true);
-              setFormData({ name: '', list_id: '', message_template: '', instance_ids: [] });
+              setFormData({ name: '', list_id: '', message_template: '', instance_ids: [], media_url: '', media_type: undefined });
             }}
             className="bg-gradient-to-r from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600"
           >
