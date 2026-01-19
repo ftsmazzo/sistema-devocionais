@@ -143,7 +143,7 @@ export default function Dispatches() {
 
       setToast({ message: 'Disparo criado com sucesso!', type: 'success' });
       setShowCreateModal(false);
-      setFormData({ name: '', list_id: '', message_template: '', instance_ids: [] });
+      setFormData({ name: '', list_id: '', message_template: '', instance_ids: [], media_url: '', media_type: undefined });
       await loadDispatches();
     } catch (error: any) {
       console.error('Erro ao criar disparo:', error);
