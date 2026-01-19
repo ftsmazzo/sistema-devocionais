@@ -660,6 +660,48 @@ router.post('/import', async (req: AuthRequest, res) => {
           results.updated++;
         }
 
+        // Validar WhatsApp automaticamente (em background, não bloqueia o import)
+        setImmediate(async () => {
+          try {
+            const { isValid } = await checkWhatsAppNumber(normalizedPhone);
+            
+            // Buscar tag "bloqueado"
+            const blockedTagResult = await pool.query(
+              `SELECT id FROM contact_tags WHERE LOWER(name) = 'bloqueado' LIMIT 1`
+            );
+            const blockedTagId = blockedTagResult.rows[0]?.id;
+
+            // Atualizar contato
+            await pool.query(
+              `UPDATE contacts 
+               SET whatsapp_validated = $1, 
+                   whatsapp_validated_at = ${isValid ? 'CURRENT_TIMESTAMP' : 'NULL'},
+                   updated_at = CURRENT_TIMESTAMP
+               WHERE id = $2`,
+              [isValid, contactId]
+            );
+
+            // Tagar como bloqueado se não tiver WhatsApp
+            if (!isValid && blockedTagId) {
+              await pool.query(
+                `INSERT INTO contact_tag_relations (contact_id, tag_id)
+                 VALUES ($1, $2)
+                 ON CONFLICT (contact_id, tag_id) DO NOTHING`,
+                [contactId, blockedTagId]
+              );
+            } else if (isValid && blockedTagId) {
+              // Remover tag bloqueado se tiver WhatsApp
+              await pool.query(
+                `DELETE FROM contact_tag_relations 
+                 WHERE contact_id = $1 AND tag_id = $2`,
+                [contactId, blockedTagId]
+              );
+            }
+          } catch (error) {
+            console.error(`Erro ao validar WhatsApp do contato ${contactId}:`, error);
+          }
+        });
+
         // Aplicar tags do contato
         const allTags = [...contactTags, ...importTags];
         if (allTags.length > 0) {
