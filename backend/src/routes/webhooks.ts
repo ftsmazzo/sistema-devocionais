@@ -360,11 +360,13 @@ async function processMessageReceived(instanceId: number, eventData: any) {
         const messageText = messageBody?.conversation || 
                            messageBody?.extendedTextMessage?.text ||
                            messageBody?.imageMessage?.caption ||
+                           messageBody?.message?.conversation ||
                            message?.body || 
                            message?.message?.conversation || 
                            message?.message?.extendedTextMessage?.text ||
                            message?.data?.message?.conversation ||
                            eventData?.data?.message?.conversation ||
+                           eventData?.data?.message?.extendedTextMessage?.text ||
                            '';
         
         const textLog = `💬 Texto extraído: "${messageText}"`;
