@@ -11,6 +11,7 @@ import devocionalRoutes from './routes/devocional';
 import contactRoutes from './routes/contacts';
 import tagRoutes from './routes/tags';
 import listRoutes from './routes/lists';
+import marketingRoutes from './routes/marketing';
 import { errorHandler } from './middleware/errorHandler';
 
 dotenv.config();
@@ -76,6 +77,7 @@ app.use('/api/devocional', devocionalRoutes);
 app.use('/api/contacts', contactRoutes);
 app.use('/api/tags', tagRoutes);
 app.use('/api/lists', listRoutes);
+app.use('/api/marketing', marketingRoutes);
 
 // Error handler
 app.use(errorHandler);
