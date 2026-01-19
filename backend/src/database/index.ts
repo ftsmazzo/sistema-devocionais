@@ -419,6 +419,34 @@ export async function initializeDatabase() {
       )
     `);
 
+    // Criar tabela de configuração do devocional
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS devocional_config (
+        id SERIAL PRIMARY KEY,
+        list_id INTEGER REFERENCES contact_lists(id),
+        dispatch_hour INTEGER DEFAULT 6,
+        dispatch_minute INTEGER DEFAULT 0,
+        timezone VARCHAR(50) DEFAULT 'America/Sao_Paulo',
+        notification_phone VARCHAR(20),
+        enabled BOOLEAN DEFAULT TRUE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // Criar tabela de configuração de IA para marketing
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS marketing_ai_config (
+        id SERIAL PRIMARY KEY,
+        ai_webhook_url TEXT,
+        positive_keywords TEXT[] DEFAULT ARRAY['interesse', 'quero', 'me chama', 'gostei', 'tenho interesse', 'quero saber mais', 'me passa', 'informação', 'detalhes', 'contato', 'ligar', 'ligue'],
+        sentiment_analysis_enabled BOOLEAN DEFAULT TRUE,
+        enabled BOOLEAN DEFAULT TRUE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
     await client.query(`
       CREATE INDEX IF NOT EXISTS idx_devocionais_date ON devocionais(date);
       CREATE INDEX IF NOT EXISTS idx_devocionais_created_at ON devocionais(created_at);
