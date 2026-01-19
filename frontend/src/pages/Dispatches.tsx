@@ -48,6 +48,7 @@ export default function Dispatches() {
   const [instances, setInstances] = useState<any[]>([]);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [startingDispatch, setStartingDispatch] = useState<number | null>(null);
+  const [creatingDispatch, setCreatingDispatch] = useState(false);
 
   useEffect(() => {
     loadDispatches();
@@ -90,6 +91,11 @@ export default function Dispatches() {
   };
 
   const handleCreate = async () => {
+    // Prevenir duplo clique
+    if (creatingDispatch) {
+      return;
+    }
+
     try {
       if (!formData.name) {
         setToast({ message: 'Nome é obrigatório', type: 'error' });
@@ -105,6 +111,8 @@ export default function Dispatches() {
         setToast({ message: 'Mensagem é obrigatória para marketing', type: 'error' });
         return;
       }
+
+      setCreatingDispatch(true);
 
       const payload: any = {
         name: formData.name,
@@ -128,6 +136,8 @@ export default function Dispatches() {
         message: error.response?.data?.error || 'Erro ao criar disparo',
         type: 'error'
       });
+    } finally {
+      setCreatingDispatch(false);
     }
   };
 
