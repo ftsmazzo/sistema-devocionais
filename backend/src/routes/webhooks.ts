@@ -152,22 +152,49 @@ async function processMessageReceived(instanceId: number, eventData: any) {
   try {
     console.log(`   🔍 Processando mensagem recebida...`);
     
-    // Tentar diferentes formatos de mensagem
-    const message = eventData.data?.messages?.[0] || 
-                    eventData.messages?.[0] || 
-                    eventData.message ||
-                    eventData.data?.message;
+    // Tentar diferentes formatos de mensagem (Evolution API pode enviar em diferentes estruturas)
+    let message = null;
+    let messageKey = null;
+    let messageBody = null;
+    
+    // Formato 1: data.messages[0]
+    if (eventData.data?.messages?.[0]) {
+      message = eventData.data.messages[0];
+      messageKey = message.key;
+      messageBody = message.message;
+    }
+    // Formato 2: messages[0]
+    else if (eventData.messages?.[0]) {
+      message = eventData.messages[0];
+      messageKey = message.key;
+      messageBody = message.message;
+    }
+    // Formato 3: data.message (formato direto)
+    else if (eventData.data?.message) {
+      message = eventData.data;
+      messageKey = eventData.data.key;
+      messageBody = eventData.data.message;
+    }
+    // Formato 4: message (formato direto)
+    else if (eventData.message) {
+      message = eventData;
+      messageKey = eventData.message.key;
+      messageBody = eventData.message;
+    }
     
     if (!message) {
       console.log(`   ⚠️ Mensagem não encontrada no formato esperado`);
+      console.log(`   📋 Estrutura recebida:`, JSON.stringify(Object.keys(eventData), null, 2));
       return;
     }
     
-    console.log(`   📝 Mensagem encontrada:`, JSON.stringify(message, null, 2));
+    console.log(`   📝 Mensagem encontrada`);
+    console.log(`   🔑 Key:`, JSON.stringify(messageKey, null, 2));
+    console.log(`   💬 Body:`, JSON.stringify(messageBody, null, 2));
     
     // Verificar se é mensagem enviada por nós
-    const fromMe = message.fromMe || 
-                   message.key?.fromMe || 
+    const fromMe = messageKey?.fromMe || 
+                   message.fromMe || 
                    message.data?.key?.fromMe ||
                    false;
     
@@ -177,11 +204,11 @@ async function processMessageReceived(instanceId: number, eventData: any) {
     }
 
     // Extrair número do remetente
-    const fromNumber = message.key?.remoteJid?.replace('@s.whatsapp.net', '') || 
+    const fromNumber = messageKey?.remoteJid?.replace('@s.whatsapp.net', '') || 
                        message.from?.replace('@s.whatsapp.net', '') ||
                        message.remoteJid?.replace('@s.whatsapp.net', '') ||
-                       message.data?.key?.remoteJid?.replace('@s.whatsapp.net', '') ||
-                       eventData.sender?.replace('@s.whatsapp.net', '');
+                       eventData.sender?.replace('@s.whatsapp.net', '') ||
+                       eventData.data?.key?.remoteJid?.replace('@s.whatsapp.net', '');
 
     if (!fromNumber) {
       console.log(`   ⚠️ Número do remetente não encontrado`);
@@ -253,7 +280,9 @@ async function processMessageReceived(instanceId: number, eventData: any) {
         console.log(`   📢 Resposta a disparo de marketing detectada (${hoursSinceSent.toFixed(2)}h desde o envio)`);
         
         // Extrair texto da mensagem em diferentes formatos
-        const messageText = message.body || 
+        const messageText = messageBody?.conversation || 
+                           messageBody?.extendedTextMessage?.text ||
+                           message.body || 
                            message.message?.conversation || 
                            message.message?.extendedTextMessage?.text ||
                            message.data?.message?.conversation ||
