@@ -702,4 +702,70 @@ router.post('/import', async (req: AuthRequest, res) => {
   }
 });
 
+/**
+ * Atualizar contatos em massa
+ * POST /api/contacts/bulk-update
+ */
+router.post('/bulk-update', async (req: AuthRequest, res) => {
+  try {
+    const { contact_ids, whatsapp_validated, opt_in, opt_out } = req.body;
+
+    if (!Array.isArray(contact_ids) || contact_ids.length === 0) {
+      return res.status(400).json({ error: 'contact_ids deve ser um array não vazio' });
+    }
+
+    const updates: string[] = [];
+    const params: any[] = [];
+    let paramCount = 1;
+
+    if (whatsapp_validated !== undefined) {
+      updates.push(`whatsapp_validated = $${paramCount}`);
+      updates.push(`whatsapp_validated_at = ${whatsapp_validated ? 'CURRENT_TIMESTAMP' : 'NULL'}`);
+      params.push(whatsapp_validated);
+      paramCount++;
+    }
+
+    if (opt_in !== undefined) {
+      updates.push(`opt_in = $${paramCount}`);
+      updates.push(`opt_in_at = ${opt_in ? 'CURRENT_TIMESTAMP' : 'NULL'}`);
+      params.push(opt_in);
+      paramCount++;
+    }
+
+    if (opt_out !== undefined) {
+      updates.push(`opt_out = $${paramCount}`);
+      updates.push(`opt_out_at = ${opt_out ? 'CURRENT_TIMESTAMP' : 'NULL'}`);
+      params.push(opt_out);
+      paramCount++;
+    }
+
+    if (updates.length === 0) {
+      return res.status(400).json({ error: 'Nenhum campo para atualizar' });
+    }
+
+    updates.push(`updated_at = CURRENT_TIMESTAMP`);
+    params.push(contact_ids);
+
+    const result = await pool.query(
+      `UPDATE contacts 
+       SET ${updates.join(', ')}
+       WHERE id = ANY($${paramCount}::int[])
+       RETURNING id`,
+      params
+    );
+
+    res.json({ 
+      success: true,
+      updated: result.rows.length,
+      message: `${result.rows.length} contato(s) atualizado(s) com sucesso`
+    });
+  } catch (error: any) {
+    console.error('❌ Erro ao atualizar contatos em massa:', error);
+    res.status(500).json({ 
+      error: 'Erro ao atualizar contatos',
+      message: error.message 
+    });
+  }
+});
+
 export default router;
