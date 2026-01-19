@@ -724,14 +724,74 @@ router.get('/:id/preview', async (req: AuthRequest, res) => {
     } else {
       // Lista híbrida - combina estática + dinâmica
       const staticQuery = `
-        SELECT DISTINCT c.*
+        SELECT DISTINCT 
+          c.id,
+          c.phone_number,
+          c.name,
+          c.email,
+          c.whatsapp_validated,
+          c.opt_in,
+          c.opt_out,
+          c.created_at
         FROM contacts c
         JOIN contact_list_items li ON c.id = li.contact_id
         WHERE li.list_id = $1
       `;
       
       const dynamicParams: any[] = [id];
-      const dynamicQuery = buildDynamicListQuery(filterConfig, 2, dynamicParams);
+      // Construir query dinâmica sem tags agregadas para preview
+      let dynamicQueryBase = `
+        SELECT DISTINCT
+          c.id,
+          c.phone_number,
+          c.name,
+          c.email,
+          c.whatsapp_validated,
+          c.opt_in,
+          c.opt_out,
+          c.created_at
+        FROM contacts c
+        WHERE 1=1
+      `;
+      let dynamicParamCount = 2;
+      
+      if (filterConfig.tags && Array.isArray(filterConfig.tags) && filterConfig.tags.length > 0) {
+        dynamicQueryBase += ` AND EXISTS (
+          SELECT 1 FROM contact_tag_relations ctr2 
+          WHERE ctr2.contact_id = c.id 
+          AND ctr2.tag_id = ANY($${dynamicParamCount}::int[])
+        )`;
+        dynamicParams.push(filterConfig.tags);
+        dynamicParamCount++;
+      }
+      
+      if (filterConfig.exclude_tags && Array.isArray(filterConfig.exclude_tags) && filterConfig.exclude_tags.length > 0) {
+        dynamicQueryBase += ` AND NOT EXISTS (
+          SELECT 1 FROM contact_tag_relations ctr3 
+          WHERE ctr3.contact_id = c.id 
+          AND ctr3.tag_id = ANY($${dynamicParamCount}::int[])
+        )`;
+        dynamicParams.push(filterConfig.exclude_tags);
+        dynamicParamCount++;
+      }
+      
+      if (filterConfig.opt_in !== undefined) {
+        dynamicQueryBase += ` AND c.opt_in = $${dynamicParamCount}`;
+        dynamicParams.push(filterConfig.opt_in);
+        dynamicParamCount++;
+      }
+      
+      if (filterConfig.opt_out !== undefined) {
+        dynamicQueryBase += ` AND c.opt_out = $${dynamicParamCount}`;
+        dynamicParams.push(filterConfig.opt_out);
+        dynamicParamCount++;
+      }
+      
+      if (filterConfig.whatsapp_validated !== undefined) {
+        dynamicQueryBase += ` AND c.whatsapp_validated = $${dynamicParamCount}`;
+        dynamicParams.push(filterConfig.whatsapp_validated);
+        dynamicParamCount++;
+      }
       
       query = `
         SELECT DISTINCT
@@ -746,13 +806,13 @@ router.get('/:id/preview', async (req: AuthRequest, res) => {
         FROM (
           ${staticQuery}
           UNION
-          ${dynamicQuery.replace(/SELECT DISTINCT[\s\S]*?FROM/, 'SELECT DISTINCT c.id, c.phone_number, c.name, c.email, c.whatsapp_validated, c.opt_in, c.opt_out, c.created_at FROM').replace(/GROUP BY[\s\S]*$/, '')}
+          ${dynamicQueryBase}
         ) c
         ORDER BY c.created_at DESC
-        LIMIT $${dynamicParams.length + 1}
+        LIMIT $${dynamicParamCount}
       `;
+      dynamicParams.push(limit);
       params.push(...dynamicParams);
-      params.push(limit);
     }
     
     const result = await pool.query(query, params);

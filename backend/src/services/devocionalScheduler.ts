@@ -122,7 +122,9 @@ export async function executeDevocionalDispatch(): Promise<void> {
       contactsParams = [list.id];
     } else {
       // Lista dinâmica ou híbrida - usar filter_config
-      const filterConfig = list.filter_config || {};
+      const filterConfig = typeof list.filter_config === 'string' 
+        ? JSON.parse(list.filter_config) 
+        : (list.filter_config || {});
       
       let whereConditions = ['c.whatsapp_validated = true', 'c.opt_in = true', 'c.opt_out = false'];
       let joinClauses = '';
@@ -148,15 +150,12 @@ export async function executeDevocionalDispatch(): Promise<void> {
         paramCount++;
       }
 
-      contactsQuery = `
-        SELECT DISTINCT c.id, c.phone_number, c.name
-        FROM contacts c
-        ${joinClauses}
-        WHERE ${whereConditions.join(' AND ')}
-      `;
-
       // Se for híbrida, também incluir contatos da lista estática
       if (list.list_type === 'hybrid') {
+        // Construir query dinâmica separada para a parte dinâmica
+        let dynamicWhere = whereConditions.join(' AND ');
+        let dynamicJoin = joinClauses;
+        
         contactsQuery = `
           SELECT DISTINCT c.id, c.phone_number, c.name
           FROM contacts c
@@ -164,12 +163,25 @@ export async function executeDevocionalDispatch(): Promise<void> {
             c.id IN (
               SELECT contact_id FROM contact_list_items WHERE list_id = $${paramCount}
             )
-            OR (
-              ${whereConditions.join(' AND ')}
-            )
+            ${dynamicWhere !== 'c.whatsapp_validated = true AND c.opt_in = true AND c.opt_out = false' 
+              ? `OR (c.id IN (
+                  SELECT DISTINCT c2.id
+                  FROM contacts c2
+                  ${dynamicJoin}
+                  WHERE ${dynamicWhere}
+                ))`
+              : ''}
           )
         `;
         contactsParams.push(list.id);
+      } else {
+        // Lista dinâmica pura
+        contactsQuery = `
+          SELECT DISTINCT c.id, c.phone_number, c.name
+          FROM contacts c
+          ${joinClauses}
+          WHERE ${whereConditions.join(' AND ')}
+        `;
       }
     }
 
