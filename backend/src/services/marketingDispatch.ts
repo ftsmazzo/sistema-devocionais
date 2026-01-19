@@ -182,13 +182,18 @@ export async function processMarketingDispatch(params: MarketingDispatchParams):
         // Aplicar delay
         if (blindageResult.delay && blindageResult.delay > 0) {
           const delaySeconds = Math.ceil(blindageResult.delay / 1000);
-          console.log(`      ⏳ Aguardando delay de ${delaySeconds}s (${blindageResult.delay}ms)...`);
           const delayStartTime = Date.now();
+          console.log(`      ⏳ [DELAY] Aguardando ${delaySeconds}s (${blindageResult.delay}ms) antes de enviar...`);
           await new Promise(resolve => setTimeout(resolve, blindageResult.delay));
           const actualDelay = Date.now() - delayStartTime;
-          console.log(`      ✅ Delay concluído (esperado: ${blindageResult.delay}ms, real: ${actualDelay}ms)`);
+          const delayDiff = actualDelay - blindageResult.delay;
+          if (Math.abs(delayDiff) > 100) {
+            console.log(`      ⚠️ [DELAY] ATENÇÃO: Esperado ${blindageResult.delay}ms, mas levou ${actualDelay}ms (diferença: ${delayDiff > 0 ? '+' : ''}${delayDiff}ms)`);
+          } else {
+            console.log(`      ✅ [DELAY] Concluído corretamente: ${actualDelay}ms`);
+          }
         } else {
-          console.log(`      ⚠️ Nenhum delay configurado`);
+          console.log(`      ⚠️ [DELAY] NENHUM DELAY CONFIGURADO - Enviando imediatamente!`);
         }
 
         // Enviar mensagem
