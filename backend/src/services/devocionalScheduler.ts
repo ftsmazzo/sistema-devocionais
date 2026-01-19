@@ -103,21 +103,6 @@ export async function executeDevocionalDispatch(): Promise<void> {
       console.log(`   ⚠️ Já existe um disparo de devocional para hoje (ID: ${existing.id}, status: ${existing.status})`);
       return;
     }
-    const devocionalResult = await pool.query(
-      `SELECT id, title, text, versiculo_principal, versiculo_apoio, metadata
-       FROM devocionais
-       WHERE date = $1`,
-      [today]
-    );
-
-    if (devocionalResult.rows.length === 0) {
-      console.log(`   ⚠️ Nenhum devocional encontrado para hoje (${today})`);
-      await sendNotification(config.notification_phone, `⚠️ Disparo de devocional cancelado: nenhum devocional encontrado para hoje.`);
-      return;
-    }
-
-    const devocional = devocionalResult.rows[0];
-    const devocionalId = devocional.id;
 
     // Buscar lista de contatos
     if (!config.list_id) {
