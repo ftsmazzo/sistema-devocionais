@@ -339,6 +339,124 @@ export async function initializeDatabase() {
       CREATE INDEX IF NOT EXISTS idx_devocionais_created_at ON devocionais(created_at);
     `);
 
+    // ============================================
+    // SISTEMA DE CONTATOS, TAGS E LISTAS
+    // ============================================
+
+    // Criar tabela de contatos
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS contacts (
+        id SERIAL PRIMARY KEY,
+        phone_number VARCHAR(20) UNIQUE NOT NULL,
+        name VARCHAR(255),
+        email VARCHAR(255),
+        whatsapp_validated BOOLEAN DEFAULT FALSE,
+        whatsapp_validated_at TIMESTAMP,
+        opt_in BOOLEAN DEFAULT TRUE,
+        opt_in_at TIMESTAMP,
+        opt_out BOOLEAN DEFAULT FALSE,
+        opt_out_at TIMESTAMP,
+        opt_out_reason TEXT,
+        source VARCHAR(100) DEFAULT 'manual',
+        metadata JSONB DEFAULT '{}',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        last_message_sent_at TIMESTAMP,
+        last_message_received_at TIMESTAMP,
+        total_messages_sent INTEGER DEFAULT 0,
+        total_messages_received INTEGER DEFAULT 0
+      )
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_contacts_phone ON contacts(phone_number);
+      CREATE INDEX IF NOT EXISTS idx_contacts_opt_in ON contacts(opt_in);
+      CREATE INDEX IF NOT EXISTS idx_contacts_opt_out ON contacts(opt_out);
+      CREATE INDEX IF NOT EXISTS idx_contacts_whatsapp_validated ON contacts(whatsapp_validated);
+      CREATE INDEX IF NOT EXISTS idx_contacts_source ON contacts(source);
+    `);
+
+    // Criar tabela de tags
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS contact_tags (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(100) UNIQUE NOT NULL,
+        color VARCHAR(7) DEFAULT '#6366f1',
+        description TEXT,
+        category VARCHAR(50) DEFAULT 'custom',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // Criar tags padrão se não existirem
+    const defaultTags = [
+      { name: 'devocional', color: '#10b981', category: 'devocional', description: 'Contatos que recebem devocionais' },
+      { name: 'marketing', color: '#3b82f6', category: 'marketing', description: 'Contatos para campanhas de marketing' },
+      { name: 'vip', color: '#f59e0b', category: 'vip', description: 'Contatos VIP' },
+      { name: 'teste', color: '#8b5cf6', category: 'teste', description: 'Contatos para testes' },
+      { name: 'bloqueado', color: '#ef4444', category: 'bloqueado', description: 'Contatos bloqueados/opt-out' }
+    ];
+
+    for (const tag of defaultTags) {
+      await client.query(
+        `INSERT INTO contact_tags (name, color, category, description)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (name) DO NOTHING`,
+        [tag.name, tag.color, tag.category, tag.description]
+      );
+    }
+
+    // Criar tabela de relação contato-tag
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS contact_tag_relations (
+        contact_id INTEGER REFERENCES contacts(id) ON DELETE CASCADE,
+        tag_id INTEGER REFERENCES contact_tags(id) ON DELETE CASCADE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (contact_id, tag_id)
+      )
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_contact_tag_contact ON contact_tag_relations(contact_id);
+      CREATE INDEX IF NOT EXISTS idx_contact_tag_tag ON contact_tag_relations(tag_id);
+    `);
+
+    // Criar tabela de listas
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS contact_lists (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        description TEXT,
+        list_type VARCHAR(50) NOT NULL DEFAULT 'static',
+        filter_config JSONB DEFAULT '{}',
+        total_contacts INTEGER DEFAULT 0,
+        created_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_contact_lists_type ON contact_lists(list_type);
+      CREATE INDEX IF NOT EXISTS idx_contact_lists_created_by ON contact_lists(created_by);
+    `);
+
+    // Criar tabela de itens de lista
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS contact_list_items (
+        id SERIAL PRIMARY KEY,
+        list_id INTEGER REFERENCES contact_lists(id) ON DELETE CASCADE,
+        contact_id INTEGER REFERENCES contacts(id) ON DELETE CASCADE,
+        added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(list_id, contact_id)
+      )
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_list_items_list ON contact_list_items(list_id);
+      CREATE INDEX IF NOT EXISTS idx_list_items_contact ON contact_list_items(contact_id);
+    `);
+
     // Melhorar tabela webhook_events
     await client.query(`
       ALTER TABLE webhook_events

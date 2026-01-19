@@ -8,6 +8,9 @@ import webhookRoutes from './routes/webhooks';
 import messageRoutes from './routes/messages';
 import blindageRoutes from './routes/blindage';
 import devocionalRoutes from './routes/devocional';
+import contactRoutes from './routes/contacts';
+import tagRoutes from './routes/tags';
+import listRoutes from './routes/lists';
 import { errorHandler } from './middleware/errorHandler';
 
 dotenv.config();
@@ -70,6 +73,9 @@ app.use('/api/webhooks', webhookRoutes);
 app.use('/api/messages', messageRoutes);
 app.use('/api/blindage', blindageRoutes);
 app.use('/api/devocional', devocionalRoutes);
+app.use('/api/contacts', contactRoutes);
+app.use('/api/tags', tagRoutes);
+app.use('/api/lists', listRoutes);
 
 // Error handler
 app.use(errorHandler);
