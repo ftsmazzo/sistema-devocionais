@@ -276,8 +276,11 @@ async function processMessageReceived(instanceId: number, eventData: any) {
         console.log(`   ${createdLog}`);
         addLog('info', createdLog);
         
-        // Usar o contato recém-criado
-        contactResult = { rows: [{ id: newContactId }] };
+        // Usar o contato recém-criado - buscar novamente para ter o formato correto
+        contactResult = await pool.query(
+          `SELECT id FROM contacts WHERE id = $1`,
+          [newContactId]
+        );
       } catch (createError: any) {
         const createErrorLog = `❌ Erro ao criar contato automaticamente: ${createError.message}`;
         console.error(`   ${createErrorLog}`);
