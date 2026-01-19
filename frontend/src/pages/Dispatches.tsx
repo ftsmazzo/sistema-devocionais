@@ -331,6 +331,20 @@ export default function Dispatches() {
                             <span>{dispatch.list_name}</span>
                           </>
                         )}
+                        {dispatch.created_at && (
+                          <>
+                            <span>•</span>
+                            <span>
+                              {new Date(dispatch.created_at).toLocaleString('pt-BR', {
+                                day: '2-digit',
+                                month: '2-digit',
+                                year: 'numeric',
+                                hour: '2-digit',
+                                minute: '2-digit'
+                              })}
+                            </span>
+                          </>
+                        )}
                       </div>
                     </div>
                   </div>
