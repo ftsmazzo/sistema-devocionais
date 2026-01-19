@@ -62,6 +62,16 @@ export default function Dispatches() {
   const [startingDispatch, setStartingDispatch] = useState<number | null>(null);
   const [creatingDispatch, setCreatingDispatch] = useState(false);
 
+  // Auto-hide toast após 5 segundos
+  useEffect(() => {
+    if (toast) {
+      const timer = setTimeout(() => {
+        setToast(null);
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [toast]);
+
   useEffect(() => {
     loadDispatches();
     loadLists();
