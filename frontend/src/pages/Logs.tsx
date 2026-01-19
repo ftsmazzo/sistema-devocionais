@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import api from '@/lib/api';
-import { RefreshCw, Trash2, Filter, X } from 'lucide-react';
+import { RefreshCw, Trash2, Filter } from 'lucide-react';
 import Button from '@/components/ui/Button';
 
 interface Log {
@@ -16,7 +16,7 @@ export default function Logs() {
   const [filterLevel, setFilterLevel] = useState<string>('');
   const [searchTerm, setSearchTerm] = useState('');
   const logsEndRef = useRef<HTMLDivElement>(null);
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     loadLogs();

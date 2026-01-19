@@ -10,6 +10,7 @@ import Lists from './pages/Lists';
 import Dispatches from './pages/Dispatches';
 import DevocionalConfig from './pages/DevocionalConfig';
 import MarketingConfig from './pages/MarketingConfig';
+import Logs from './pages/Logs';
 import Layout from './components/Layout';
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {

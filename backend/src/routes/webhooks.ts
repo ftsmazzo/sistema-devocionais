@@ -30,17 +30,17 @@ router.post('/evolution/:instanceName', async (req, res) => {
     }
 
     const instanceId = instanceResult.rows[0].id;
-    const eventType = eventData.event || eventData.type || 'unknown';
+    const eventTypeStr = eventData.event || eventData.type || 'unknown';
 
     // Salvar evento no banco
     await pool.query(
       `INSERT INTO webhook_events (instance_id, event_type, event_data)
        VALUES ($1, $2, $3)`,
-      [instanceId, eventType, JSON.stringify(eventData)]
+      [instanceId, eventTypeStr, JSON.stringify(eventData)]
     );
 
     // Processar eventos específicos
-    await processWebhookEvent(instanceId, eventType, eventData);
+    await processWebhookEvent(instanceId, eventTypeStr, eventData);
 
     res.status(200).json({ success: true, message: 'Webhook recebido' });
   } catch (error: any) {
