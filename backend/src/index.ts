@@ -12,6 +12,7 @@ import contactRoutes from './routes/contacts';
 import tagRoutes from './routes/tags';
 import listRoutes from './routes/lists';
 import marketingRoutes from './routes/marketing';
+import dispatchRoutes from './routes/dispatches';
 import { errorHandler } from './middleware/errorHandler';
 
 dotenv.config();
@@ -78,6 +79,7 @@ app.use('/api/contacts', contactRoutes);
 app.use('/api/tags', tagRoutes);
 app.use('/api/lists', listRoutes);
 app.use('/api/marketing', marketingRoutes);
+app.use('/api/dispatches', dispatchRoutes);
 
 // Error handler
 app.use(errorHandler);
