@@ -1022,6 +1022,99 @@ export default function Contacts() {
         </div>
       )}
 
+      {/* Modal Adicionar Tags em Massa */}
+      {showBulkTagModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <Card className="w-full max-w-md border-2 border-gray-200 rounded-2xl shadow-xl">
+            <CardHeader className="bg-gradient-to-br from-blue-50 to-cyan-50 border-b-2 border-gray-100 px-6 py-4">
+              <CardTitle className="text-xl font-bold text-gray-900">
+                Adicionar Tags ({selectedContacts.length} contatos)
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-6">
+              <div className="space-y-4">
+                <div className="flex flex-wrap gap-2 p-3 border-2 border-gray-200 rounded-xl min-h-[100px] bg-gray-50">
+                  {tags.length === 0 ? (
+                    <span className="text-sm text-gray-400">Nenhuma tag disponível. Crie tags na página de Tags.</span>
+                  ) : (
+                    tags.map(tag => {
+                      const isSelected = contactTags.includes(tag.id);
+                      return (
+                        <button
+                          key={tag.id}
+                          type="button"
+                          onClick={() => {
+                            if (isSelected) {
+                              setContactTags(contactTags.filter(id => id !== tag.id));
+                            } else {
+                              setContactTags([...contactTags, tag.id]);
+                            }
+                          }}
+                          className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                            isSelected
+                              ? 'text-white shadow-md'
+                              : 'bg-white text-gray-700 hover:bg-gray-100 border border-gray-300'
+                          }`}
+                          style={isSelected ? { backgroundColor: tag.color } : {}}
+                        >
+                          {isSelected ? '✓ ' : ''}{tag.name}
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
+                <div className="flex items-center gap-3 pt-4 border-t border-gray-100">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      setShowBulkTagModal(false);
+                      setContactTags([]);
+                    }}
+                    className="flex-1"
+                  >
+                    Cancelar
+                  </Button>
+                  <Button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        for (const contactId of selectedContacts) {
+                          for (const tagId of contactTags) {
+                            try {
+                              await api.post(`/contacts/${contactId}/tags`, { tag_id: tagId });
+                            } catch (error) {
+                              // Ignorar erros de tag duplicada
+                            }
+                          }
+                        }
+                        setToast({
+                          message: `Tags adicionadas a ${selectedContacts.length} contato(s)!`,
+                          type: 'success'
+                        });
+                        setShowBulkTagModal(false);
+                        setContactTags([]);
+                        setSelectedContacts([]);
+                        loadContacts();
+                      } catch (error: any) {
+                        setToast({
+                          message: error.response?.data?.error || 'Erro ao adicionar tags',
+                          type: 'error'
+                        });
+                      }
+                    }}
+                    className="flex-1 bg-gradient-to-r from-blue-500 to-cyan-500 hover:from-blue-600 hover:to-cyan-600 text-white"
+                    disabled={contactTags.length === 0}
+                  >
+                    Adicionar
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
       {toast && (
         <Toast
           message={toast.message}
