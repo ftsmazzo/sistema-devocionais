@@ -713,73 +713,58 @@ router.get('/:id/preview', async (req: AuthRequest, res) => {
 
     // Lista dinâmica ou híbrida - usar filtros
     const params: any[] = [];
-    let query = buildDynamicListQuery(filterConfig, 1, params);
+    let query: string;
     
-    // Para híbrida, também incluir contatos estáticos
-    if (list.list_type === 'hybrid') {
+    if (list.list_type === 'dynamic') {
+      // Lista dinâmica - usar buildDynamicListQuery
+      query = buildDynamicListQuery(filterConfig, 1, params);
+      // Adicionar GROUP BY e LIMIT
+      query += ` GROUP BY c.id ORDER BY c.created_at DESC LIMIT $${params.length + 1}`;
+      params.push(limit);
+    } else {
+      // Lista híbrida - combina estática + dinâmica
+      const staticQuery = `
+        SELECT DISTINCT c.*
+        FROM contacts c
+        JOIN contact_list_items li ON c.id = li.contact_id
+        WHERE li.list_id = $1
+      `;
+      
+      const dynamicParams: any[] = [id];
+      const dynamicQuery = buildDynamicListQuery(filterConfig, 2, dynamicParams);
+      
       query = `
         SELECT DISTINCT
-          c.*,
-          COALESCE(
-            json_agg(
-              json_build_object(
-                'id', t.id,
-                'name', t.name,
-                'color', t.color,
-                'category', t.category
-              )
-            ) FILTER (WHERE t.id IS NOT NULL),
-            '[]'::json
-          ) as tags
+          c.id,
+          c.phone_number,
+          c.name,
+          c.email,
+          c.whatsapp_validated,
+          c.opt_in,
+          c.opt_out,
+          c.created_at
         FROM (
-          SELECT DISTINCT c.* FROM contacts c
-          JOIN contact_list_items li ON c.id = li.contact_id
-          WHERE li.list_id = $${params.length + 1}
+          ${staticQuery}
           UNION
-          SELECT DISTINCT c.* FROM contacts c
-          LEFT JOIN contact_tag_relations ctr ON c.id = ctr.contact_id
-          LEFT JOIN contact_tags t ON ctr.tag_id = t.id
-          WHERE 1=1
-          ${filterConfig.tags && Array.isArray(filterConfig.tags) && filterConfig.tags.length > 0 
-            ? `AND EXISTS (SELECT 1 FROM contact_tag_relations ctr2 WHERE ctr2.contact_id = c.id AND ctr2.tag_id = ANY($${params.length + 2}::int[]))`
-            : ''}
-          ${filterConfig.exclude_tags && Array.isArray(filterConfig.exclude_tags) && filterConfig.exclude_tags.length > 0
-            ? `AND NOT EXISTS (SELECT 1 FROM contact_tag_relations ctr3 WHERE ctr3.contact_id = c.id AND ctr3.tag_id = ANY($${params.length + 3}::int[]))`
-            : ''}
-          ${filterConfig.opt_in !== undefined ? `AND c.opt_in = $${params.length + 4}` : ''}
-          ${filterConfig.opt_out !== undefined ? `AND c.opt_out = $${params.length + 5}` : ''}
-          ${filterConfig.whatsapp_validated !== undefined ? `AND c.whatsapp_validated = $${params.length + 6}` : ''}
+          ${dynamicQuery.replace(/SELECT DISTINCT[\s\S]*?FROM/, 'SELECT DISTINCT c.id, c.phone_number, c.name, c.email, c.whatsapp_validated, c.opt_in, c.opt_out, c.created_at FROM').replace(/GROUP BY[\s\S]*$/, '')}
         ) c
-        LEFT JOIN contact_tag_relations ctr ON c.id = ctr.contact_id
-        LEFT JOIN contact_tags t ON ctr.tag_id = t.id
+        ORDER BY c.created_at DESC
+        LIMIT $${dynamicParams.length + 1}
       `;
-      params.push(id);
-      if (filterConfig.tags && Array.isArray(filterConfig.tags) && filterConfig.tags.length > 0) {
-        params.push(filterConfig.tags);
-      }
-      if (filterConfig.exclude_tags && Array.isArray(filterConfig.exclude_tags) && filterConfig.exclude_tags.length > 0) {
-        params.push(filterConfig.exclude_tags);
-      }
-      if (filterConfig.opt_in !== undefined) params.push(filterConfig.opt_in);
-      if (filterConfig.opt_out !== undefined) params.push(filterConfig.opt_out);
-      if (filterConfig.whatsapp_validated !== undefined) params.push(filterConfig.whatsapp_validated);
+      params.push(...dynamicParams);
+      params.push(limit);
     }
-
-    const finalQuery = `${query} GROUP BY c.id, c.phone_number, c.name, c.email, c.whatsapp_validated, c.whatsapp_validated_at,
-      c.opt_in, c.opt_in_at, c.opt_out, c.opt_out_at, c.opt_out_reason, c.source, c.metadata,
-      c.created_at, c.updated_at, c.last_message_sent_at, c.last_message_received_at,
-      c.total_messages_sent, c.total_messages_received
-      ORDER BY c.created_at DESC LIMIT $${params.length + 1}`;
     
-    params.push(limit);
-    
-    const result = await pool.query(finalQuery, params);
+    const result = await pool.query(query, params);
 
-    const contacts = result.rows.map(row => ({
+    const contacts = result.rows.map((row: any) => ({
       id: row.id,
       phone_number: row.phone_number,
       name: row.name,
-      email: row.email
+      email: row.email,
+      whatsapp_validated: row.whatsapp_validated,
+      opt_in: row.opt_in,
+      opt_out: row.opt_out
     }));
 
     res.json({ contacts, preview: true });
