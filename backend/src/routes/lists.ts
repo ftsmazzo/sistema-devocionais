@@ -169,6 +169,37 @@ router.post('/', async (req: AuthRequest, res) => {
     const list = result.rows[0];
     list.filter_config = typeof list.filter_config === 'string' ? JSON.parse(list.filter_config) : list.filter_config;
 
+    // Calcular total_contacts para listas dinâmicas/híbridas
+    if (list_type === 'dynamic' || list_type === 'hybrid') {
+      const params: any[] = [];
+      const countQuery = buildDynamicListQuery(filter_config, 1, params);
+      const countResult = await pool.query(
+        countQuery.replace(/SELECT DISTINCT.*FROM/, 'SELECT COUNT(DISTINCT c.id) as total FROM').replace(/GROUP BY.*/, ''),
+        params
+      );
+      const dynamicCount = parseInt(countResult.rows[0]?.total || '0');
+      
+      if (list_type === 'hybrid') {
+        // Híbrida: contagem será atualizada quando contatos forem adicionados
+        await pool.query(
+          `UPDATE contact_lists SET total_contacts = $1 WHERE id = $2`,
+          [dynamicCount, list.id]
+        );
+      } else {
+        await pool.query(
+          `UPDATE contact_lists SET total_contacts = $1 WHERE id = $2`,
+          [dynamicCount, list.id]
+        );
+      }
+      
+      // Buscar lista atualizada
+      const updatedResult = await pool.query(
+        `SELECT * FROM contact_lists WHERE id = $1`,
+        [list.id]
+      );
+      list.total_contacts = parseInt(updatedResult.rows[0]?.total_contacts || '0');
+    }
+
     res.json({ list });
   } catch (error: any) {
     console.error('❌ Erro ao criar lista:', error);
@@ -641,12 +672,85 @@ router.get('/:id/preview', async (req: AuthRequest, res) => {
       ? JSON.parse(list.filter_config) 
       : list.filter_config;
 
-    // Usar mesma lógica de busca de contatos, mas limitado
-    const query = buildDynamicListQuery(filterConfig, 1, []);
-    const result = await pool.query(
-      `${query} GROUP BY c.id ORDER BY c.created_at DESC LIMIT $1`,
-      [limit]
-    );
+    if (list.list_type === 'static') {
+      // Lista estática - buscar contatos da lista
+      const result = await pool.query(
+        `SELECT c.id, c.phone_number, c.name, c.email
+         FROM contacts c
+         JOIN contact_list_items li ON c.id = li.contact_id
+         WHERE li.list_id = $1
+         ORDER BY c.created_at DESC
+         LIMIT $2`,
+        [id, limit]
+      );
+      
+      res.json({ contacts: result.rows, preview: true });
+      return;
+    }
+
+    // Lista dinâmica ou híbrida - usar filtros
+    const params: any[] = [];
+    let query = buildDynamicListQuery(filterConfig, 1, params);
+    
+    // Para híbrida, também incluir contatos estáticos
+    if (list.list_type === 'hybrid') {
+      query = `
+        SELECT DISTINCT
+          c.*,
+          COALESCE(
+            json_agg(
+              json_build_object(
+                'id', t.id,
+                'name', t.name,
+                'color', t.color,
+                'category', t.category
+              )
+            ) FILTER (WHERE t.id IS NOT NULL),
+            '[]'::json
+          ) as tags
+        FROM (
+          SELECT DISTINCT c.* FROM contacts c
+          JOIN contact_list_items li ON c.id = li.contact_id
+          WHERE li.list_id = $${params.length + 1}
+          UNION
+          SELECT DISTINCT c.* FROM contacts c
+          LEFT JOIN contact_tag_relations ctr ON c.id = ctr.contact_id
+          LEFT JOIN contact_tags t ON ctr.tag_id = t.id
+          WHERE 1=1
+          ${filterConfig.tags && Array.isArray(filterConfig.tags) && filterConfig.tags.length > 0 
+            ? `AND EXISTS (SELECT 1 FROM contact_tag_relations ctr2 WHERE ctr2.contact_id = c.id AND ctr2.tag_id = ANY($${params.length + 2}::int[]))`
+            : ''}
+          ${filterConfig.exclude_tags && Array.isArray(filterConfig.exclude_tags) && filterConfig.exclude_tags.length > 0
+            ? `AND NOT EXISTS (SELECT 1 FROM contact_tag_relations ctr3 WHERE ctr3.contact_id = c.id AND ctr3.tag_id = ANY($${params.length + 3}::int[]))`
+            : ''}
+          ${filterConfig.opt_in !== undefined ? `AND c.opt_in = $${params.length + 4}` : ''}
+          ${filterConfig.opt_out !== undefined ? `AND c.opt_out = $${params.length + 5}` : ''}
+          ${filterConfig.whatsapp_validated !== undefined ? `AND c.whatsapp_validated = $${params.length + 6}` : ''}
+        ) c
+        LEFT JOIN contact_tag_relations ctr ON c.id = ctr.contact_id
+        LEFT JOIN contact_tags t ON ctr.tag_id = t.id
+      `;
+      params.push(id);
+      if (filterConfig.tags && Array.isArray(filterConfig.tags) && filterConfig.tags.length > 0) {
+        params.push(filterConfig.tags);
+      }
+      if (filterConfig.exclude_tags && Array.isArray(filterConfig.exclude_tags) && filterConfig.exclude_tags.length > 0) {
+        params.push(filterConfig.exclude_tags);
+      }
+      if (filterConfig.opt_in !== undefined) params.push(filterConfig.opt_in);
+      if (filterConfig.opt_out !== undefined) params.push(filterConfig.opt_out);
+      if (filterConfig.whatsapp_validated !== undefined) params.push(filterConfig.whatsapp_validated);
+    }
+
+    const finalQuery = `${query} GROUP BY c.id, c.phone_number, c.name, c.email, c.whatsapp_validated, c.whatsapp_validated_at,
+      c.opt_in, c.opt_in_at, c.opt_out, c.opt_out_at, c.opt_out_reason, c.source, c.metadata,
+      c.created_at, c.updated_at, c.last_message_sent_at, c.last_message_received_at,
+      c.total_messages_sent, c.total_messages_received
+      ORDER BY c.created_at DESC LIMIT $${params.length + 1}`;
+    
+    params.push(limit);
+    
+    const result = await pool.query(finalQuery, params);
 
     const contacts = result.rows.map(row => ({
       id: row.id,

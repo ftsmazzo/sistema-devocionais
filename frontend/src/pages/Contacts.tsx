@@ -57,8 +57,9 @@ export default function Contacts() {
   });
   const [contactTags, setContactTags] = useState<number[]>([]);
   const [total, setTotal] = useState(0);
-  const [limit] = useState(50);
+  const [limit, setLimit] = useState(50);
   const [offset, setOffset] = useState(0);
+  const [showAll, setShowAll] = useState(false);
   const [viewMode, setViewMode] = useState<'cards' | 'list'>('cards');
   const [selectedContacts, setSelectedContacts] = useState<number[]>([]);
   const [showBulkTagModal, setShowBulkTagModal] = useState(false);
@@ -71,8 +72,9 @@ export default function Contacts() {
   const loadContacts = async () => {
     try {
       setLoading(true);
+      const currentLimit = showAll ? 10000 : limit;
       const params = new URLSearchParams({
-        limit: limit.toString(),
+        limit: currentLimit.toString(),
         offset: offset.toString(),
       });
       
@@ -536,6 +538,21 @@ export default function Contacts() {
               <CardContent className="p-4 flex items-center justify-between">
                 <span className="text-sm font-medium text-blue-900">
                   {selectedContacts.length} contato(s) selecionado(s)
+                  {!showAll && total > limit && (
+                    <span className="text-xs text-blue-600 ml-2">
+                      (Mostrando apenas {limit} de {total}. 
+                      <button
+                        onClick={() => {
+                          setShowAll(true);
+                          setOffset(0);
+                          loadContacts();
+                        }}
+                        className="underline ml-1 font-semibold"
+                      >
+                        Carregar todos
+                      </button>)
+                    </span>
+                  )}
                 </span>
                 <div className="flex gap-2">
                   <Button
@@ -549,7 +566,12 @@ export default function Contacts() {
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={() => setSelectedContacts([])}
+                    onClick={() => {
+                      setSelectedContacts([]);
+                      setShowAll(false);
+                      setLimit(50);
+                      setOffset(0);
+                    }}
                   >
                     <X className="h-4 w-4 mr-1" />
                     Limpar
@@ -978,10 +1000,13 @@ export default function Contacts() {
                     type="button"
                     onClick={async () => {
                       try {
+                        setLoading(true);
+                        let successCount = 0;
                         for (const contactId of selectedContacts) {
                           for (const tagId of contactTags) {
                             try {
                               await api.post(`/contacts/${contactId}/tags`, { tag_id: tagId });
+                              successCount++;
                             } catch (error) {
                               // Ignorar erros de tag duplicada
                             }
@@ -994,12 +1019,14 @@ export default function Contacts() {
                         setShowBulkTagModal(false);
                         setContactTags([]);
                         setSelectedContacts([]);
-                        loadContacts();
+                        await loadContacts();
                       } catch (error: any) {
                         setToast({
                           message: error.response?.data?.error || 'Erro ao adicionar tags',
                           type: 'error'
                         });
+                      } finally {
+                        setLoading(false);
                       }
                     }}
                     className="flex-1 bg-gradient-to-r from-blue-500 to-cyan-500 hover:from-blue-600 hover:to-cyan-600 text-white"
