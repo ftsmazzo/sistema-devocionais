@@ -583,6 +583,14 @@ export async function initializeDatabase() {
           SELECT id FROM contacts WHERE last_devocional_sent_at IS NULL
         )
     `);
+    
+    // Migração: Resetar health_status para 'healthy' de instâncias conectadas que estão marcadas como 'down'
+    await client.query(`
+      UPDATE instances
+      SET health_status = 'healthy'
+      WHERE status = 'connected'
+        AND (health_status = 'down' OR health_status IS NULL)
+    `);
 
     // Criar tabela de tags
     await client.query(`
