@@ -147,34 +147,55 @@ export async function processMarketingDispatch(params: MarketingDispatchParams):
     let failedCount = 0;
     let instanceIndex = 0;
 
+    const startTime = Date.now();
+    let contactIndex = 0;
+
     for (const contact of contacts) {
+      contactIndex++;
+      const contactStartTime = Date.now();
+      
       try {
+        console.log(`\n   📤 [${contactIndex}/${contacts.length}] Processando contato: ${contact.phone_number} (${contact.name || 'Sem nome'})`);
+        
         // Selecionar instância (rotação)
         const instance = instances[instanceIndex % instances.length];
         instanceIndex++;
+        console.log(`      🔄 Usando instância: ${instance.instance_name} (ID: ${instance.id})`);
 
         // Aplicar blindagem
+        const blindageStartTime = Date.now();
         const blindageResult = await applyBlindage({
           to: contact.phone_number,
           message: dispatch.message_template,
           instanceId: instance.id,
           messageType: 'marketing',
         });
+        const blindageTime = Date.now() - blindageStartTime;
+        console.log(`      🛡️ Blindagem aplicada em ${blindageTime}ms`);
 
         if (!blindageResult.canSend) {
-          console.log(`   ⛔ Contato ${contact.phone_number} bloqueado pela blindagem: ${blindageResult.reason}`);
+          console.log(`      ⛔ BLOQUEADO pela blindagem: ${blindageResult.reason}`);
           failedCount++;
           continue;
         }
 
         // Aplicar delay
         if (blindageResult.delay && blindageResult.delay > 0) {
+          const delaySeconds = Math.ceil(blindageResult.delay / 1000);
+          console.log(`      ⏳ Aguardando delay de ${delaySeconds}s (${blindageResult.delay}ms)...`);
+          const delayStartTime = Date.now();
           await new Promise(resolve => setTimeout(resolve, blindageResult.delay));
+          const actualDelay = Date.now() - delayStartTime;
+          console.log(`      ✅ Delay concluído (esperado: ${blindageResult.delay}ms, real: ${actualDelay}ms)`);
+        } else {
+          console.log(`      ⚠️ Nenhum delay configurado`);
         }
 
         // Enviar mensagem
+        const sendStartTime = Date.now();
         if (mediaUrl && mediaType) {
           // Enviar com mídia
+          console.log(`      📎 Enviando mensagem com mídia (${mediaType}): ${mediaUrl.substring(0, 50)}...`);
           await sendMessageWithMedia(
             instance,
             contact.phone_number,
@@ -184,12 +205,15 @@ export async function processMarketingDispatch(params: MarketingDispatchParams):
           );
         } else {
           // Enviar apenas texto
+          console.log(`      💬 Enviando mensagem de texto (${dispatch.message_template.length} caracteres)`);
           await sendTextMessage(
             instance,
             contact.phone_number,
             dispatch.message_template
           );
         }
+        const sendTime = Date.now() - sendStartTime;
+        console.log(`      ✅ Mensagem enviada em ${sendTime}ms`);
 
         // Registrar mensagem
         const messageResult = await pool.query(
@@ -231,7 +255,13 @@ export async function processMarketingDispatch(params: MarketingDispatchParams):
         );
 
         successCount++;
-        console.log(`   ✅ Enviado para ${contact.phone_number} (${successCount}/${contacts.length})`);
+        const contactTotalTime = Date.now() - contactStartTime;
+        const totalElapsed = Date.now() - startTime;
+        const avgTimePerContact = totalElapsed / contactIndex;
+        const estimatedRemaining = Math.ceil((avgTimePerContact * (contacts.length - contactIndex)) / 1000);
+        
+        console.log(`      ✅ SUCESSO! Tempo total: ${contactTotalTime}ms`);
+        console.log(`      📊 Progresso: ${successCount}/${contacts.length} enviados | Tempo médio: ${Math.ceil(avgTimePerContact)}ms | Estimativa restante: ~${estimatedRemaining}s`);
 
         // Atualizar última mensagem enviada da instância
         await pool.query(
@@ -402,19 +432,40 @@ async function getContactsFromList(list: any): Promise<any[]> {
 
     // Se for híbrida, também incluir contatos da lista estática
     if (list.list_type === 'hybrid') {
-      query = `
-        SELECT DISTINCT c.id, c.phone_number, c.name
-        FROM contacts c
-        WHERE (
-          c.id IN (
-            SELECT contact_id FROM contact_list_items WHERE list_id = $${paramCount}
+      const hasDynamicFilters = (filterConfig.tags && Array.isArray(filterConfig.tags) && filterConfig.tags.length > 0) ||
+                                (filterConfig.exclude_tags && Array.isArray(filterConfig.exclude_tags) && filterConfig.exclude_tags.length > 0);
+      
+      if (!hasDynamicFilters) {
+        // Apenas lista estática
+        query = `
+          SELECT DISTINCT c.id, c.phone_number, c.name
+          FROM contacts c
+          JOIN contact_list_items cli ON c.id = cli.contact_id
+          WHERE cli.list_id = $1
+            AND c.whatsapp_validated = true
+            AND c.opt_in = true
+            AND c.opt_out = false
+        `;
+        params = [list.id];
+      } else {
+        // Tem filtros dinâmicos, combinar estática + dinâmica
+        query = `
+          SELECT DISTINCT c.id, c.phone_number, c.name
+          FROM contacts c
+          WHERE (
+            c.id IN (
+              SELECT contact_id FROM contact_list_items WHERE list_id = $${paramCount}
+            )
+            OR c.id IN (
+              SELECT DISTINCT c2.id
+              FROM contacts c2
+              ${joinClauses}
+              WHERE ${whereConditions.join(' AND ')}
+            )
           )
-          OR (
-            ${whereConditions.join(' AND ')}
-          )
-        )
-      `;
-      params.push(list.id);
+        `;
+        params.push(list.id);
+      }
     }
   }
 
