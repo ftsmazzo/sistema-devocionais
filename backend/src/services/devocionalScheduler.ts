@@ -68,19 +68,39 @@ export async function executeDevocionalDispatch(): Promise<void> {
 
     console.log(`   ✅ Horário de disparo detectado: ${config.dispatch_hour}:${config.dispatch_minute}`);
 
-    // Verificar se já existe um disparo para hoje (evitar duplicação)
+    // Buscar devocional do dia primeiro para verificar se já existe disparo
     const today = new Date().toISOString().split('T')[0];
-    const existingDispatch = await pool.query(
-      `SELECT id FROM dispatches 
-       WHERE dispatch_type = 'devocional' 
-         AND devocional_id IN (SELECT id FROM devocionais WHERE date = $1)
-         AND status IN ('pending', 'running')
-         AND DATE(created_at) = $1`,
+    const devocionalResult = await pool.query(
+      `SELECT id, title, text, versiculo_principal, versiculo_apoio, metadata
+       FROM devocionais
+       WHERE date = $1`,
       [today]
     );
 
+    if (devocionalResult.rows.length === 0) {
+      console.log(`   ⚠️ Nenhum devocional encontrado para hoje (${today})`);
+      await sendNotification(config.notification_phone, `⚠️ Disparo de devocional cancelado: nenhum devocional encontrado para hoje.`);
+      return;
+    }
+
+    const devocional = devocionalResult.rows[0];
+    const devocionalId = devocional.id;
+
+    // Verificar se já existe um disparo para este devocional hoje (evitar duplicação)
+    // Verificar por devocional_id e data, independente do status
+    const existingDispatch = await pool.query(
+      `SELECT id, status FROM dispatches 
+       WHERE dispatch_type = 'devocional' 
+         AND devocional_id = $1
+         AND DATE(created_at) = $2
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [devocionalId, today]
+    );
+
     if (existingDispatch.rows.length > 0) {
-      console.log(`   ⚠️ Já existe um disparo de devocional para hoje (ID: ${existingDispatch.rows[0].id})`);
+      const existing = existingDispatch.rows[0];
+      console.log(`   ⚠️ Já existe um disparo de devocional para hoje (ID: ${existing.id}, status: ${existing.status})`);
       return;
     }
     const devocionalResult = await pool.query(
