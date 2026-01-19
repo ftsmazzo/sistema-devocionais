@@ -557,14 +557,16 @@ export default function Dispatches() {
               <Button
                 variant="outline"
                 onClick={() => setShowCreateModal(false)}
+                disabled={creatingDispatch}
               >
                 Cancelar
               </Button>
               <Button
                 onClick={handleCreate}
-                className="bg-gradient-to-r from-indigo-500 to-purple-500"
+                disabled={creatingDispatch}
+                className="bg-gradient-to-r from-indigo-500 to-purple-500 disabled:opacity-50"
               >
-                Criar Disparo
+                {creatingDispatch ? 'Criando...' : 'Criar Disparo'}
               </Button>
             </div>
           </div>
