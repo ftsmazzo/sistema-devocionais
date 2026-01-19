@@ -58,7 +58,6 @@ export default function Dispatches() {
   });
   const [lists, setLists] = useState<any[]>([]);
   const [instances, setInstances] = useState<any[]>([]);
-  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [startingDispatch, setStartingDispatch] = useState<number | null>(null);
   const [creatingDispatch, setCreatingDispatch] = useState(false);
 
