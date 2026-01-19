@@ -727,7 +727,8 @@ async function processDevocionalDispatchManually(dispatchId: number): Promise<vo
         if (!blindageResult.canSend) {
           console.log(`   ⛔ Contato ${contact.phone_number} bloqueado pela blindagem: ${blindageResult.reason}`);
           failedCount++;
-          await updateDevocionalScore(contact.id, 'failed');
+          // NÃO contar como falha de devocional se foi bloqueado pela blindagem antes de enviar
+          // Só conta como falha se a mensagem foi enviada mas não foi entregue/lida
           continue;
         }
 

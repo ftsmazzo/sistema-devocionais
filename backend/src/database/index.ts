@@ -533,7 +533,7 @@ export async function initializeDatabase() {
       BEGIN 
         IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
                        WHERE table_name = 'contacts' AND column_name = 'devocional_score') THEN
-          ALTER TABLE contacts ADD COLUMN devocional_score INTEGER DEFAULT 0;
+          ALTER TABLE contacts ADD COLUMN devocional_score INTEGER DEFAULT 100;
         END IF;
         IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
                        WHERE table_name = 'contacts' AND column_name = 'last_devocional_sent_at') THEN

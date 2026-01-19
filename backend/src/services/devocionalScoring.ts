@@ -28,7 +28,7 @@ export async function updateDevocionalScore(
     }
 
     const contact = contactResult.rows[0];
-    let newScore = contact.devocional_score || 0;
+    let newScore = contact.devocional_score ?? 100; // Default 100 se NULL
     let consecutiveFailures = contact.consecutive_devocional_failures || 0;
     const updates: string[] = [];
     const params: any[] = [];
@@ -71,11 +71,18 @@ export async function updateDevocionalScore(
         break;
 
       case 'failed':
-        // Falha no envio - incrementar falhas consecutivas
-        consecutiveFailures = (consecutiveFailures || 0) + 1;
-        updates.push(`consecutive_devocional_failures = $${paramCount}`);
-        params.push(consecutiveFailures);
-        paramCount++;
+        // Falha no envio - só incrementar falhas consecutivas se já recebeu pelo menos um devocional
+        // Se nunca recebeu, não faz sentido ter falhas consecutivas
+        if (contact.last_devocional_sent_at) {
+          consecutiveFailures = (consecutiveFailures || 0) + 1;
+          updates.push(`consecutive_devocional_failures = $${paramCount}`);
+          params.push(consecutiveFailures);
+          paramCount++;
+        } else {
+          // Se nunca recebeu devocional, não incrementar falhas
+          console.log(`   ℹ️ Contato ${contactId} nunca recebeu devocional, não contando como falha`);
+          return; // Não atualizar nada se nunca recebeu
+        }
 
         // Se atingiu 3 falhas consecutivas, adicionar tag "bloqueado"
         if (consecutiveFailures >= 3) {
