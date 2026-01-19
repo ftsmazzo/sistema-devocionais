@@ -107,7 +107,7 @@ export default function Contacts() {
       let contactId: number;
       
       if (editingContact) {
-        const response = await api.put(`/contacts/${editingContact.id}`, formData);
+        await api.put(`/contacts/${editingContact.id}`, formData);
         contactId = editingContact.id;
         setToast({ message: 'Contato atualizado com sucesso!', type: 'success' });
       } else {
@@ -261,7 +261,7 @@ export default function Contacts() {
         });
       }
 
-      const contactsToImport = dataLines.map((line, lineIndex) => {
+      const contactsToImport = dataLines.map((line) => {
         // Tratar CSV com aspas e vírgulas dentro de campos
         const parts: string[] = [];
         let current = '';
