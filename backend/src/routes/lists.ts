@@ -372,7 +372,7 @@ router.get('/:id/contacts', async (req: AuthRequest, res) => {
       query = buildDynamicListQuery(filterConfig, paramCount, params);
     } else {
       // Lista híbrida - combina estática + dinâmica
-      query = `
+      const staticQuery = `
         SELECT DISTINCT
           c.*,
           COALESCE(
@@ -387,15 +387,38 @@ router.get('/:id/contacts', async (req: AuthRequest, res) => {
             '[]'
           ) as tags
         FROM contacts c
+        JOIN contact_list_items li ON c.id = li.contact_id
         LEFT JOIN contact_tag_relations ctr ON c.id = ctr.contact_id
         LEFT JOIN contact_tags t ON ctr.tag_id = t.id
-        WHERE (
-          c.id IN (SELECT contact_id FROM contact_list_items WHERE list_id = $${paramCount})
-          OR ${buildDynamicListQuery(filterConfig, paramCount + 1, params).replace('FROM contacts', 'FROM contacts').split('WHERE')[1] || '1=1'}
-        )
+        WHERE li.list_id = $${paramCount}
       `;
       params.push(id);
       paramCount++;
+
+      const dynamicQuery = buildDynamicListQuery(filterConfig, paramCount, params);
+      
+      query = `
+        SELECT DISTINCT
+          c.*,
+          COALESCE(
+            json_agg(
+              json_build_object(
+                'id', t.id,
+                'name', t.name,
+                'color', t.color,
+                'category', t.category
+              )
+            ) FILTER (WHERE t.id IS NOT NULL),
+            '[]'
+          ) as tags
+        FROM (
+          ${staticQuery}
+          UNION
+          ${dynamicQuery.replace(/SELECT DISTINCT.*FROM/, 'SELECT DISTINCT c.*, \'[]\'::json as tags FROM').replace(/GROUP BY c.id/, '')}
+        ) c
+        LEFT JOIN contact_tag_relations ctr ON c.id = ctr.contact_id
+        LEFT JOIN contact_tags t ON ctr.tag_id = t.id
+      `;
     }
 
     query += ` GROUP BY c.id ORDER BY c.created_at DESC LIMIT $${paramCount} OFFSET $${paramCount + 1}`;
@@ -417,10 +440,33 @@ router.get('/:id/contacts', async (req: AuthRequest, res) => {
       tags: typeof row.tags === 'string' ? JSON.parse(row.tags) : row.tags
     }));
 
-    // Contar total (simplificado para performance)
+    // Contar total
+    let countQuery = '';
+    if (listType === 'static') {
+      countQuery = `SELECT COUNT(DISTINCT c.id) as total FROM contacts c JOIN contact_list_items li ON c.id = li.contact_id WHERE li.list_id = $1`;
+    } else if (listType === 'dynamic') {
+      countQuery = buildDynamicListQuery(filterConfig, 1, []).replace(/SELECT DISTINCT.*FROM/, 'SELECT COUNT(DISTINCT c.id) as total FROM').replace(/GROUP BY.*/, '');
+    } else {
+      // Híbrida - contar ambos
+      const staticCount = await pool.query(
+        `SELECT COUNT(DISTINCT c.id) as total FROM contacts c JOIN contact_list_items li ON c.id = li.contact_id WHERE li.list_id = $1`,
+        [id]
+      );
+      const dynamicCountQuery = buildDynamicListQuery(filterConfig, 1, []).replace(/SELECT DISTINCT.*FROM/, 'SELECT COUNT(DISTINCT c.id) as total FROM').replace(/GROUP BY.*/, '');
+      const dynamicCount = await pool.query(dynamicCountQuery, []);
+      
+      const total = parseInt(staticCount.rows[0]?.total || '0') + parseInt(dynamicCount.rows[0]?.total || '0');
+      return res.json({
+        contacts,
+        total,
+        limit,
+        offset
+      });
+    }
+    
     const countResult = await pool.query(
-      query.replace(/SELECT.*FROM/, 'SELECT COUNT(DISTINCT c.id) as total FROM').replace(/LIMIT.*/, ''),
-      params.slice(0, -2)
+      countQuery,
+      listType === 'static' ? [id] : []
     );
     const total = parseInt(countResult.rows[0]?.total || '0');
 
