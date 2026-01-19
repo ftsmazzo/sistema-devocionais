@@ -105,6 +105,14 @@ function App() {
             </PrivateRoute>
           }
         />
+        <Route
+          path="/logs"
+          element={
+            <PrivateRoute>
+              <Logs />
+            </PrivateRoute>
+          }
+        />
       </Routes>
     </BrowserRouter>
   );

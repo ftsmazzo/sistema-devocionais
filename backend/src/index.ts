@@ -91,6 +91,7 @@ app.use('/api/tags', tagRoutes);
 app.use('/api/lists', listRoutes);
 app.use('/api/marketing', marketingRoutes);
 app.use('/api/dispatches', dispatchRoutes);
+app.use('/api/logs', logsRoutes);
 
 // Error handler
 app.use(errorHandler);

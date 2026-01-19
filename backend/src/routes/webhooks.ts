@@ -13,9 +13,10 @@ router.post('/evolution/:instanceName', async (req, res) => {
     const { instanceName } = req.params;
     const eventData = req.body;
 
-    console.log(`📥 Webhook recebido para instância: ${instanceName}`);
-    console.log(`   Tipo: ${eventData.event || eventData.type || 'unknown'}`);
-    console.log(`   Dados:`, JSON.stringify(eventData, null, 2));
+    const eventType = eventData.event || eventData.type || 'unknown';
+    const logMessage = `Webhook recebido: ${instanceName} - ${eventType}`;
+    console.log(`📥 ${logMessage}`);
+    addLog('info', logMessage);
 
     // Buscar instância pelo instance_name
     const instanceResult = await pool.query(
