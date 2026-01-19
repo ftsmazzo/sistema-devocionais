@@ -152,28 +152,41 @@ export async function executeDevocionalDispatch(): Promise<void> {
 
       // Se for híbrida, também incluir contatos da lista estática
       if (list.list_type === 'hybrid') {
-        // Construir query dinâmica separada para a parte dinâmica
-        let dynamicWhere = whereConditions.join(' AND ');
-        let dynamicJoin = joinClauses;
+        // Se não há filtros dinâmicos (apenas básicos), buscar apenas da lista estática
+        const hasDynamicFilters = (filterConfig.tags && Array.isArray(filterConfig.tags) && filterConfig.tags.length > 0) ||
+                                  (filterConfig.exclude_tags && Array.isArray(filterConfig.exclude_tags) && filterConfig.exclude_tags.length > 0);
         
-        contactsQuery = `
-          SELECT DISTINCT c.id, c.phone_number, c.name
-          FROM contacts c
-          WHERE (
-            c.id IN (
-              SELECT contact_id FROM contact_list_items WHERE list_id = $${paramCount}
+        if (!hasDynamicFilters) {
+          // Apenas lista estática
+          contactsQuery = `
+            SELECT DISTINCT c.id, c.phone_number, c.name
+            FROM contacts c
+            JOIN contact_list_items cli ON c.id = cli.contact_id
+            WHERE cli.list_id = $1
+              AND c.whatsapp_validated = true
+              AND c.opt_in = true
+              AND c.opt_out = false
+          `;
+          contactsParams = [list.id];
+        } else {
+          // Tem filtros dinâmicos, combinar estática + dinâmica
+          contactsQuery = `
+            SELECT DISTINCT c.id, c.phone_number, c.name
+            FROM contacts c
+            WHERE (
+              c.id IN (
+                SELECT contact_id FROM contact_list_items WHERE list_id = $${paramCount}
+              )
+              OR c.id IN (
+                SELECT DISTINCT c2.id
+                FROM contacts c2
+                ${joinClauses}
+                WHERE ${whereConditions.join(' AND ')}
+              )
             )
-            ${dynamicWhere !== 'c.whatsapp_validated = true AND c.opt_in = true AND c.opt_out = false' 
-              ? `OR (c.id IN (
-                  SELECT DISTINCT c2.id
-                  FROM contacts c2
-                  ${dynamicJoin}
-                  WHERE ${dynamicWhere}
-                ))`
-              : ''}
-          )
-        `;
-        contactsParams.push(list.id);
+          `;
+          contactsParams.push(list.id);
+        }
       } else {
         // Lista dinâmica pura
         contactsQuery = `
