@@ -210,16 +210,30 @@ export default function Tags() {
                       <Edit className="h-4 w-4 mr-1" />
                       Editar
                     </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => handleDelete(tag.id)}
-                      className="text-red-600 hover:text-red-700 hover:border-red-300"
-                      title={['devocional', 'marketing', 'vip', 'teste', 'bloqueado'].includes(tag.category) ? 'Tags padrão não podem ser excluídas' : 'Excluir tag'}
-                      disabled={['devocional', 'marketing', 'vip', 'teste', 'bloqueado'].includes(tag.category)}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+                    {!['devocional', 'marketing', 'vip', 'teste', 'bloqueado'].includes(tag.category) && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleDelete(tag.id)}
+                        className="text-red-600 hover:text-red-700 hover:border-red-300 flex-1"
+                        title="Excluir tag"
+                      >
+                        <Trash2 className="h-4 w-4 mr-1" />
+                        Excluir
+                      </Button>
+                    )}
+                    {['devocional', 'marketing', 'vip', 'teste', 'bloqueado'].includes(tag.category) && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled
+                        className="text-gray-400 cursor-not-allowed flex-1"
+                        title="Tags padrão não podem ser excluídas"
+                      >
+                        <Trash2 className="h-4 w-4 mr-1" />
+                        Padrão
+                      </Button>
+                    )}
                   </div>
                 </div>
               </CardContent>
