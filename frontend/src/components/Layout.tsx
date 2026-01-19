@@ -13,6 +13,7 @@ import {
   List,
   Send,
   Settings,
+  FileText,
 } from 'lucide-react';
 import { useState } from 'react';
 
@@ -34,6 +35,7 @@ export default function Layout({ children }: LayoutProps) {
     { name: 'Disparos', href: '/dispatches', icon: Send },
     { name: 'Config. Devocional', href: '/devocional/config', icon: Settings },
     { name: 'Config. Marketing', href: '/marketing/config', icon: Settings },
+    { name: 'Logs', href: '/logs', icon: FileText },
     // Futuras páginas:
     // { name: 'Mensagens', href: '/messages', icon: Inbox },
     // { name: 'Estatísticas', href: '/stats', icon: BarChart3 },
