@@ -98,8 +98,7 @@ async function processWebhookEvent(instanceId: number, eventType: string, eventD
       case 'messages.upsert':
       case 'message':
         // Mensagem recebida ou atualizada
-        // Aqui você pode processar mensagens recebidas
-        console.log(`   💬 Mensagem processada para instância ${instanceId}`);
+        await processMessageReceived(instanceId, eventData);
         break;
 
       case 'messages.update':
