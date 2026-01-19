@@ -152,7 +152,12 @@ async function processWebhookEvent(instanceId: number, eventType: string, eventD
 // Processar mensagem recebida
 async function processMessageReceived(instanceId: number, eventData: any) {
   try {
-    console.log(`   🔍 Processando mensagem recebida...`);
+    const processLog = `🔍 [processMessageReceived] Iniciando processamento para instância ${instanceId}`;
+    console.log(`\n   ========================================`);
+    console.log(`   ${processLog}`);
+    console.log(`   ========================================`);
+    addLog('info', processLog);
+    addLog('debug', `Estrutura completa do evento: ${JSON.stringify(eventData).substring(0, 500)}...`);
     
     // Tentar diferentes formatos de mensagem (Evolution API pode enviar em diferentes estruturas)
     let message = null;
@@ -185,14 +190,17 @@ async function processMessageReceived(instanceId: number, eventData: any) {
     }
     
     if (!message) {
-      console.log(`   ⚠️ Mensagem não encontrada no formato esperado`);
-      console.log(`   📋 Estrutura recebida:`, JSON.stringify(Object.keys(eventData), null, 2));
+      const noMessageLog = `⚠️ Mensagem não encontrada no formato esperado. Estrutura recebida: ${JSON.stringify(Object.keys(eventData))}`;
+      console.log(`   ${noMessageLog}`);
+      addLog('warning', noMessageLog);
+      addLog('debug', `Estrutura completa: ${JSON.stringify(eventData)}`);
+      console.log(`   ========================================\n`);
       return;
     }
     
-    console.log(`   📝 Mensagem encontrada`);
-    console.log(`   🔑 Key:`, JSON.stringify(messageKey, null, 2));
-    console.log(`   💬 Body:`, JSON.stringify(messageBody, null, 2));
+    const messageFoundLog = `📝 Mensagem encontrada! Key: ${JSON.stringify(messageKey)}, Body: ${JSON.stringify(messageBody)}`;
+    console.log(`   ${messageFoundLog}`);
+    addLog('info', messageFoundLog);
     
     // Verificar se é mensagem enviada por nós
     const fromMe = messageKey?.fromMe || 
@@ -200,8 +208,14 @@ async function processMessageReceived(instanceId: number, eventData: any) {
                    message.data?.key?.fromMe ||
                    false;
     
+    console.log(`   🔍 Verificando fromMe: ${fromMe}`);
+    addLog('debug', `fromMe verificado: ${fromMe}`);
+    
     if (fromMe) {
-      console.log(`   ℹ️ Mensagem enviada por nós, ignorando`);
+      const fromMeLog = `ℹ️ Mensagem enviada por nós (fromMe=${fromMe}), ignorando`;
+      console.log(`   ${fromMeLog}`);
+      addLog('info', fromMeLog);
+      console.log(`   ========================================\n`);
       return;
     }
 
@@ -211,27 +225,37 @@ async function processMessageReceived(instanceId: number, eventData: any) {
                        message.remoteJid?.replace('@s.whatsapp.net', '') ||
                        eventData.sender?.replace('@s.whatsapp.net', '') ||
                        eventData.data?.key?.remoteJid?.replace('@s.whatsapp.net', '');
-
+    
     if (!fromNumber) {
-      console.log(`   ⚠️ Número do remetente não encontrado`);
+      const noNumberLog = `⚠️ Número do remetente não encontrado. messageKey: ${JSON.stringify(messageKey)}, message: ${JSON.stringify(message)}`;
+      console.log(`   ${noNumberLog}`);
+      addLog('warning', noNumberLog);
+      console.log(`   ========================================\n`);
       return;
     }
     
-    console.log(`   📱 Número do remetente: ${fromNumber}`);
+    const fromNumberLog = `📱 Número do remetente: ${fromNumber}`;
+    console.log(`   ${fromNumberLog}`);
+    addLog('info', fromNumberLog);
 
     // Buscar contato pelo número
     const contactResult = await pool.query(
       `SELECT id FROM contacts WHERE phone_number = $1`,
       [fromNumber]
     );
-
+    
     if (contactResult.rows.length === 0) {
-      console.log(`   ⚠️ Contato ${fromNumber} não encontrado no banco`);
+      const noContactLog = `⚠️ Contato ${fromNumber} não encontrado no banco. Mensagem será ignorada.`;
+      console.log(`   ${noContactLog}`);
+      addLog('warning', noContactLog);
+      console.log(`   ========================================\n`);
       return; // Contato não encontrado
     }
-
+    
     const contactId = contactResult.rows[0].id;
-    console.log(`   ✅ Contato encontrado: ID ${contactId}`);
+    const contactFoundLog = `✅ Contato encontrado: ID ${contactId} (${fromNumber})`;
+    console.log(`   ${contactFoundLog}`);
+    addLog('info', contactFoundLog);
 
     // Buscar último devocional enviado para este contato
     const lastDevocionalResult = await pool.query(
