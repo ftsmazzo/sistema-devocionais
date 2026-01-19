@@ -319,6 +319,26 @@ export async function initializeDatabase() {
       ON number_validation_cache(checked_at);
     `);
 
+    // Criar tabela de devocionais
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS devocionais (
+        id SERIAL PRIMARY KEY,
+        text TEXT NOT NULL,
+        title VARCHAR(255) NOT NULL,
+        date DATE UNIQUE NOT NULL,
+        versiculo_principal JSONB,
+        versiculo_apoio JSONB,
+        metadata JSONB,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_devocionais_date ON devocionais(date);
+      CREATE INDEX IF NOT EXISTS idx_devocionais_created_at ON devocionais(created_at);
+    `);
+
     // Melhorar tabela webhook_events
     await client.query(`
       ALTER TABLE webhook_events
