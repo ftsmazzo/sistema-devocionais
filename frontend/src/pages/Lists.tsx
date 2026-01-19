@@ -436,84 +436,104 @@ export default function Lists() {
 
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Tags (incluir)
+                        Tags (incluir contatos com estas tags)
                       </label>
-                      <div className="flex flex-wrap gap-2">
-                        {tags.map(tag => (
-                          <button
-                            key={tag.id}
-                            type="button"
-                            onClick={() => {
-                              const current = formData.filter_config.tags || [];
-                              if (current.includes(tag.id)) {
-                                setFormData({
-                                  ...formData,
-                                  filter_config: {
-                                    ...formData.filter_config,
-                                    tags: current.filter(id => id !== tag.id)
+                      <p className="text-xs text-gray-500 mb-2">
+                        Selecione as tags para filtrar contatos. A lista incluirá apenas contatos que possuem pelo menos uma das tags selecionadas.
+                      </p>
+                      <div className="flex flex-wrap gap-2 p-3 border-2 border-gray-200 rounded-xl min-h-[60px] bg-gray-50">
+                        {tags.length === 0 ? (
+                          <span className="text-sm text-gray-400">Nenhuma tag disponível. Crie tags na página de Tags.</span>
+                        ) : (
+                          tags.map(tag => {
+                            const isSelected = formData.filter_config.tags?.includes(tag.id);
+                            return (
+                              <button
+                                key={tag.id}
+                                type="button"
+                                onClick={() => {
+                                  const current = formData.filter_config.tags || [];
+                                  if (isSelected) {
+                                    setFormData({
+                                      ...formData,
+                                      filter_config: {
+                                        ...formData.filter_config,
+                                        tags: current.filter(id => id !== tag.id)
+                                      }
+                                    });
+                                  } else {
+                                    setFormData({
+                                      ...formData,
+                                      filter_config: {
+                                        ...formData.filter_config,
+                                        tags: [...current, tag.id]
+                                      }
+                                    });
                                   }
-                                });
-                              } else {
-                                setFormData({
-                                  ...formData,
-                                  filter_config: {
-                                    ...formData.filter_config,
-                                    tags: [...current, tag.id]
-                                  }
-                                });
-                              }
-                            }}
-                            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
-                              formData.filter_config.tags?.includes(tag.id)
-                                ? 'text-white shadow-md'
-                                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                            }`}
-                            style={formData.filter_config.tags?.includes(tag.id) ? { backgroundColor: tag.color } : {}}
-                          >
-                            {tag.name}
-                          </button>
-                        ))}
+                                }}
+                                className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                                  isSelected
+                                    ? 'text-white shadow-md'
+                                    : 'bg-white text-gray-700 hover:bg-gray-100 border border-gray-300'
+                                }`}
+                                style={isSelected ? { backgroundColor: tag.color } : {}}
+                              >
+                                {isSelected ? '✓ ' : ''}{tag.name}
+                              </button>
+                            );
+                          })
+                        )}
                       </div>
                     </div>
 
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Tags (excluir)
+                        Tags (excluir contatos com estas tags)
                       </label>
-                      <div className="flex flex-wrap gap-2">
-                        {tags.map(tag => (
-                          <button
-                            key={tag.id}
-                            type="button"
-                            onClick={() => {
-                              const current = formData.filter_config.exclude_tags || [];
-                              if (current.includes(tag.id)) {
-                                setFormData({
-                                  ...formData,
-                                  filter_config: {
-                                    ...formData.filter_config,
-                                    exclude_tags: current.filter(id => id !== tag.id)
+                      <p className="text-xs text-gray-500 mb-2">
+                        Selecione as tags para excluir contatos. A lista não incluirá contatos que possuem qualquer uma das tags selecionadas.
+                      </p>
+                      <div className="flex flex-wrap gap-2 p-3 border-2 border-gray-200 rounded-xl min-h-[60px] bg-gray-50">
+                        {tags.length === 0 ? (
+                          <span className="text-sm text-gray-400">Nenhuma tag disponível.</span>
+                        ) : (
+                          tags.map(tag => {
+                            const isSelected = formData.filter_config.exclude_tags?.includes(tag.id);
+                            return (
+                              <button
+                                key={tag.id}
+                                type="button"
+                                onClick={() => {
+                                  const current = formData.filter_config.exclude_tags || [];
+                                  if (isSelected) {
+                                    setFormData({
+                                      ...formData,
+                                      filter_config: {
+                                        ...formData.filter_config,
+                                        exclude_tags: current.filter(id => id !== tag.id)
+                                      }
+                                    });
+                                  } else {
+                                    setFormData({
+                                      ...formData,
+                                      filter_config: {
+                                        ...formData.filter_config,
+                                        exclude_tags: [...current, tag.id]
+                                      }
+                                    });
                                   }
-                                });
-                              } else {
-                                setFormData({
-                                  ...formData,
-                                  filter_config: {
-                                    ...formData.filter_config,
-                                    exclude_tags: [...current, tag.id]
-                                  }
-                                });
-                              }
-                            }}
-                            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all border-2 ${
-                              formData.filter_config.exclude_tags?.includes(tag.id)
-                                ? 'border-red-500 bg-red-50 text-red-700'
-                                : 'border-gray-200 bg-gray-50 text-gray-700 hover:bg-gray-100'
-                            }`}
-                          >
-                            {tag.name}
-                          </button>
-                        ))}
+                                }}
+                                className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all border-2 ${
+                                  isSelected
+                                    ? 'border-red-500 bg-red-50 text-red-700'
+                                    : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-100'
+                                }`}
+                              >
+                                {isSelected ? '✕ ' : ''}{tag.name}
+                              </button>
+                            );
+                          })
+                        )}
                       </div>
                     </div>
 

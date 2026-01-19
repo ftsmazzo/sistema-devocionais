@@ -67,7 +67,7 @@ export default function Contacts() {
   useEffect(() => {
     loadContacts();
     loadTags();
-  }, [searchTerm, selectedTags, offset]);
+  }, [searchTerm, selectedTags, offset, showAll]);
 
   const loadContacts = async () => {
     try {
@@ -566,6 +566,43 @@ export default function Contacts() {
                   <Button
                     size="sm"
                     variant="outline"
+                    onClick={async () => {
+                      if (!confirm(`Tem certeza que deseja excluir ${selectedContacts.length} contato(s)?`)) return;
+                      try {
+                        setLoading(true);
+                        for (const contactId of selectedContacts) {
+                          try {
+                            await api.delete(`/contacts/${contactId}`);
+                          } catch (error) {
+                            console.error(`Erro ao excluir contato ${contactId}:`, error);
+                          }
+                        }
+                        setToast({
+                          message: `${selectedContacts.length} contato(s) excluído(s) com sucesso!`,
+                          type: 'success'
+                        });
+                        setSelectedContacts([]);
+                        setShowAll(false);
+                        setLimit(50);
+                        setOffset(0);
+                        await loadContacts();
+                      } catch (error: any) {
+                        setToast({
+                          message: error.response?.data?.error || 'Erro ao excluir contatos',
+                          type: 'error'
+                        });
+                      } finally {
+                        setLoading(false);
+                      }
+                    }}
+                    className="text-red-600 hover:text-red-700 hover:border-red-300"
+                  >
+                    <Trash2 className="h-4 w-4 mr-1" />
+                    Excluir
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
                     onClick={() => {
                       setSelectedContacts([]);
                       setShowAll(false);
@@ -759,8 +796,11 @@ export default function Contacts() {
                                       {tag.name}
                                     </span>
                                     <button
-                                      onClick={() => handleRemoveTag(contact.id, tag.id)}
-                                      className="text-gray-400 hover:text-red-500 transition-colors"
+                                      onClick={async (e) => {
+                                        e.stopPropagation();
+                                        await handleRemoveTag(contact.id, tag.id);
+                                      }}
+                                      className="text-gray-400 hover:text-red-500 transition-colors ml-1"
                                       title="Remover tag"
                                     >
                                       <X className="h-3 w-3" />
