@@ -578,7 +578,22 @@ async function checkInstanceHealth(
 
   const instance = instanceResult.rows[0];
 
-  // Se está down e configurado para pausar
+  // Verificar se a instância está realmente conectada (status é mais confiável que health_status)
+  if (instance.status !== 'connected') {
+    await logBlindageAction(instanceId, {
+      action_type: 'health_blocked',
+      reason: 'instance_not_connected',
+      status: instance.status,
+    }, healthRule.id);
+
+    return {
+      canSend: false,
+      reason: `Instância não está conectada (status: ${instance.status})`,
+      blockedBy: 'health_check',
+    };
+  }
+
+  // Se está down e configurado para pausar (verificar health_status apenas se configurado)
   if (config.pause_if_down && instance.health_status === 'down') {
     await logBlindageAction(instanceId, {
       action_type: 'health_blocked',
@@ -694,8 +709,18 @@ async function checkAllowedHours(
   }
 
   const config = timeRule.config || {};
+  const timezone = config.timezone || 'America/Sao_Paulo';
+  
+  // Obter hora atual no timezone configurado
   const now = new Date();
-  const currentHour = now.getHours();
+  const currentHour = parseInt(
+    new Intl.DateTimeFormat('pt-BR', {
+      timeZone: timezone,
+      hour: 'numeric',
+      hour12: false,
+    }).formatToParts(now).find(part => part.type === 'hour')?.value || '0',
+    10
+  );
 
   // Verificar horas bloqueadas
   if (config.blocked_hours && Array.isArray(config.blocked_hours)) {
