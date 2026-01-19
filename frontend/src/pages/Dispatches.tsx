@@ -14,6 +14,7 @@ import {
   Megaphone,
   RefreshCw,
   X,
+  AlertCircle,
 } from 'lucide-react';
 
 interface Dispatch {
@@ -234,8 +235,21 @@ export default function Dispatches() {
               Disparos
             </h1>
             <p className="text-gray-600 text-sm ml-13">
-              Gerencie seus disparos de devocional e marketing
+              Gerencie seus disparos de marketing e testes de devocional
             </p>
+            <div className="bg-blue-50 border-l-4 border-blue-400 p-4 mt-4 rounded-r-lg">
+              <div className="flex items-start gap-3">
+                <AlertCircle className="h-5 w-5 text-blue-600 mt-0.5 flex-shrink-0" />
+                <div className="text-sm text-blue-900">
+                  <p className="font-semibold mb-1">ℹ️ Sobre Disparos de Devocional:</p>
+                  <p className="text-blue-800">
+                    O disparo de devocional é <strong>automático</strong> e configurado na página <strong>"Config. Devocional"</strong>.
+                    Ele dispara automaticamente todos os dias no horário configurado. Você não precisa criar disparos manuais de devocional aqui.
+                    Esta página é apenas para <strong>disparos de marketing</strong> ou <strong>testes manuais</strong> de devocional.
+                  </p>
+                </div>
+              </div>
+            </div>
           </div>
 
           <Button
@@ -303,6 +317,11 @@ export default function Dispatches() {
                   </div>
 
                   <div className="flex items-center gap-6 mt-4">
+                    {dispatch.dispatch_type === 'devocional' && dispatch.status === 'pending' && (
+                      <div className="bg-yellow-50 border border-yellow-200 rounded-lg px-3 py-2 text-xs text-yellow-800">
+                        ⚠️ Este é um disparo manual. O disparo automático está em "Config. Devocional"
+                      </div>
+                    )}
                     <div className="flex items-center gap-2">
                       {getStatusIcon(dispatch.status)}
                       <span className="text-sm font-medium text-gray-700">
@@ -391,16 +410,24 @@ export default function Dispatches() {
                 <div className="grid grid-cols-2 gap-4">
                   <button
                     onClick={() => setDispatchType('devocional')}
-                    className={`p-4 rounded-xl border-2 transition-all ${
+                    className={`p-4 rounded-xl border-2 transition-all relative ${
                       dispatchType === 'devocional'
                         ? 'border-green-500 bg-green-50'
                         : 'border-gray-200 hover:border-gray-300'
                     }`}
                   >
+                    <div className="absolute top-2 right-2">
+                      <span className="bg-yellow-500 text-white text-xs px-2 py-0.5 rounded-full font-semibold">
+                        TESTE
+                      </span>
+                    </div>
                     <BookOpen className="h-6 w-6 mx-auto mb-2 text-green-600" />
-                    <div className="font-medium">Devocional</div>
+                    <div className="font-medium">Devocional (Teste)</div>
                     <div className="text-xs text-gray-600 mt-1">
-                      Envio automático diário
+                      Apenas para testes manuais
+                    </div>
+                    <div className="text-xs text-yellow-700 mt-2 font-medium">
+                      ⚠️ Disparo automático configurado em "Config. Devocional"
                     </div>
                   </button>
                   <button

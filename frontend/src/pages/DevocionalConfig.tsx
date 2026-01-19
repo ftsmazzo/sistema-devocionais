@@ -281,6 +281,34 @@ export default function DevocionalConfig() {
           </div>
         )}
 
+        {/* Status do Disparo Automático */}
+        {config.enabled ? (
+          <div className="bg-green-50 border-2 border-green-200 rounded-xl p-4">
+            <div className="flex items-start gap-3">
+              <CheckCircle2 className="h-5 w-5 text-green-600 mt-0.5 flex-shrink-0" />
+              <div className="text-sm text-green-900">
+                <p className="font-semibold mb-2">✅ Disparo Automático ATIVO</p>
+                <p className="text-green-800">
+                  O sistema disparará automaticamente todos os dias às <strong>{String(config.dispatch_hour).padStart(2, '0')}:{String(config.dispatch_minute).padStart(2, '0')}</strong> (horário de {config.timezone}).
+                  Você <strong>não precisa</strong> criar disparos manuais na página "Disparos". O sistema fará isso automaticamente.
+                </p>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="bg-yellow-50 border-2 border-yellow-200 rounded-xl p-4">
+            <div className="flex items-start gap-3">
+              <AlertCircle className="h-5 w-5 text-yellow-600 mt-0.5 flex-shrink-0" />
+              <div className="text-sm text-yellow-900">
+                <p className="font-semibold mb-2">⚠️ Disparo Automático DESATIVADO</p>
+                <p className="text-yellow-800">
+                  O disparo automático está desabilitado. Ative-o acima para que o sistema envie devocionais automaticamente todos os dias.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Informações Importantes */}
         <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-4">
           <div className="flex items-start gap-3">
@@ -293,6 +321,7 @@ export default function DevocionalConfig() {
                 <li>• A mensagem é personalizada com saudação (Bom dia/Tarde/Noite) + primeiro nome</li>
                 <li>• Contatos são validados automaticamente (WhatsApp + opt-in)</li>
                 <li>• Sistema de pontuação: após 3 falhas consecutivas, contato é tagado como "bloqueado"</li>
+                <li>• <strong>Não é necessário criar disparos manuais</strong> - o sistema faz isso automaticamente</li>
               </ul>
             </div>
           </div>
