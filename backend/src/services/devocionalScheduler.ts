@@ -24,6 +24,7 @@ interface DevocionalConfig {
  */
 export async function executeDevocionalDispatch(): Promise<void> {
   try {
+    addLog('info', '🚀 Iniciando disparo automático de devocional');
     console.log('📅 Iniciando verificação de disparo automático de devocional...');
 
     // Buscar configuração

@@ -1,6 +1,7 @@
 import { pool } from '../database';
 import axios from 'axios';
 import { applyBlindage } from './blindage';
+import { addLog } from '../routes/logs';
 
 /**
  * Serviço para processar disparos de marketing
@@ -183,17 +184,25 @@ export async function processMarketingDispatch(params: MarketingDispatchParams):
         if (blindageResult.delay && blindageResult.delay > 0) {
           const delaySeconds = Math.ceil(blindageResult.delay / 1000);
           const delayStartTime = Date.now();
-          console.log(`      ⏳ [DELAY] Aguardando ${delaySeconds}s (${blindageResult.delay}ms) antes de enviar...`);
+          const delayLog = `⏳ [DELAY] Aguardando ${delaySeconds}s (${blindageResult.delay}ms) antes de enviar...`;
+          console.log(`      ${delayLog}`);
+          addLog('info', `[Marketing ${dispatchId}] ${delayLog} - Contato: ${contact.phone_number}`);
           await new Promise(resolve => setTimeout(resolve, blindageResult.delay));
           const actualDelay = Date.now() - delayStartTime;
           const delayDiff = actualDelay - blindageResult.delay;
           if (Math.abs(delayDiff) > 100) {
-            console.log(`      ⚠️ [DELAY] ATENÇÃO: Esperado ${blindageResult.delay}ms, mas levou ${actualDelay}ms (diferença: ${delayDiff > 0 ? '+' : ''}${delayDiff}ms)`);
+            const delayWarn = `⚠️ [DELAY] ATENÇÃO: Esperado ${blindageResult.delay}ms, mas levou ${actualDelay}ms (diferença: ${delayDiff > 0 ? '+' : ''}${delayDiff}ms)`;
+            console.log(`      ${delayWarn}`);
+            addLog('warning', `[Marketing ${dispatchId}] ${delayWarn}`);
           } else {
-            console.log(`      ✅ [DELAY] Concluído corretamente: ${actualDelay}ms`);
+            const delayOk = `✅ [DELAY] Concluído corretamente: ${actualDelay}ms`;
+            console.log(`      ${delayOk}`);
+            addLog('success', `[Marketing ${dispatchId}] ${delayOk}`);
           }
         } else {
-          console.log(`      ⚠️ [DELAY] NENHUM DELAY CONFIGURADO - Enviando imediatamente!`);
+          const noDelayWarn = `⚠️ [DELAY] NENHUM DELAY CONFIGURADO - Enviando imediatamente!`;
+          console.log(`      ${noDelayWarn}`);
+          addLog('warning', `[Marketing ${dispatchId}] ${noDelayWarn}`);
         }
 
         // Enviar mensagem
