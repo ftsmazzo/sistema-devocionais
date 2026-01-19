@@ -1009,6 +1009,88 @@ export default function Contacts() {
         </div>
       )}
 
+      {/* Modal Importar CSV */}
+      {showImportModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <Card className="w-full max-w-md border-2 border-gray-200 rounded-2xl shadow-xl">
+            <CardHeader className="bg-gradient-to-br from-blue-50 to-cyan-50 border-b-2 border-gray-100 px-6 py-4">
+              <CardTitle className="text-xl font-bold text-gray-900">
+                Importar Contatos CSV
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-6">
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Arquivo CSV
+                  </label>
+                  <input
+                    type="file"
+                    id="csv-import-modal"
+                    accept=".csv,.txt"
+                    onChange={handleImportFile}
+                    className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    Formatos aceitos: telefone, nome, email, tags (separadas por vírgula)
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Tags para aplicar a todos os contatos (opcional)
+                  </label>
+                  <div className="flex flex-wrap gap-2 p-3 border-2 border-gray-200 rounded-xl min-h-[60px] bg-gray-50">
+                    {tags.length === 0 ? (
+                      <span className="text-sm text-gray-400">Nenhuma tag disponível. Crie tags na página de Tags.</span>
+                    ) : (
+                      tags.map(tag => {
+                        const isSelected = importTags.includes(tag.id);
+                        return (
+                          <button
+                            key={tag.id}
+                            type="button"
+                            onClick={() => {
+                              if (isSelected) {
+                                setImportTags(importTags.filter(id => id !== tag.id));
+                              } else {
+                                setImportTags([...importTags, tag.id]);
+                              }
+                            }}
+                            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                              isSelected
+                                ? 'text-white shadow-md'
+                                : 'bg-white text-gray-700 hover:bg-gray-100 border border-gray-300'
+                            }`}
+                            style={isSelected ? { backgroundColor: tag.color } : {}}
+                          >
+                            {isSelected ? '✓ ' : ''}{tag.name}
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3 pt-4 border-t border-gray-100">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      setShowImportModal(false);
+                      setImportTags([]);
+                    }}
+                    className="flex-1"
+                  >
+                    Cancelar
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
       {/* Modal Adicionar Tags em Massa */}
       {showBulkTagModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
