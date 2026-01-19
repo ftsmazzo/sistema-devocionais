@@ -3,6 +3,7 @@ import axios from 'axios';
 import { pool } from '../database';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { applyBlindage } from '../services/blindage';
+import { processMarketingDispatch } from '../services/marketingDispatch';
 
 const router = express.Router();
 
@@ -329,8 +330,19 @@ router.post('/:id/start', async (req: AuthRequest, res) => {
       [id]
     );
 
-    // TODO: Iniciar processamento em background
-    // Por enquanto, apenas atualiza o status
+    // Iniciar processamento em background baseado no tipo
+    if (dispatch.dispatch_type === 'marketing') {
+      // Processar marketing em background (não bloqueia a resposta)
+      processMarketingDispatch({
+        dispatchId: parseInt(id),
+        instanceIds: dispatch.instance_ids || undefined,
+      }).catch((error) => {
+        console.error(`❌ Erro ao processar disparo de marketing ${id}:`, error);
+      });
+    } else if (dispatch.dispatch_type === 'devocional') {
+      // Devocional já tem seu próprio scheduler, mas pode ser iniciado manualmente também
+      // Por enquanto, apenas atualiza status
+    }
 
     res.json({ 
       success: true,

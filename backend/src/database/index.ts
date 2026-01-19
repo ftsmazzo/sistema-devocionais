@@ -447,6 +447,44 @@ export async function initializeDatabase() {
       )
     `);
 
+    // Criar tabela de detecções de IA
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS ai_detections (
+        id SERIAL PRIMARY KEY,
+        contact_id INTEGER REFERENCES contacts(id) ON DELETE CASCADE,
+        dispatch_id INTEGER REFERENCES dispatches(id) ON DELETE CASCADE,
+        message TEXT NOT NULL,
+        is_positive BOOLEAN NOT NULL,
+        confidence DECIMAL(3,2) NOT NULL,
+        method VARCHAR(20) NOT NULL,
+        detected_keywords TEXT[],
+        sentiment_score DECIMAL(3,2),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_ai_detections_contact ON ai_detections(contact_id);
+      CREATE INDEX IF NOT EXISTS idx_ai_detections_dispatch ON ai_detections(dispatch_id);
+      CREATE INDEX IF NOT EXISTS idx_ai_detections_positive ON ai_detections(is_positive);
+    `);
+
+    // Criar tabela de interações de IA
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS ai_interactions (
+        id SERIAL PRIMARY KEY,
+        dispatch_id INTEGER REFERENCES dispatches(id) ON DELETE CASCADE,
+        contact_id INTEGER REFERENCES contacts(id) ON DELETE CASCADE,
+        user_message TEXT NOT NULL,
+        triggered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_ai_interactions_dispatch ON ai_interactions(dispatch_id);
+      CREATE INDEX IF NOT EXISTS idx_ai_interactions_contact ON ai_interactions(contact_id);
+    `);
+
     await client.query(`
       CREATE INDEX IF NOT EXISTS idx_devocionais_date ON devocionais(date);
       CREATE INDEX IF NOT EXISTS idx_devocionais_created_at ON devocionais(created_at);

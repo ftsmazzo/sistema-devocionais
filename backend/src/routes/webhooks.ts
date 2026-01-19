@@ -3,6 +3,7 @@ import axios from 'axios';
 import { pool } from '../database';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { updateDevocionalScore } from '../services/devocionalScoring';
+import { detectPositiveIntent, triggerAIInteraction } from '../services/aiDetection';
 
 const router = express.Router();
 
