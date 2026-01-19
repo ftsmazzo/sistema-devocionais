@@ -573,6 +573,15 @@ export async function initializeDatabase() {
       SET devocional_score = 100
       WHERE devocional_score IS NULL OR devocional_score = 0
     `);
+    
+    // Migração: Remover tag "bloqueado" de contatos que nunca receberam devocional
+    await client.query(`
+      DELETE FROM contact_tag_relations
+      WHERE tag_id IN (SELECT id FROM contact_tags WHERE name = 'bloqueado')
+        AND contact_id IN (
+          SELECT id FROM contacts WHERE last_devocional_sent_at IS NULL
+        )
+    `);
     `);
 
     // Criar tabela de tags
