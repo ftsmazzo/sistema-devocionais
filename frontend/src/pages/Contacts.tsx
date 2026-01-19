@@ -52,6 +52,7 @@ export default function Contacts() {
     name: '',
     email: '',
   });
+  const [contactTags, setContactTags] = useState<number[]>([]);
   const [total, setTotal] = useState(0);
   const [limit] = useState(50);
   const [offset, setOffset] = useState(0);
@@ -103,16 +104,60 @@ export default function Contacts() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
+      let contactId: number;
+      
       if (editingContact) {
-        await api.put(`/contacts/${editingContact.id}`, formData);
+        const response = await api.put(`/contacts/${editingContact.id}`, formData);
+        contactId = editingContact.id;
         setToast({ message: 'Contato atualizado com sucesso!', type: 'success' });
       } else {
-        await api.post('/contacts', formData);
+        const response = await api.post('/contacts', formData);
+        contactId = response.data.contact.id;
         setToast({ message: 'Contato criado com sucesso!', type: 'success' });
       }
+      
+      // Gerenciar tags
+      if (editingContact) {
+        // Remover tags que não estão mais selecionadas
+        const tagsToRemove = editingContact.tags
+          ?.filter(t => !contactTags.includes(t.id))
+          .map(t => t.id) || [];
+        
+        for (const tagId of tagsToRemove) {
+          try {
+            await api.delete(`/contacts/${contactId}/tags/${tagId}`);
+          } catch (error) {
+            console.error('Erro ao remover tag:', error);
+          }
+        }
+        
+        // Adicionar novas tags
+        const tagsToAdd = contactTags.filter(tagId => 
+          !editingContact.tags?.some(t => t.id === tagId)
+        );
+        
+        for (const tagId of tagsToAdd) {
+          try {
+            await api.post(`/contacts/${contactId}/tags`, { tag_id: tagId });
+          } catch (error) {
+            console.error('Erro ao adicionar tag:', error);
+          }
+        }
+      } else {
+        // Para novo contato, adicionar todas as tags selecionadas
+        for (const tagId of contactTags) {
+          try {
+            await api.post(`/contacts/${contactId}/tags`, { tag_id: tagId });
+          } catch (error) {
+            console.error('Erro ao adicionar tag:', error);
+          }
+        }
+      }
+      
       setShowModal(false);
       setEditingContact(null);
       setFormData({ phone_number: '', name: '', email: '' });
+      setContactTags([]);
       loadContacts();
     } catch (error: any) {
       setToast({
@@ -143,6 +188,7 @@ export default function Contacts() {
       name: contact.name || '',
       email: contact.email || '',
     });
+    setContactTags(contact.tags?.map(t => t.id) || []);
     setShowModal(true);
   };
 
@@ -159,34 +205,157 @@ export default function Contacts() {
     }
   };
 
+  const handleRemoveTag = async (contactId: number, tagId: number) => {
+    try {
+      await api.delete(`/contacts/${contactId}/tags/${tagId}`);
+      setToast({ message: 'Tag removida com sucesso!', type: 'success' });
+      loadContacts();
+    } catch (error: any) {
+      setToast({
+        message: error.response?.data?.error || 'Erro ao remover tag',
+        type: 'error'
+      });
+    }
+  };
+
 
   const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     try {
+      setLoading(true);
       const text = await file.text();
       const lines = text.split('\n').filter(line => line.trim());
-      const contactsToImport = lines.map(line => {
-        const parts = line.split(',').map(p => p.trim());
-        return {
-          phone_number: parts[0] || '',
-          name: parts[1] || '',
-          email: parts[2] || '',
-        };
+      
+      if (lines.length === 0) {
+        setToast({
+          message: 'Arquivo vazio',
+          type: 'error'
+        });
+        return;
+      }
+
+      // Detectar se tem header
+      const firstLine = lines[0].toLowerCase();
+      const hasHeader = firstLine.includes('phone') || 
+                       firstLine.includes('telefone') || 
+                       firstLine.includes('nome') || 
+                       firstLine.includes('name') ||
+                       firstLine.includes('email');
+      
+      const dataLines = hasHeader ? lines.slice(1) : lines;
+      
+      // Se tem header, mapear colunas
+      let columnMap: { [key: string]: number } = {};
+      if (hasHeader) {
+        const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
+        headers.forEach((header, index) => {
+          if (header.includes('phone') || header.includes('telefone') || header.includes('celular') || header.includes('whatsapp') || header.includes('numero')) {
+            columnMap['phone'] = index;
+          } else if (header.includes('nome') || header.includes('name')) {
+            columnMap['name'] = index;
+          } else if (header.includes('email') || header.includes('e-mail')) {
+            columnMap['email'] = index;
+          }
+        });
+      }
+
+      const contactsToImport = dataLines.map((line, lineIndex) => {
+        // Tratar CSV com aspas e vírgulas dentro de campos
+        const parts: string[] = [];
+        let current = '';
+        let inQuotes = false;
+        
+        for (let i = 0; i < line.length; i++) {
+          const char = line[i];
+          if (char === '"') {
+            inQuotes = !inQuotes;
+          } else if (char === ',' && !inQuotes) {
+            parts.push(current.trim());
+            current = '';
+          } else {
+            current += char;
+          }
+        }
+        parts.push(current.trim());
+
+        let contact: any = {};
+        
+        if (hasHeader && Object.keys(columnMap).length > 0) {
+          // Usar mapeamento de colunas
+          if (columnMap['phone'] !== undefined) {
+            contact.phone_number = parts[columnMap['phone']] || '';
+          }
+          if (columnMap['name'] !== undefined) {
+            contact.name = parts[columnMap['name']] || '';
+          }
+          if (columnMap['email'] !== undefined) {
+            contact.email = parts[columnMap['email']] || '';
+          }
+          
+          // Adicionar campos extras ao metadata
+          const metadata: any = {};
+          parts.forEach((part, index) => {
+            if (index !== columnMap['phone'] && index !== columnMap['name'] && index !== columnMap['email'] && part) {
+              metadata[`col_${index}`] = part;
+            }
+          });
+          if (Object.keys(metadata).length > 0) {
+            contact.metadata = metadata;
+          }
+        } else {
+          // Sem header, usar posição padrão
+          contact = {
+            phone_number: parts[0] || '',
+            name: parts[1] || '',
+            email: parts[2] || '',
+          };
+          
+          // Campos extras
+          if (parts.length > 3) {
+            const metadata: any = {};
+            parts.slice(3).forEach((part, index) => {
+              if (part) metadata[`extra_${index}`] = part;
+            });
+            contact.metadata = metadata;
+          }
+        }
+
+        return contact;
       }).filter(c => c.phone_number);
 
+      if (contactsToImport.length === 0) {
+        setToast({
+          message: 'Nenhum contato válido encontrado no arquivo',
+          type: 'error'
+        });
+        return;
+      }
+
       const response = await api.post('/contacts/import', { contacts: contactsToImport });
+      
+      const errorsCount = response.data.results.errors?.length || 0;
+      let message = `${response.data.results.created} criados, ${response.data.results.updated} atualizados`;
+      if (errorsCount > 0) {
+        message += `, ${errorsCount} erros`;
+      }
+      
       setToast({
-        message: `${response.data.results.created} criados, ${response.data.results.updated} atualizados`,
-        type: 'success'
+        message,
+        type: errorsCount > 0 ? 'warning' : 'success'
       });
+      
+      // Limpar input para permitir reimportar o mesmo arquivo
+      e.target.value = '';
       loadContacts();
     } catch (error: any) {
       setToast({
         message: error.response?.data?.error || 'Erro ao importar contatos',
         type: 'error'
       });
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -203,7 +372,7 @@ export default function Contacts() {
               Contatos
             </h1>
             <p className="text-gray-600 text-sm ml-13">
-              Gerencie seus contatos e organize com tags
+              Gerencie seus contatos e organize com tags. <strong>Tags</strong> categorizam contatos (ex: "Cliente VIP", "Interessado"). <strong>Listas</strong> agrupam contatos para disparos específicos.
             </p>
           </div>
           
@@ -227,6 +396,7 @@ export default function Contacts() {
               onClick={() => {
                 setEditingContact(null);
                 setFormData({ phone_number: '', name: '', email: '' });
+                setContactTags([]);
                 setShowModal(true);
               }}
               className="flex items-center gap-2 bg-gradient-to-r from-blue-500 to-cyan-500 hover:from-blue-600 hover:to-cyan-600 text-white shadow-lg"
@@ -367,18 +537,31 @@ export default function Contacts() {
                         )}
                       </div>
                       
-                      {/* Adicionar tag */}
+                      {/* Adicionar/Remover tag */}
                       <div className="flex flex-wrap gap-1">
-                        {tags.filter(t => !contact.tags?.some(ct => ct.id === t.id)).slice(0, 3).map(tag => (
-                          <button
-                            key={tag.id}
-                            onClick={() => handleAddTag(contact.id, tag.id)}
-                            className="px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors"
-                            style={{ borderLeft: `3px solid ${tag.color}` }}
-                          >
-                            + {tag.name}
-                          </button>
-                        ))}
+                        {tags.map(tag => {
+                          const hasTag = contact.tags?.some(ct => ct.id === tag.id);
+                          return (
+                            <button
+                              key={tag.id}
+                              onClick={() => hasTag 
+                                ? handleRemoveTag(contact.id, tag.id)
+                                : handleAddTag(contact.id, tag.id)
+                              }
+                              className={`px-2 py-0.5 rounded text-xs font-medium transition-colors ${
+                                hasTag
+                                  ? 'text-white'
+                                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                              }`}
+                              style={hasTag 
+                                ? { backgroundColor: tag.color }
+                                : { borderLeft: `3px solid ${tag.color}` }
+                              }
+                            >
+                              {hasTag ? '✕ ' : '+ '}{tag.name}
+                            </button>
+                          );
+                        })}
                       </div>
                     </div>
 
@@ -484,6 +667,46 @@ export default function Contacts() {
                     placeholder="email@exemplo.com"
                     className="h-12 border-2 border-gray-300 rounded-xl focus:border-blue-500"
                   />
+                </div>
+
+                {/* Tags */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Tags
+                  </label>
+                  <div className="flex flex-wrap gap-2 p-3 border-2 border-gray-200 rounded-xl min-h-[60px] bg-gray-50">
+                    {tags.length === 0 ? (
+                      <span className="text-sm text-gray-400">Nenhuma tag disponível. Crie tags na página de Tags.</span>
+                    ) : (
+                      tags.map(tag => {
+                        const isSelected = contactTags.includes(tag.id);
+                        return (
+                          <button
+                            key={tag.id}
+                            type="button"
+                            onClick={() => {
+                              if (isSelected) {
+                                setContactTags(contactTags.filter(id => id !== tag.id));
+                              } else {
+                                setContactTags([...contactTags, tag.id]);
+                              }
+                            }}
+                            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                              isSelected
+                                ? 'text-white shadow-md'
+                                : 'bg-white text-gray-700 hover:bg-gray-100 border border-gray-300'
+                            }`}
+                            style={isSelected ? { backgroundColor: tag.color } : {}}
+                          >
+                            {isSelected ? '✓ ' : ''}{tag.name}
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Tags ajudam a categorizar e filtrar contatos. Clique para selecionar/deselecionar.
+                  </p>
                 </div>
 
                 <div className="flex items-center gap-3 pt-4 border-t border-gray-100">

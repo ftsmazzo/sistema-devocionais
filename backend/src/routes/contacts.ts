@@ -559,14 +559,61 @@ router.post('/import', async (req: AuthRequest, res) => {
 
     for (const contactData of contacts) {
       try {
-        const { phone_number, name, email, metadata = {} } = contactData;
+        // Sanitização inteligente: aceita vários formatos de campo
+        let phone_number = contactData.phone_number || 
+                          contactData.phone || 
+                          contactData.telefone || 
+                          contactData.celular ||
+                          contactData.whatsapp ||
+                          contactData.numero ||
+                          '';
+        
+        let name = contactData.name || 
+                  contactData.nome || 
+                  contactData.full_name ||
+                  contactData.nome_completo ||
+                  '';
+        
+        let email = contactData.email || 
+                   contactData.e_mail ||
+                   contactData.email_address ||
+                   '';
+
+        // Coletar campos extras para metadata
+        const metadata: any = {};
+        const knownFields = ['phone_number', 'phone', 'telefone', 'celular', 'whatsapp', 'numero',
+                            'name', 'nome', 'full_name', 'nome_completo',
+                            'email', 'e_mail', 'email_address'];
+        
+        for (const [key, value] of Object.entries(contactData)) {
+          const normalizedKey = key.toLowerCase().trim();
+          if (!knownFields.some(f => normalizedKey.includes(f.toLowerCase())) && value) {
+            metadata[normalizedKey] = value;
+          }
+        }
 
         if (!phone_number) {
           results.errors.push({ contact: contactData, error: 'phone_number é obrigatório' });
           continue;
         }
 
+        // Normalizar número (remover caracteres não numéricos, exceto +)
         const normalizedPhone = phone_number.replace(/[^\d+]/g, '');
+        
+        // Validar formato básico de telefone
+        if (normalizedPhone.length < 10) {
+          results.errors.push({ contact: contactData, error: 'Número de telefone inválido (muito curto)' });
+          continue;
+        }
+
+        // Sanitizar nome e email
+        name = name.trim() || null;
+        email = email.trim() || null;
+        
+        // Validar email se fornecido
+        if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+          email = null; // Email inválido, mas não bloqueia o import
+        }
 
         const result = await pool.query(
           `INSERT INTO contacts (phone_number, name, email, source, metadata, opt_in_at)
@@ -578,7 +625,7 @@ router.post('/import', async (req: AuthRequest, res) => {
              metadata = contacts.metadata || EXCLUDED.metadata,
              updated_at = CURRENT_TIMESTAMP
            RETURNING id, (xmax = 0) as inserted`,
-          [normalizedPhone, name || null, email || null, source, JSON.stringify(metadata)]
+          [normalizedPhone, name, email, source, JSON.stringify(metadata)]
         );
 
         if (result.rows[0].inserted) {
