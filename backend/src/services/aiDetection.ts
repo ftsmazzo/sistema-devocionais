@@ -236,12 +236,14 @@ export async function triggerAIInteraction(
     };
 
     // Chamar webhook da IA
+    const webhookCallLog = `📤 CHAMANDO WEBHOOK DO N8N - URL: ${aiWebhookUrl}`;
     console.log(`\n   ========================================`);
-    console.log(`   📤 CHAMANDO WEBHOOK DO N8N`);
+    console.log(`   ${webhookCallLog}`);
     console.log(`   ========================================`);
-    console.log(`   URL: ${aiWebhookUrl}`);
     console.log(`   Payload:`, JSON.stringify(payload, null, 2));
     console.log(`   ========================================\n`);
+    addLog('info', webhookCallLog);
+    addLog('info', `Payload: ${JSON.stringify(payload)}`);
     
     try {
       const response = await axios.post(
@@ -255,20 +257,24 @@ export async function triggerAIInteraction(
         }
       );
       
-      console.log(`\n   ✅ WEBHOOK CHAMADO COM SUCESSO!`);
-      console.log(`   Status: ${response.status}`);
+      const successLog = `✅ WEBHOOK CHAMADO COM SUCESSO! Status: ${response.status}`;
+      console.log(`\n   ${successLog}`);
       console.log(`   Resposta:`, JSON.stringify(response.data, null, 2));
       console.log(`\n`);
+      addLog('success', successLog);
+      addLog('info', `Resposta do N8N: ${JSON.stringify(response.data)}`);
     } catch (error: any) {
-      console.error(`\n   ❌ ERRO AO CHAMAR WEBHOOK DO N8N!`);
-      console.error(`   URL: ${aiWebhookUrl}`);
-      console.error(`   Erro:`, error.message);
+      const errorLog = `❌ ERRO AO CHAMAR WEBHOOK DO N8N! URL: ${aiWebhookUrl} | Erro: ${error.message}`;
+      console.error(`\n   ${errorLog}`);
       if (error.response) {
         console.error(`   Status: ${error.response.status}`);
         console.error(`   Resposta:`, JSON.stringify(error.response.data, null, 2));
-      }
-      if (error.request) {
+        addLog('error', `${errorLog} | Status: ${error.response.status} | Resposta: ${JSON.stringify(error.response.data)}`);
+      } else if (error.request) {
         console.error(`   Request enviado mas sem resposta do servidor`);
+        addLog('error', `${errorLog} | Sem resposta do servidor`);
+      } else {
+        addLog('error', errorLog);
       }
       console.error(`\n`);
       throw error;
