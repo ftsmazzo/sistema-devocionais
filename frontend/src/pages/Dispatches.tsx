@@ -47,11 +47,13 @@ export default function Dispatches() {
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [dispatchType, setDispatchType] = useState<'devocional' | 'marketing'>('marketing');
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<FormData>({
     name: '',
     list_id: '',
     message_template: '',
-    instance_ids: [] as number[],
+    instance_ids: [],
+    media_url: '',
+    media_type: undefined,
   });
   const [lists, setLists] = useState<any[]>([]);
   const [instances, setInstances] = useState<any[]>([]);
@@ -131,6 +133,10 @@ export default function Dispatches() {
 
       if (dispatchType === 'marketing') {
         payload.message_template = formData.message_template;
+        if (formData.media_url) {
+          payload.media_url = formData.media_url;
+          payload.media_type = formData.media_type || 'image';
+        }
       }
 
       await api.post(`/dispatches/${dispatchType}`, payload);
@@ -525,20 +531,56 @@ export default function Dispatches() {
 
               {/* Mensagem (apenas marketing) */}
               {dispatchType === 'marketing' && (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Mensagem *
-                  </label>
-                  <textarea
-                    value={formData.message_template}
-                    onChange={(e) =>
-                      setFormData({ ...formData, message_template: e.target.value })
-                    }
-                    rows={6}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                    placeholder="Digite a mensagem que será enviada..."
-                  />
-                </div>
+                <>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Mensagem *
+                    </label>
+                    <textarea
+                      value={formData.message_template}
+                      onChange={(e) =>
+                        setFormData({ ...formData, message_template: e.target.value })
+                      }
+                      rows={6}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                      placeholder="Digite a mensagem que será enviada..."
+                    />
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Tipo de Mídia (Opcional)
+                    </label>
+                    <select
+                      value={formData.media_type || ''}
+                      onChange={(e) => setFormData({ ...formData, media_type: e.target.value as 'image' | 'pdf' | 'document' | undefined })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                    >
+                      <option value="">Apenas texto</option>
+                      <option value="image">Imagem</option>
+                      <option value="pdf">PDF</option>
+                      <option value="document">Documento</option>
+                    </select>
+                  </div>
+
+                  {formData.media_type && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        URL da Mídia *
+                      </label>
+                      <input
+                        type="url"
+                        value={formData.media_url || ''}
+                        onChange={(e) => setFormData({ ...formData, media_url: e.target.value })}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                        placeholder={`Cole a URL da ${formData.media_type === 'image' ? 'imagem' : formData.media_type === 'pdf' ? 'PDF' : 'documento'}...`}
+                      />
+                      <p className="text-xs text-gray-500 mt-1">
+                        Cole a URL completa da mídia (ex: https://exemplo.com/imagem.jpg)
+                      </p>
+                    </div>
+                  )}
+                </>
               )}
 
               {/* Instâncias */}
