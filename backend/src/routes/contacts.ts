@@ -1,6 +1,7 @@
 import express from 'express';
 import { pool } from '../database';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
+import { checkWhatsAppNumber, validateContactsWhatsApp } from '../services/whatsappValidation';
 
 const router = express.Router();
 
@@ -708,12 +709,25 @@ router.post('/import', async (req: AuthRequest, res) => {
  */
 router.post('/bulk-update', async (req: AuthRequest, res) => {
   try {
-    const { contact_ids, whatsapp_validated, opt_in, opt_out } = req.body;
+    const { contact_ids, whatsapp_validated, opt_in, opt_out, validate_whatsapp } = req.body;
 
     if (!Array.isArray(contact_ids) || contact_ids.length === 0) {
       return res.status(400).json({ error: 'contact_ids deve ser um array não vazio' });
     }
 
+    // Se validate_whatsapp for true, validar via Evolution API
+    if (validate_whatsapp === true) {
+      const validationResults = await validateContactsWhatsApp(contact_ids);
+      return res.json({
+        success: true,
+        validated: validationResults.validated,
+        invalid: validationResults.invalid,
+        errors: validationResults.errors,
+        message: `${validationResults.validated} validado(s), ${validationResults.invalid} inválido(s)`
+      });
+    }
+
+    // Atualização manual de campos
     const updates: string[] = [];
     const params: any[] = [];
     let paramCount = 1;

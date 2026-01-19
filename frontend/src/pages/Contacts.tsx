@@ -597,13 +597,14 @@ export default function Contacts() {
                     onClick={async () => {
                       try {
                         setLoading(true);
-                        await api.post('/contacts/bulk-update', {
+                        const response = await api.post('/contacts/bulk-update', {
                           contact_ids: selectedContacts,
-                          whatsapp_validated: true
+                          validate_whatsapp: true
                         });
+                        const { validated, invalid } = response.data;
                         setToast({
-                          message: `${selectedContacts.length} contato(s) marcado(s) como WhatsApp validado!`,
-                          type: 'success'
+                          message: `Validação concluída: ${validated} válido(s), ${invalid} inválido(s). Contatos sem WhatsApp foram tagados como "bloqueado".`,
+                          type: invalid > 0 ? 'warning' : 'success'
                         });
                         setSelectedContacts([]);
                         await loadContacts();
@@ -617,10 +618,10 @@ export default function Contacts() {
                       }
                     }}
                     className="text-green-600 hover:text-green-700 hover:border-green-300"
-                    title="Marcar contatos selecionados como WhatsApp validado"
+                    title="Validar contatos selecionados via Evolution API e tagar como bloqueado os inválidos"
                   >
                     <CheckCircle2 className="h-4 w-4 mr-1" />
-                    Validar WhatsApp
+                    Validar WhatsApp (API)
                   </Button>
                   <Button
                     size="sm"
