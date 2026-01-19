@@ -579,49 +579,26 @@ async function checkInstanceHealth(
   const instance = instanceResult.rows[0];
 
   // Verificar se a instância está realmente conectada (status é mais confiável que health_status)
-  if (instance.status !== 'connected') {
-    await logBlindageAction(instanceId, {
-      action_type: 'health_blocked',
-      reason: 'instance_not_connected',
-      status: instance.status,
-    }, healthRule.id);
-
-    return {
-      canSend: false,
-      reason: `Instância não está conectada (status: ${instance.status})`,
-      blockedBy: 'health_check',
-    };
+  // Se status = 'connected', a instância está funcionando, independente do health_status
+  if (instance.status === 'connected') {
+    // Se está conectada, permitir envio mesmo se health_status estiver como 'down' ou 'degraded'
+    // O health_status pode estar desatualizado, mas o status 'connected' é atualizado em tempo real
+    return { canSend: true };
   }
 
-  // Se está down e configurado para pausar (verificar health_status apenas se configurado)
-  if (config.pause_if_down && instance.health_status === 'down') {
-    await logBlindageAction(instanceId, {
-      action_type: 'health_blocked',
-      reason: 'instance_down',
-    }, healthRule.id);
+  // Se não está conectada, bloquear
+  await logBlindageAction(instanceId, {
+    action_type: 'health_blocked',
+    reason: 'instance_not_connected',
+    status: instance.status,
+    health_status: instance.health_status,
+  }, healthRule.id);
 
-    return {
-      canSend: false,
-      reason: 'Instância está down',
-      blockedBy: 'health_check',
-    };
-  }
-
-  // Se está degradada e configurado para pausar
-  if (config.pause_if_degraded && instance.health_status === 'degraded') {
-    await logBlindageAction(instanceId, {
-      action_type: 'health_blocked',
-      reason: 'instance_degraded',
-    }, healthRule.id);
-
-    return {
-      canSend: false,
-      reason: 'Instância está degradada',
-      blockedBy: 'health_check',
-    };
-  }
-
-  return { canSend: true };
+  return {
+    canSend: false,
+    reason: `Instância não está conectada (status: ${instance.status})`,
+    blockedBy: 'health_check',
+  };
 }
 
 /**
