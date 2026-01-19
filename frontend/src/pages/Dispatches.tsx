@@ -47,6 +47,7 @@ export default function Dispatches() {
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [dispatchType, setDispatchType] = useState<'devocional' | 'marketing'>('marketing');
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [formData, setFormData] = useState<FormData>({
     name: '',
     list_id: '',
