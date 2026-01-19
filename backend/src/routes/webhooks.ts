@@ -150,18 +150,45 @@ async function processWebhookEvent(instanceId: number, eventType: string, eventD
 // Processar mensagem recebida
 async function processMessageReceived(instanceId: number, eventData: any) {
   try {
-    const message = eventData.messages?.[0] || eventData.message;
-    if (!message || message.fromMe) {
-      return; // Ignorar mensagens enviadas por nós
-    }
-
-    const fromNumber = message.key?.remoteJid?.replace('@s.whatsapp.net', '') || 
-                       message.from?.replace('@s.whatsapp.net', '') ||
-                       message.remoteJid?.replace('@s.whatsapp.net', '');
-
-    if (!fromNumber) {
+    console.log(`   🔍 Processando mensagem recebida...`);
+    
+    // Tentar diferentes formatos de mensagem
+    const message = eventData.data?.messages?.[0] || 
+                    eventData.messages?.[0] || 
+                    eventData.message ||
+                    eventData.data?.message;
+    
+    if (!message) {
+      console.log(`   ⚠️ Mensagem não encontrada no formato esperado`);
       return;
     }
+    
+    console.log(`   📝 Mensagem encontrada:`, JSON.stringify(message, null, 2));
+    
+    // Verificar se é mensagem enviada por nós
+    const fromMe = message.fromMe || 
+                   message.key?.fromMe || 
+                   message.data?.key?.fromMe ||
+                   false;
+    
+    if (fromMe) {
+      console.log(`   ℹ️ Mensagem enviada por nós, ignorando`);
+      return;
+    }
+
+    // Extrair número do remetente
+    const fromNumber = message.key?.remoteJid?.replace('@s.whatsapp.net', '') || 
+                       message.from?.replace('@s.whatsapp.net', '') ||
+                       message.remoteJid?.replace('@s.whatsapp.net', '') ||
+                       message.data?.key?.remoteJid?.replace('@s.whatsapp.net', '') ||
+                       eventData.sender?.replace('@s.whatsapp.net', '');
+
+    if (!fromNumber) {
+      console.log(`   ⚠️ Número do remetente não encontrado`);
+      return;
+    }
+    
+    console.log(`   📱 Número do remetente: ${fromNumber}`);
 
     // Buscar contato pelo número
     const contactResult = await pool.query(
@@ -170,10 +197,12 @@ async function processMessageReceived(instanceId: number, eventData: any) {
     );
 
     if (contactResult.rows.length === 0) {
+      console.log(`   ⚠️ Contato ${fromNumber} não encontrado no banco`);
       return; // Contato não encontrado
     }
 
     const contactId = contactResult.rows[0].id;
+    console.log(`   ✅ Contato encontrado: ID ${contactId}`);
 
     // Buscar último devocional enviado para este contato
     const lastDevocionalResult = await pool.query(
@@ -221,15 +250,33 @@ async function processMessageReceived(instanceId: number, eventData: any) {
 
       // Se a mensagem foi recebida dentro de 48 horas após o envio do marketing, verificar intenção
       if (hoursSinceSent <= 48 && lastMarketing.dispatch_id) {
-        const messageText = message.body || message.message?.conversation || message.message?.extendedTextMessage?.text || '';
+        console.log(`   📢 Resposta a disparo de marketing detectada (${hoursSinceSent.toFixed(2)}h desde o envio)`);
+        
+        // Extrair texto da mensagem em diferentes formatos
+        const messageText = message.body || 
+                           message.message?.conversation || 
+                           message.message?.extendedTextMessage?.text ||
+                           message.data?.message?.conversation ||
+                           eventData.data?.message?.conversation ||
+                           '';
+        
+        console.log(`   💬 Texto da mensagem: "${messageText}"`);
         
         if (messageText.trim().length > 0) {
           // Detectar intenção positiva
+          console.log(`   🔍 Verificando intenção positiva...`);
           const detection = await detectPositiveIntent(
             messageText,
             contactId,
             lastMarketing.dispatch_id
           );
+
+          console.log(`   📊 Resultado da detecção:`, {
+            isPositive: detection.isPositive,
+            confidence: detection.confidence,
+            method: detection.method,
+            detectedKeywords: detection.detectedKeywords,
+          });
 
           if (detection.isPositive && detection.confidence > 0.5) {
             console.log(`   ✅ Intenção positiva detectada para contato ${contactId} (confiança: ${detection.confidence})`);
@@ -240,8 +287,14 @@ async function processMessageReceived(instanceId: number, eventData: any) {
               contactId,
               messageText
             );
+          } else {
+            console.log(`   ⚠️ Intenção não detectada ou confiança baixa (${detection.confidence})`);
           }
+        } else {
+          console.log(`   ⚠️ Mensagem vazia, não processando`);
         }
+      } else {
+        console.log(`   ⚠️ Mensagem recebida após 48h do disparo (${hoursSinceSent.toFixed(2)}h)`);
       }
     }
 

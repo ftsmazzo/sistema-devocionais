@@ -30,12 +30,15 @@ export async function detectPositiveIntent(
   dispatchId: number
 ): Promise<DetectionResult> {
   try {
+    console.log(`   🔍 [AI Detection] Verificando mensagem: "${message}"`);
+    
     // Buscar configuração de IA
     const configResult = await pool.query(
       `SELECT * FROM marketing_ai_config WHERE enabled = true ORDER BY id DESC LIMIT 1`
     );
 
     if (configResult.rows.length === 0) {
+      console.log(`   ⚠️ [AI Detection] Configuração de marketing não encontrada ou desabilitada`);
       return {
         isPositive: false,
         confidence: 0,
@@ -44,18 +47,32 @@ export async function detectPositiveIntent(
     }
 
     const config: AIConfig = configResult.rows[0];
+    console.log(`   📋 [AI Detection] Config encontrada:`, {
+      keywords: config.positive_keywords,
+      sentiment_enabled: config.sentiment_analysis_enabled,
+      webhook_url: config.ai_webhook_url ? 'configurado' : 'não configurado',
+    });
+    
     const messageLower = message.toLowerCase().trim();
 
     // 1. Verificar palavras-chave
     const detectedKeywords: string[] = [];
-    for (const keyword of config.positive_keywords || []) {
-      if (messageLower.includes(keyword.toLowerCase())) {
+    const keywordsList = config.positive_keywords || [];
+    
+    console.log(`   🔑 [AI Detection] Verificando ${keywordsList.length} palavras-chave...`);
+    
+    for (const keyword of keywordsList) {
+      const keywordLower = keyword.toLowerCase();
+      if (messageLower.includes(keywordLower)) {
         detectedKeywords.push(keyword);
+        console.log(`   ✅ [AI Detection] Palavra-chave encontrada: "${keyword}"`);
       }
     }
 
     const hasKeywords = detectedKeywords.length > 0;
     let keywordConfidence = hasKeywords ? Math.min(0.7, 0.4 + (detectedKeywords.length * 0.1)) : 0;
+    
+    console.log(`   📊 [AI Detection] Palavras-chave: ${detectedKeywords.length} encontradas, confiança: ${keywordConfidence}`);
 
     // 2. Análise de sentimento (se habilitada)
     let sentimentScore = 0;
@@ -218,16 +235,28 @@ export async function triggerAIInteraction(
     };
 
     // Chamar webhook da IA
-    await axios.post(
-      aiWebhookUrl,
-      payload,
-      {
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        timeout: 30000, // 30 segundos
+    console.log(`   📤 [AI Trigger] Enviando payload para webhook:`, JSON.stringify(payload, null, 2));
+    
+    try {
+      const response = await axios.post(
+        aiWebhookUrl,
+        payload,
+        {
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          timeout: 30000, // 30 segundos
+        }
+      );
+      
+      console.log(`   ✅ [AI Trigger] Webhook chamado com sucesso! Status: ${response.status}`);
+    } catch (error: any) {
+      console.error(`   ❌ [AI Trigger] Erro ao chamar webhook:`, error.message);
+      if (error.response) {
+        console.error(`   📄 [AI Trigger] Resposta do erro:`, error.response.data);
       }
-    );
+      throw error;
+    }
 
     // Registrar ativação da IA
     await pool.query(
