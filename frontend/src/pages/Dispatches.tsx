@@ -47,6 +47,7 @@ export default function Dispatches() {
   const [lists, setLists] = useState<any[]>([]);
   const [instances, setInstances] = useState<any[]>([]);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [startingDispatch, setStartingDispatch] = useState<number | null>(null);
 
   useEffect(() => {
     loadDispatches();
@@ -131,7 +132,13 @@ export default function Dispatches() {
   };
 
   const handleStart = async (id: number) => {
+    // Prevenir duplo clique
+    if (startingDispatch === id) {
+      return;
+    }
+
     try {
+      setStartingDispatch(id);
       await api.post(`/dispatches/${id}/start`);
       setToast({ message: 'Disparo iniciado!', type: 'success' });
       await loadDispatches();
@@ -140,6 +147,8 @@ export default function Dispatches() {
         message: error.response?.data?.error || 'Erro ao iniciar disparo',
         type: 'error'
       });
+    } finally {
+      setStartingDispatch(null);
     }
   };
 
@@ -351,10 +360,11 @@ export default function Dispatches() {
                       size="sm"
                       variant="outline"
                       onClick={() => handleStart(dispatch.id)}
-                      className="text-green-600 hover:text-green-700"
+                      disabled={startingDispatch === dispatch.id}
+                      className="text-green-600 hover:text-green-700 disabled:opacity-50"
                     >
                       <Play className="h-4 w-4 mr-1" />
-                      Iniciar
+                      {startingDispatch === dispatch.id ? 'Iniciando...' : 'Iniciar'}
                     </Button>
                   )}
                   {dispatch.status === 'running' && (

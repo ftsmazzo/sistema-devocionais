@@ -325,13 +325,22 @@ router.post('/:id/start', async (req: AuthRequest, res) => {
       return res.status(400).json({ error: 'Disparo já foi concluído' });
     }
 
-    // Atualizar status
-    await pool.query(
+    // Atualizar status com verificação de concorrência (evitar processamento duplicado)
+    const updateResult = await pool.query(
       `UPDATE dispatches 
        SET status = 'running', started_at = CURRENT_TIMESTAMP
-       WHERE id = $1`,
+       WHERE id = $1 AND status = 'pending'
+       RETURNING id`,
       [id]
     );
+
+    // Se não atualizou nenhuma linha, significa que já foi iniciado por outra requisição
+    if (updateResult.rows.length === 0) {
+      return res.status(400).json({ 
+        error: 'Disparo já foi iniciado ou não está mais pendente',
+        message: 'Este disparo já está sendo processado'
+      });
+    }
 
     // Iniciar processamento em background baseado no tipo
     if (dispatch.dispatch_type === 'marketing') {

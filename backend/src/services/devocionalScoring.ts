@@ -154,19 +154,33 @@ export async function canReceiveDevocional(contactId: number): Promise<boolean> 
 
     const contact = result.rows[0];
 
+    // Log detalhado para debug
+    const reasons: string[] = [];
+    
+    if ((contact.consecutive_devocional_failures || 0) >= 3) {
+      reasons.push(`falhas consecutivas: ${contact.consecutive_devocional_failures}`);
+    }
+    if ((contact.has_bloqueado_tag || 0) > 0) {
+      reasons.push('tag bloqueado');
+    }
+    if (!contact.opt_in) {
+      reasons.push('opt_in = false');
+    }
+    if (contact.opt_out) {
+      reasons.push('opt_out = true');
+    }
+    if (!contact.whatsapp_validated) {
+      reasons.push('whatsapp não validado');
+    }
+
     // Não pode receber se:
     // 1. Tem 3+ falhas consecutivas
     // 2. Tem tag "bloqueado"
     // 3. Não está opt-in
     // 4. Está opt-out
     // 5. WhatsApp não validado
-    if (
-      (contact.consecutive_devocional_failures || 0) >= 3 ||
-      (contact.has_bloqueado_tag || 0) > 0 ||
-      !contact.opt_in ||
-      contact.opt_out ||
-      !contact.whatsapp_validated
-    ) {
+    if (reasons.length > 0) {
+      console.log(`   ⛔ Contato ${contactId} bloqueado: ${reasons.join(', ')}`);
       return false;
     }
 
