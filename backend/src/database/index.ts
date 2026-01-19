@@ -195,6 +195,14 @@ export async function initializeDatabase() {
         name VARCHAR(255) NOT NULL,
         message_template TEXT NOT NULL,
         instance_ids INTEGER[],
+        dispatch_type VARCHAR(50) NOT NULL DEFAULT 'marketing',
+        list_id INTEGER REFERENCES contact_lists(id),
+        contact_ids INTEGER[],
+        devocional_id INTEGER REFERENCES devocionais(id),
+        template_id INTEGER,
+        blindage_config JSONB DEFAULT '{}',
+        schedule_config JSONB DEFAULT '{}',
+        metadata JSONB DEFAULT '{}',
         total_contacts INTEGER DEFAULT 0,
         contacts_processed INTEGER DEFAULT 0,
         contacts_success INTEGER DEFAULT 0,
@@ -208,6 +216,41 @@ export async function initializeDatabase() {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
+    `);
+
+    // Adicionar colunas se não existirem (migração)
+    await client.query(`
+      DO $$ 
+      BEGIN 
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                       WHERE table_name = 'dispatches' AND column_name = 'dispatch_type') THEN
+          ALTER TABLE dispatches ADD COLUMN dispatch_type VARCHAR(50) NOT NULL DEFAULT 'marketing';
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                       WHERE table_name = 'dispatches' AND column_name = 'list_id') THEN
+          ALTER TABLE dispatches ADD COLUMN list_id INTEGER REFERENCES contact_lists(id);
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                       WHERE table_name = 'dispatches' AND column_name = 'contact_ids') THEN
+          ALTER TABLE dispatches ADD COLUMN contact_ids INTEGER[];
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                       WHERE table_name = 'dispatches' AND column_name = 'devocional_id') THEN
+          ALTER TABLE dispatches ADD COLUMN devocional_id INTEGER REFERENCES devocionais(id);
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                       WHERE table_name = 'dispatches' AND column_name = 'blindage_config') THEN
+          ALTER TABLE dispatches ADD COLUMN blindage_config JSONB DEFAULT '{}';
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                       WHERE table_name = 'dispatches' AND column_name = 'schedule_config') THEN
+          ALTER TABLE dispatches ADD COLUMN schedule_config JSONB DEFAULT '{}';
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                       WHERE table_name = 'dispatches' AND column_name = 'metadata') THEN
+          ALTER TABLE dispatches ADD COLUMN metadata JSONB DEFAULT '{}';
+        END IF;
+      END $$;
     `);
 
     await client.query(`
