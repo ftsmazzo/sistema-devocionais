@@ -9,7 +9,6 @@ import {
   Plus,
   Edit,
   Trash2,
-  Palette,
 } from 'lucide-react';
 
 interface Tag {

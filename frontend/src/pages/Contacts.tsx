@@ -12,7 +12,6 @@ import {
   Trash2,
   Tag,
   Upload,
-  Download,
   CheckCircle2,
   XCircle,
   Phone,
@@ -160,18 +159,6 @@ export default function Contacts() {
     }
   };
 
-  const handleRemoveTag = async (contactId: number, tagId: number) => {
-    try {
-      await api.delete(`/contacts/${contactId}/tags/${tagId}`);
-      setToast({ message: 'Tag removida com sucesso!', type: 'success' });
-      loadContacts();
-    } catch (error: any) {
-      setToast({
-        message: error.response?.data?.error || 'Erro ao remover tag',
-        type: 'error'
-      });
-    }
-  };
 
   const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -348,10 +335,14 @@ export default function Contacts() {
                     </div>
                     <div className="flex items-center gap-2">
                       {contact.whatsapp_validated && (
-                        <CheckCircle2 className="h-5 w-5 text-green-500" title="WhatsApp validado" />
+                        <div title="WhatsApp validado">
+                          <CheckCircle2 className="h-5 w-5 text-green-500" />
+                        </div>
                       )}
                       {contact.opt_out && (
-                        <XCircle className="h-5 w-5 text-red-500" title="Opt-out" />
+                        <div title="Opt-out">
+                          <XCircle className="h-5 w-5 text-red-500" />
+                        </div>
                       )}
                     </div>
                   </div>
