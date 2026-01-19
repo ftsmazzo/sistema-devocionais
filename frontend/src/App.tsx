@@ -8,6 +8,8 @@ import Contacts from './pages/Contacts';
 import Tags from './pages/Tags';
 import Lists from './pages/Lists';
 import Dispatches from './pages/Dispatches';
+import DevocionalConfig from './pages/DevocionalConfig';
+import MarketingConfig from './pages/MarketingConfig';
 import Layout from './components/Layout';
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
@@ -84,6 +86,22 @@ function App() {
           element={
             <PrivateRoute>
               <Dispatches />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/devocional/config"
+          element={
+            <PrivateRoute>
+              <DevocionalConfig />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/marketing/config"
+          element={
+            <PrivateRoute>
+              <MarketingConfig />
             </PrivateRoute>
           }
         />
