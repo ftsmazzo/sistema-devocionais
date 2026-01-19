@@ -48,7 +48,8 @@ export function personalizeDevocionalMessage(
 
 /**
  * Formatar devocional completo com versículos
- * O texto do devocional já vem completo do N8N, então não adicionamos versículos se já estiverem no texto
+ * O texto do devocional já vem completo do N8N (incluindo assinatura e versículos),
+ * então verificamos se o texto já contém versículos antes de adicionar
  */
 export function formatDevocionalMessage(devocional: {
   title: string;
@@ -64,13 +65,25 @@ export function formatDevocionalMessage(devocional: {
 }): string {
   let message = `*${devocional.title}*\n\n`;
 
+  // Verificar se o texto já contém a assinatura (indica que o texto já está completo)
+  const textoCompleto = devocional.text.includes('Alex e Daniela') || 
+                        devocional.text.includes('Mantovani');
+
   // Verificar se o versículo principal já está no texto
   const versiculoPrincipalNoTexto = devocional.versiculo_principal && 
-    devocional.text.includes(devocional.versiculo_principal.referencia);
+    (devocional.text.includes(devocional.versiculo_principal.referencia) ||
+     devocional.text.includes(devocional.versiculo_principal.texto));
 
   // Verificar se o versículo de apoio já está no texto
   const versiculoApoioNoTexto = devocional.versiculo_apoio && 
-    devocional.text.includes(devocional.versiculo_apoio.referencia);
+    (devocional.text.includes(devocional.versiculo_apoio.referencia) ||
+     devocional.text.includes(devocional.versiculo_apoio.texto));
+
+  // Se o texto já está completo (tem assinatura), não adicionar versículos
+  if (textoCompleto) {
+    message += devocional.text;
+    return message;
+  }
 
   // Adicionar versículo principal apenas se não estiver no texto
   if (devocional.versiculo_principal && !versiculoPrincipalNoTexto) {
@@ -78,7 +91,7 @@ export function formatDevocionalMessage(devocional: {
     message += `${devocional.versiculo_principal.texto}\n\n`;
   }
 
-  message += `${devocional.text}`;
+  message += devocional.text;
 
   // Adicionar versículo de apoio apenas se não estiver no texto
   if (devocional.versiculo_apoio && !versiculoApoioNoTexto) {
