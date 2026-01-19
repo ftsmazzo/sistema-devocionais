@@ -211,6 +211,15 @@ export async function processMarketingDispatch(params: MarketingDispatchParams):
           addLog('warning', `[Marketing ${dispatchId}] ${noDelayWarn}`);
         }
 
+        // CRÍTICO: Atualizar last_message_sent_at ANTES de enviar para que o próximo cálculo de delay seja correto
+        // Isso garante que o delay global seja respeitado mesmo com rotação de instâncias
+        await pool.query(
+          `UPDATE instances 
+           SET last_message_sent_at = CURRENT_TIMESTAMP 
+           WHERE id = $1`,
+          [instance.id]
+        );
+
         // Enviar mensagem
         const sendStartTime = Date.now();
         if (mediaUrl && mediaType) {

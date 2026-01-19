@@ -738,10 +738,12 @@ async function checkAllowedHours(
 
 /**
  * Calcula delay necessário antes de enviar
+ * IMPORTANTE: Calcula baseado na última mensagem GLOBAL (de qualquer instância) para evitar envios simultâneos
  */
 async function calculateDelay(instanceId: number, rules: BlindageRule[]): Promise<number> {
   const delayRule = rules.find(r => r.rule_type === 'message_delay');
   if (!delayRule || !delayRule.enabled) {
+    console.log('   ℹ️ Regra de delay desabilitada ou não encontrada. Sem delay.');
     return 0;
   }
 
@@ -750,21 +752,20 @@ async function calculateDelay(instanceId: number, rules: BlindageRule[]): Promis
 
   // Delay progressivo
   if (config.progressive) {
-    // Buscar quantas mensagens foram enviadas na última hora
+    // Buscar quantas mensagens foram enviadas na última hora (GLOBAL, não por instância)
     const now = new Date();
     const currentHour = now.getHours();
     const currentDate = now.toISOString().split('T')[0];
 
     const metrics = await pool.query(
-      `SELECT messages_sent 
+      `SELECT SUM(messages_sent) as total_messages
        FROM message_metrics 
-       WHERE instance_id = $1 
-         AND metric_date = $2 
-         AND hour = $3`,
-      [instanceId, currentDate, currentHour]
+       WHERE metric_date = $1 
+         AND hour = $2`,
+      [currentDate, currentHour]
     );
 
-    const messagesThisHour = metrics.rows[0]?.messages_sent || 0;
+    const messagesThisHour = parseInt(metrics.rows[0]?.total_messages || '0');
     const baseDelay = config.base_delay || minDelaySeconds;
     const increment = config.increment_per_message || 0.5;
 
@@ -776,28 +777,35 @@ async function calculateDelay(instanceId: number, rules: BlindageRule[]): Promis
     }
   }
 
-  // Verificar última mensagem enviada
-  const instanceResult = await pool.query(
-    `SELECT last_message_sent_at FROM instances WHERE id = $1`,
-    [instanceId]
+  // CRÍTICO: Verificar última mensagem enviada GLOBALMENTE (de qualquer instância)
+  // Isso garante que não haja envios simultâneos mesmo com rotação de instâncias
+  const globalLastSentResult = await pool.query(
+    `SELECT MAX(last_message_sent_at) as global_last_sent 
+     FROM instances 
+     WHERE status = 'connected' AND last_message_sent_at IS NOT NULL`
   );
 
   let delayNeeded = 0;
-  if (instanceResult.rows[0]?.last_message_sent_at) {
-    const lastSent = new Date(instanceResult.rows[0].last_message_sent_at);
+  if (globalLastSentResult.rows[0]?.global_last_sent) {
+    const lastSent = new Date(globalLastSentResult.rows[0].global_last_sent);
     const secondsSinceLastSent = (Date.now() - lastSent.getTime()) / 1000;
+
+    console.log(`   ⏱️ Última mensagem global: ${secondsSinceLastSent.toFixed(2)}s atrás | Delay mínimo necessário: ${minDelaySeconds}s`);
 
     if (secondsSinceLastSent < minDelaySeconds) {
       // Precisa esperar mais tempo
       delayNeeded = (minDelaySeconds - secondsSinceLastSent) * 1000; // em milissegundos
+      console.log(`   ⏳ Delay necessário: ${(delayNeeded / 1000).toFixed(2)}s (${delayNeeded}ms)`);
     } else {
-      // Já passou o tempo mínimo, mas ainda aplicar um pequeno delay para garantir
-      // Aplicar pelo menos 1 segundo de delay entre mensagens
-      delayNeeded = 1000; // 1 segundo mínimo
+      // Já passou o tempo mínimo, mas ainda aplicar um pequeno delay para garantir espaçamento
+      // Aplicar pelo menos o delay mínimo configurado
+      delayNeeded = minDelaySeconds * 1000;
+      console.log(`   ⏳ Aplicando delay mínimo: ${minDelaySeconds}s (${delayNeeded}ms)`);
     }
   } else {
-    // Primeira mensagem desta instância, aplicar delay mínimo
+    // Primeira mensagem do sistema, aplicar delay mínimo
     delayNeeded = minDelaySeconds * 1000;
+    console.log(`   ⏳ Primeira mensagem do sistema, aplicando delay mínimo: ${minDelaySeconds}s (${delayNeeded}ms)`);
   }
 
   return Math.ceil(delayNeeded);
