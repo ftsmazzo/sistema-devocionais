@@ -71,9 +71,16 @@ export async function detectPositiveIntent(
     }
 
     const hasKeywords = detectedKeywords.length > 0;
-    let keywordConfidence = hasKeywords ? Math.min(0.7, 0.4 + (detectedKeywords.length * 0.1)) : 0;
+    // Aumentar confiança base para garantir que palavras-chave sejam detectadas
+    // Base: 0.5 (era 0.4), incremento: 0.15 por palavra (era 0.1)
+    let keywordConfidence = hasKeywords ? Math.min(0.9, 0.5 + (detectedKeywords.length * 0.15)) : 0;
     
     console.log(`   📊 [AI Detection] Palavras-chave: ${detectedKeywords.length} encontradas, confiança: ${keywordConfidence}`);
+    if (hasKeywords) {
+      console.log(`   ✅ [AI Detection] Palavras-chave detectadas: ${detectedKeywords.join(', ')}`);
+    } else {
+      console.log(`   ⚠️ [AI Detection] Nenhuma palavra-chave encontrada. Lista de palavras-chave: ${keywordsList.join(', ')}`);
+    }
 
     // 2. Análise de sentimento (se habilitada)
     let sentimentScore = 0;

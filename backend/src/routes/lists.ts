@@ -160,6 +160,19 @@ router.post('/', async (req: AuthRequest, res) => {
 
     const userId = (req as AuthRequest).user?.id;
 
+    // Verificar se já existe uma lista com o mesmo nome
+    const existingCheck = await pool.query(
+      `SELECT id FROM contact_lists WHERE name = $1`,
+      [name]
+    );
+
+    if (existingCheck.rows.length > 0) {
+      return res.status(409).json({ 
+        error: 'Já existe uma lista com este nome',
+        existing_list_id: existingCheck.rows[0].id
+      });
+    }
+
     const result = await pool.query(
       `INSERT INTO contact_lists (name, description, list_type, filter_config, created_by)
        VALUES ($1, $2, $3, $4, $5)
