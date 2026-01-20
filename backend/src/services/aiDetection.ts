@@ -79,14 +79,16 @@ export async function detectPositiveIntent(
     let sentimentScore = 0;
     let sentimentConfidence = 0;
 
-    if (config.sentiment_analysis_enabled && config.ai_webhook_url) {
-      try {
-        sentimentScore = await analyzeSentiment(message, config.ai_webhook_url);
-        sentimentConfidence = Math.abs(sentimentScore); // Quanto mais próximo de 1 ou -1, mais confiável
-      } catch (error: any) {
-        console.error('❌ Erro na análise de sentimento:', error.message);
-      }
-    }
+    // NOTA: Análise de sentimento desabilitada temporariamente para evitar conflito com webhook principal
+    // Se precisar, usar um webhook diferente para análise de sentimento
+    // if (config.sentiment_analysis_enabled && config.ai_webhook_url) {
+    //   try {
+    //     sentimentScore = await analyzeSentiment(message, config.ai_webhook_url);
+    //     sentimentConfidence = Math.abs(sentimentScore); // Quanto mais próximo de 1 ou -1, mais confiável
+    //   } catch (error: any) {
+    //     console.error('❌ Erro na análise de sentimento:', error.message);
+    //   }
+    // }
 
     // 3. Decisão final
     let isPositive = false;
@@ -189,18 +191,21 @@ export async function triggerAIInteraction(
   userMessage: string
 ): Promise<void> {
   try {
-    // Verificar se já existe uma interação recente (últimos 5 minutos) para evitar duplicação
+    // Verificar se já existe uma interação recente (últimos 30 segundos) para evitar duplicação
+    // Usar dispatch_id, contact_id E user_message para ser mais específico
     const recentInteraction = await pool.query(
       `SELECT id FROM ai_interactions 
        WHERE dispatch_id = $1 
          AND contact_id = $2 
          AND user_message = $3
-         AND triggered_at > NOW() - INTERVAL '5 minutes'`,
+         AND triggered_at > NOW() - INTERVAL '30 seconds'
+       ORDER BY triggered_at DESC
+       LIMIT 1`,
       [dispatchId, contactId, userMessage]
     );
 
     if (recentInteraction.rows.length > 0) {
-      const duplicateLog = `⚠️ Interação já processada recentemente para contato ${contactId} no disparo ${dispatchId}. Ignorando duplicação.`;
+      const duplicateLog = `⚠️ Interação já processada recentemente para contato ${contactId} no disparo ${dispatchId} com mensagem "${userMessage}". Ignorando duplicação.`;
       console.log(`   ${duplicateLog}`);
       addLog('warning', duplicateLog);
       return;
