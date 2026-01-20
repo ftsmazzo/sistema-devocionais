@@ -189,30 +189,39 @@ export async function triggerAIInteraction(
   userMessage: string
 ): Promise<void> {
   try {
-    // Buscar dados do disparo e contato
+    // Buscar dados do disparo e contato separadamente
     const dispatchResult = await pool.query(
-      `SELECT d.*, c.phone_number, c.name
-       FROM dispatches d
-       CROSS JOIN contacts c
-       WHERE c.id = $1 AND d.id = $2`,
-      [contactId, dispatchId]
+      `SELECT id, name, message_template, metadata
+       FROM dispatches
+       WHERE id = $1`,
+      [dispatchId]
+    );
+
+    const contactResult = await pool.query(
+      `SELECT id, phone_number, name
+       FROM contacts
+       WHERE id = $1`,
+      [contactId]
     );
 
     if (dispatchResult.rows.length === 0) {
-      const errorMsg = `❌ Disparo ${dispatchId} ou contato ${contactId} não encontrado`;
+      const errorMsg = `❌ Disparo ${dispatchId} não encontrado`;
       console.error(errorMsg);
       addLog('error', errorMsg);
       return;
     }
 
-    const row = dispatchResult.rows[0];
-    const dispatch = {
-      name: row.name,
-      message_template: row.message_template,
-      metadata: row.metadata,
-    };
-    const phone_number = row.phone_number;
-    const name = row.name;
+    if (contactResult.rows.length === 0) {
+      const errorMsg = `❌ Contato ${contactId} não encontrado`;
+      console.error(errorMsg);
+      addLog('error', errorMsg);
+      return;
+    }
+
+    const dispatch = dispatchResult.rows[0];
+    const contact = contactResult.rows[0];
+    const phone_number = contact.phone_number;
+    const name = contact.name || 'Sem nome';
 
     // Buscar configuração de IA
     const configResult = await pool.query(
