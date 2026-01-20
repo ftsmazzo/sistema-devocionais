@@ -71,25 +71,14 @@ export async function executeDevocionalDispatch(): Promise<void> {
     console.log(`   ✅ Horário de disparo detectado: ${config.dispatch_hour}:${config.dispatch_minute}`);
 
     // Buscar devocional do dia usando o timezone configurado (não UTC)
-    // IMPORTANTE: Criar a data no timezone correto para evitar problemas de meia-noite
-    // Usar toLocaleString para obter a data no timezone específico
-    const dateInTimezone = new Date(now.toLocaleString('en-US', { timeZone: timezone }));
-    const year = dateInTimezone.getFullYear();
-    const month = String(dateInTimezone.getMonth() + 1).padStart(2, '0');
-    const day = String(dateInTimezone.getDate()).padStart(2, '0');
-    const todayInTimezone = `${year}-${month}-${day}`;
-    
-    // Alternativa usando Intl.DateTimeFormat (mais confiável)
+    // IMPORTANTE: Usar Intl.DateTimeFormat com locale 'en-CA' que retorna formato YYYY-MM-DD
     const dateFormatter = new Intl.DateTimeFormat('en-CA', {
       timeZone: timezone,
       year: 'numeric',
       month: '2-digit',
       day: '2-digit',
     });
-    const formattedDate = dateFormatter.format(now);
-    
-    // Usar a data formatada pelo Intl (mais confiável)
-    const finalDate = formattedDate || todayInTimezone;
+    const finalDate = dateFormatter.format(now);
     
     const utcDate = new Date().toISOString().split('T')[0];
     console.log(`   📅 Data no timezone ${timezone}: ${finalDate} (UTC seria: ${utcDate})`);
