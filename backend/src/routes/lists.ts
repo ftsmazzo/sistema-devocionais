@@ -348,6 +348,47 @@ router.delete('/:id', async (req: AuthRequest, res) => {
   try {
     const { id } = req.params;
 
+    // Verificar se a lista existe
+    const listCheck = await pool.query(
+      `SELECT id FROM contact_lists WHERE id = $1`,
+      [id]
+    );
+
+    if (listCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Lista não encontrada' });
+    }
+
+    // Verificar se há referências em devocional_config
+    const devocionalConfigCheck = await pool.query(
+      `SELECT id FROM devocional_config WHERE list_id = $1`,
+      [id]
+    );
+
+    if (devocionalConfigCheck.rows.length > 0) {
+      // Remover referência (setar para NULL)
+      await pool.query(
+        `UPDATE devocional_config SET list_id = NULL WHERE list_id = $1`,
+        [id]
+      );
+      console.log(`   ℹ️ Referência removida de devocional_config para lista ${id}`);
+    }
+
+    // Verificar se há referências em dispatches
+    const dispatchesCheck = await pool.query(
+      `SELECT id FROM dispatches WHERE list_id = $1`,
+      [id]
+    );
+
+    if (dispatchesCheck.rows.length > 0) {
+      // Remover referência (setar para NULL)
+      await pool.query(
+        `UPDATE dispatches SET list_id = NULL WHERE list_id = $1`,
+        [id]
+      );
+      console.log(`   ℹ️ Referência removida de dispatches para lista ${id}`);
+    }
+
+    // Agora pode deletar a lista (contact_list_items já tem ON DELETE CASCADE)
     const result = await pool.query(
       `DELETE FROM contact_lists WHERE id = $1 RETURNING id`,
       [id]
