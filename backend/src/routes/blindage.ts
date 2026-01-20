@@ -151,6 +151,8 @@ router.put('/rules/:id', async (req: AuthRequest, res) => {
     const { id } = req.params;
     const { rule_name, rule_type, enabled, config } = req.body;
 
+    console.log(`📝 Atualizando regra ${id}:`, { rule_name, rule_type, enabled, config });
+
     const updates: string[] = [];
     const params: any[] = [];
     let paramCount = 1;
@@ -167,10 +169,14 @@ router.put('/rules/:id', async (req: AuthRequest, res) => {
       paramCount++;
     }
 
-    if (enabled !== undefined) {
+    // IMPORTANTE: enabled pode ser false, então verificar explicitamente !== undefined
+    if (enabled !== undefined && enabled !== null) {
+      // Garantir que seja boolean
+      const enabledValue = enabled === true || enabled === 'true' || enabled === 1;
       updates.push(`enabled = $${paramCount}`);
-      params.push(enabled);
+      params.push(enabledValue);
       paramCount++;
+      console.log(`   ✅ Campo 'enabled' será atualizado para: ${enabledValue}`);
     }
 
     if (config !== undefined) {
@@ -198,9 +204,11 @@ router.put('/rules/:id', async (req: AuthRequest, res) => {
       return res.status(404).json({ error: 'Regra não encontrada' });
     }
 
+    console.log(`✅ Regra ${id} atualizada com sucesso. enabled: ${result.rows[0].enabled}`);
+
     res.json({ rule: result.rows[0] });
   } catch (error) {
-    console.error('Erro ao atualizar regra:', error);
+    console.error('❌ Erro ao atualizar regra:', error);
     res.status(500).json({ error: 'Erro ao atualizar regra' });
   }
 });
