@@ -759,7 +759,7 @@ async function checkAllowedHours(
   // Verificar horas permitidas
   if (config.allowed_hours && Array.isArray(config.allowed_hours)) {
     if (!config.allowed_hours.includes(currentHour)) {
-      const notAllowedLog = `🚫 Envio não permitido no horário atual (${currentHour}h não está na lista de permitidos)`;
+      const notAllowedLog = `🚫 Envio não permitido no horário atual (${currentHour}h não está na lista de permitidos: ${JSON.stringify(config.allowed_hours)})`;
       console.log(`   ${notAllowedLog}`);
       addLog('warning', `[Blindage] ${notAllowedLog}`);
       
@@ -767,6 +767,7 @@ async function checkAllowedHours(
         action_type: 'time_blocked',
         reason: 'not_allowed_hour',
         current_hour: currentHour,
+        allowed_hours: config.allowed_hours,
       }, timeRule.id);
 
       return {
@@ -775,12 +776,12 @@ async function checkAllowedHours(
         blockedBy: 'allowed_hours',
       };
     } else {
-      console.log(`   ✅ Hora ${currentHour}h está permitida`);
+      console.log(`   ✅ Hora ${currentHour}h está permitida (lista: ${JSON.stringify(config.allowed_hours)})`);
       addLog('debug', `[Blindage] Hora ${currentHour}h está permitida`);
     }
   } else {
     console.log(`   ⚠️ Lista de horas permitidas não configurada, permitindo envio`);
-    addLog('warning', `[Blindage] Lista de horas permitidas não configurada para instância ${instanceId}`);
+    addLog('warning', `[Blindage] Lista de horas permitidas não configurada - permitindo envio`);
   }
 
   return { canSend: true };
