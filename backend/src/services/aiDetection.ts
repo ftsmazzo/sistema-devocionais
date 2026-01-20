@@ -189,6 +189,23 @@ export async function triggerAIInteraction(
   userMessage: string
 ): Promise<void> {
   try {
+    // Verificar se já existe uma interação recente (últimos 5 minutos) para evitar duplicação
+    const recentInteraction = await pool.query(
+      `SELECT id FROM ai_interactions 
+       WHERE dispatch_id = $1 
+         AND contact_id = $2 
+         AND user_message = $3
+         AND triggered_at > NOW() - INTERVAL '5 minutes'`,
+      [dispatchId, contactId, userMessage]
+    );
+
+    if (recentInteraction.rows.length > 0) {
+      const duplicateLog = `⚠️ Interação já processada recentemente para contato ${contactId} no disparo ${dispatchId}. Ignorando duplicação.`;
+      console.log(`   ${duplicateLog}`);
+      addLog('warning', duplicateLog);
+      return;
+    }
+
     // Buscar dados do disparo e contato separadamente
     const dispatchResult = await pool.query(
       `SELECT id, name, message_template, metadata
