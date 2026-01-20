@@ -882,13 +882,14 @@ async function logBlindageAction(
 }
 
 /**
- * Cria regras padrão de blindagem para uma instância
+ * Cria regras padrão GLOBAIS de blindagem (instance_id = NULL)
+ * Todas as regras são aplicadas globalmente, não por instância
  */
-export async function createDefaultRules(instanceId: number): Promise<void> {
+export async function createGlobalDefaultRules(): Promise<void> {
   try {
     const defaultRules = [
       {
-        instance_id: instanceId,
+        instance_id: null, // NULL = regra global
         rule_name: 'Delay Mínimo Entre Mensagens',
         rule_type: 'message_delay',
         enabled: true,
@@ -901,7 +902,7 @@ export async function createDefaultRules(instanceId: number): Promise<void> {
         },
       },
       {
-        instance_id: instanceId,
+        instance_id: null,
         rule_name: 'Limite de Mensagens',
         rule_type: 'message_limit',
         enabled: true,
@@ -913,7 +914,7 @@ export async function createDefaultRules(instanceId: number): Promise<void> {
         },
       },
       {
-        instance_id: instanceId,
+        instance_id: null,
         rule_name: 'Rotação de Instâncias',
         rule_type: 'instance_rotation',
         enabled: true,
@@ -924,7 +925,7 @@ export async function createDefaultRules(instanceId: number): Promise<void> {
         },
       },
       {
-        instance_id: instanceId,
+        instance_id: null,
         rule_name: 'Horários Permitidos',
         rule_type: 'allowed_hours',
         enabled: true,
@@ -935,7 +936,7 @@ export async function createDefaultRules(instanceId: number): Promise<void> {
         },
       },
       {
-        instance_id: instanceId,
+        instance_id: null,
         rule_name: 'Health Check',
         rule_type: 'health_check',
         enabled: true,
@@ -946,7 +947,7 @@ export async function createDefaultRules(instanceId: number): Promise<void> {
         },
       },
       {
-        instance_id: instanceId,
+        instance_id: null,
         rule_name: 'Validação de Conteúdo',
         rule_type: 'content_validation',
         enabled: true,
@@ -956,46 +957,72 @@ export async function createDefaultRules(instanceId: number): Promise<void> {
         },
       },
       {
-        instance_id: instanceId,
+        instance_id: null,
         rule_name: 'Validação de Número',
         rule_type: 'number_validation',
         enabled: true,
         config: {
           validate_format: true,
           check_whatsapp: true,
-          require_whatsapp_check: false, // Se true, bloqueia se não conseguir verificar
-          default_country_code: '55', // Código do Brasil
-          cache_hours: 24, // Cache por 24 horas
-          timeout_ms: 10000, // Timeout de 10 segundos
+          require_whatsapp_check: false,
+          default_country_code: '55',
+          cache_hours: 24,
+          timeout_ms: 10000,
         },
       },
-      // Regra de seleção de instâncias é GLOBAL (instance_id = NULL)
-      // Criar apenas uma vez, não por instância
       {
-        instance_id: null, // NULL = regra global
+        instance_id: null,
         rule_name: 'Seleção de Instâncias',
         rule_type: 'instance_selection',
         enabled: true,
         config: {
-          selected_instance_ids: [], // IDs das instâncias selecionadas (vazio = todas)
-          max_simultaneous: 1, // Máximo de instâncias simultâneas
-          auto_switch_on_failure: true, // Trocar automaticamente quando uma instância cair
-          retry_after_pause: true, // Reiniciar com outra instância após pausa
+          selected_instance_ids: [],
+          max_simultaneous: 1,
+          auto_switch_on_failure: true,
+          retry_after_pause: true,
         },
       },
     ];
 
     for (const rule of defaultRules) {
-      await pool.query(
-        `INSERT INTO blindage_rules (instance_id, rule_name, rule_type, enabled, config)
-         VALUES ($1, $2, $3, $4, $5)
-         ON CONFLICT DO NOTHING`,
-        [rule.instance_id, rule.rule_name, rule.rule_type, rule.enabled, JSON.stringify(rule.config)]
+      // Verificar se a regra já existe antes de inserir
+      const existing = await pool.query(
+        `SELECT id FROM blindage_rules 
+         WHERE rule_type = $1 AND instance_id IS NULL`,
+        [rule.rule_type]
       );
+      
+      if (existing.rows.length === 0) {
+        await pool.query(
+          `INSERT INTO blindage_rules (instance_id, rule_name, rule_type, enabled, config)
+           VALUES ($1, $2, $3, $4, $5)`,
+          [rule.instance_id, rule.rule_name, rule.rule_type, rule.enabled, JSON.stringify(rule.config)]
+        );
+        console.log(`   ✅ Regra global criada: ${rule.rule_type}`);
+      } else {
+        console.log(`   ℹ️ Regra global já existe: ${rule.rule_type}`);
+      }
     }
 
-    console.log(`✅ Regras padrão de blindagem criadas para instância ${instanceId}`);
+    console.log(`✅ Regras padrão GLOBAIS de blindagem criadas`);
+    addLog('info', '[Blindage] Regras padrão globais criadas/verificadas');
   } catch (error) {
-    console.error('Erro ao criar regras padrão:', error);
+    console.error('Erro ao criar regras padrão globais:', error);
+    addLog('error', `[Blindage] Erro ao criar regras globais: ${error}`);
+  }
+}
+
+/**
+ * Cria regras padrão de blindagem para uma instância (DEPRECATED - mantido para compatibilidade)
+ * @deprecated Use createGlobalDefaultRules() - todas as regras agora são globais
+ */
+export async function createDefaultRules(instanceId: number): Promise<void> {
+  // Apenas criar a regra de instance_selection se não existir
+  // Todas as outras regras devem ser globais
+  try {
+    await createGlobalDefaultRules();
+    console.log(`✅ Regras globais verificadas ao criar instância ${instanceId}`);
+  } catch (error) {
+    console.error('Erro ao criar regras globais:', error);
   }
 }

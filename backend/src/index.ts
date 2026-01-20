@@ -17,6 +17,7 @@ import dispatchRoutes from './routes/dispatches';
 import logsRoutes from './routes/logs';
 import { errorHandler } from './middleware/errorHandler';
 import { executeDevocionalDispatch } from './services/devocionalScheduler';
+import { createGlobalDefaultRules } from './services/blindage';
 
 dotenv.config();
 
@@ -107,6 +108,10 @@ async function start() {
   try {
     await initializeDatabase();
     console.log('✅ Banco de dados inicializado');
+    
+    // Criar regras globais de blindagem padrão se não existirem
+    await createGlobalDefaultRules();
+    console.log('✅ Regras globais de blindagem verificadas');
     
     server = app.listen(PORT, '0.0.0.0', () => {
       console.log(`🚀 Servidor rodando na porta ${PORT}`);
