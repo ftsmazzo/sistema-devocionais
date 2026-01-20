@@ -708,7 +708,16 @@ async function checkAllowedHours(
   rules: BlindageRule[]
 ): Promise<BlindageResult> {
   const timeRule = rules.find(r => r.rule_type === 'allowed_hours');
-  if (!timeRule || !timeRule.enabled) {
+  
+  if (!timeRule) {
+    console.log(`   ⚠️ Regra de horários permitidos não encontrada para instância ${instanceId}`);
+    addLog('warning', `[Blindage] Regra de horários permitidos não encontrada para instância ${instanceId}`);
+    return { canSend: true };
+  }
+  
+  if (!timeRule.enabled) {
+    console.log(`   ⚠️ Regra de horários permitidos desabilitada para instância ${instanceId}`);
+    addLog('warning', `[Blindage] Regra de horários permitidos desabilitada para instância ${instanceId}`);
     return { canSend: true };
   }
 
@@ -726,9 +735,18 @@ async function checkAllowedHours(
     10
   );
 
+  console.log(`   🕐 Verificando horários permitidos - Hora atual: ${currentHour}h (timezone: ${timezone})`);
+  console.log(`   📋 Horas permitidas: ${config.allowed_hours ? JSON.stringify(config.allowed_hours) : 'não configurado'}`);
+  console.log(`   🚫 Horas bloqueadas: ${config.blocked_hours ? JSON.stringify(config.blocked_hours) : 'não configurado'}`);
+  addLog('debug', `[Blindage] Verificando horários - Hora: ${currentHour}h | Permitidas: ${JSON.stringify(config.allowed_hours)} | Bloqueadas: ${JSON.stringify(config.blocked_hours)}`);
+
   // Verificar horas bloqueadas
   if (config.blocked_hours && Array.isArray(config.blocked_hours)) {
     if (config.blocked_hours.includes(currentHour)) {
+      const blockedLog = `🚫 Envio bloqueado no horário atual (${currentHour}h está na lista de bloqueados)`;
+      console.log(`   ${blockedLog}`);
+      addLog('warning', `[Blindage] ${blockedLog}`);
+      
       await logBlindageAction(instanceId, {
         action_type: 'time_blocked',
         reason: 'blocked_hour',
@@ -746,6 +764,10 @@ async function checkAllowedHours(
   // Verificar horas permitidas
   if (config.allowed_hours && Array.isArray(config.allowed_hours)) {
     if (!config.allowed_hours.includes(currentHour)) {
+      const notAllowedLog = `🚫 Envio não permitido no horário atual (${currentHour}h não está na lista de permitidos)`;
+      console.log(`   ${notAllowedLog}`);
+      addLog('warning', `[Blindage] ${notAllowedLog}`);
+      
       await logBlindageAction(instanceId, {
         action_type: 'time_blocked',
         reason: 'not_allowed_hour',
@@ -757,7 +779,13 @@ async function checkAllowedHours(
         reason: `Envio não permitido no horário atual (${currentHour}h)`,
         blockedBy: 'allowed_hours',
       };
+    } else {
+      console.log(`   ✅ Hora ${currentHour}h está permitida`);
+      addLog('debug', `[Blindage] Hora ${currentHour}h está permitida`);
     }
+  } else {
+    console.log(`   ⚠️ Lista de horas permitidas não configurada, permitindo envio`);
+    addLog('warning', `[Blindage] Lista de horas permitidas não configurada para instância ${instanceId}`);
   }
 
   return { canSend: true };
