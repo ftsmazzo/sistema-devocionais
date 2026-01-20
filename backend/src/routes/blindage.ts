@@ -10,45 +10,54 @@ router.use(authenticateToken);
 
 /**
  * Listar regras de blindagem
- * GET /api/blindage/rules?instanceId=123
+ * GET /api/blindage/rules?instanceId=123&enabledOnly=true
+ * 
+ * Por padrão, retorna TODAS as regras (habilitadas e desabilitadas)
+ * Use ?enabledOnly=true para filtrar apenas regras habilitadas
  */
 router.get('/rules', async (req: AuthRequest, res) => {
   try {
-    const { instanceId } = req.query;
+    const { instanceId, enabledOnly } = req.query;
 
     let query: string;
     const params: any[] = [];
+    let paramCount = 1;
+
+    // Construir WHERE clause
+    const whereConditions: string[] = [];
+    
+    // Filtrar por enabled apenas se enabledOnly=true
+    if (enabledOnly === 'true') {
+      whereConditions.push(`br.enabled = TRUE`);
+    }
 
     if (instanceId) {
       // Buscar regras globais (instance_id IS NULL) E regras específicas da instância
-      query = `
-        SELECT 
-          br.*,
-          i.name as instance_name,
-          i.instance_name as instance_identifier
-        FROM blindage_rules br
-        LEFT JOIN instances i ON br.instance_id = i.id
-        WHERE br.enabled = TRUE
-          AND (
-            br.instance_id IS NULL 
-            OR br.instance_id = $1
-          )
-        ORDER BY br.instance_id NULLS FIRST, br.rule_type, br.id
-      `;
+      whereConditions.push(`(
+        br.instance_id IS NULL 
+        OR br.instance_id = $${paramCount}
+      )`);
       params.push(instanceId);
+      paramCount++;
     } else {
-      // Se não há instanceId, buscar regras globais E de todas as instâncias
-      query = `
-        SELECT 
-          br.*,
-          i.name as instance_name,
-          i.instance_name as instance_identifier
-        FROM blindage_rules br
-        LEFT JOIN instances i ON br.instance_id = i.id
-        WHERE br.enabled = TRUE
-        ORDER BY br.instance_id NULLS FIRST, br.rule_type, br.id
-      `;
+      // Se não há instanceId, buscar apenas regras globais (instance_id IS NULL)
+      whereConditions.push(`br.instance_id IS NULL`);
     }
+
+    const whereClause = whereConditions.length > 0 
+      ? `WHERE ${whereConditions.join(' AND ')}`
+      : '';
+
+    query = `
+      SELECT 
+        br.*,
+        i.name as instance_name,
+        i.instance_name as instance_identifier
+      FROM blindage_rules br
+      LEFT JOIN instances i ON br.instance_id = i.id
+      ${whereClause}
+      ORDER BY br.instance_id NULLS FIRST, br.enabled DESC, br.rule_type, br.id
+    `;
 
     const result = await pool.query(query, params);
 
