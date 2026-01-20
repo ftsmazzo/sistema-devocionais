@@ -398,7 +398,8 @@ async function processMessageReceived(instanceId: number, eventData: any) {
           console.log(`   📊 Resultado da detecção:`, detectionResult);
           addLog('info', `📊 Resultado da detecção: ${detectionResult}`);
 
-          if (detection.isPositive && detection.confidence >= 0.5) {
+          // Reduzir threshold de confiança para 0.3 (era 0.5) para capturar mais intenções positivas
+          if (detection.isPositive && detection.confidence >= 0.3) {
             const positiveLog = `✅ INTENÇÃO POSITIVA DETECTADA! Confiança: ${detection.confidence} | Palavras-chave: ${detection.detectedKeywords?.join(', ') || 'nenhuma'}`;
             console.log(`   ${positiveLog}`);
             addLog('success', positiveLog);
