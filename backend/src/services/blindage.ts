@@ -536,16 +536,23 @@ async function selectInstance(
   // Selecionar instância com menos mensagens recentes
   const selectedInstance = instancesResult.rows[0];
   
+  console.log(`   🔍 Instância selecionada: ${selectedInstance.id} (${selectedInstance.name || selectedInstance.instance_name})`);
+  console.log(`   ⏱️ Última mensagem enviada: ${selectedInstance.last_message_sent_at || 'nunca'}`);
+  
   // Verificar delay mínimo entre instâncias
   if (config.min_delay_between_instances) {
+    console.log(`   🔄 Verificando delay entre instâncias (mínimo configurado: ${config.min_delay_between_instances}s)`);
     const lastSent = selectedInstance.last_message_sent_at;
     if (lastSent) {
       const secondsSinceLastSent = (Date.now() - new Date(lastSent).getTime()) / 1000;
+      console.log(`   ⏱️ Tempo desde última mensagem: ${secondsSinceLastSent.toFixed(2)}s`);
+      
       if (secondsSinceLastSent < config.min_delay_between_instances) {
         const delayNeeded = config.min_delay_between_instances - secondsSinceLastSent;
         const delayMs = Math.ceil(delayNeeded * 1000);
-        console.log(`   🔄 Delay entre instâncias necessário: ${delayNeeded.toFixed(2)}s (${delayMs}ms) para instância ${selectedInstance.id}`);
-        addLog('info', `[Blindage] Delay entre instâncias: ${delayNeeded.toFixed(2)}s necessário para instância ${selectedInstance.id}`);
+        const delayLog = `🔄 Delay entre instâncias necessário: ${delayNeeded.toFixed(2)}s (${delayMs}ms) para instância ${selectedInstance.id}`;
+        console.log(`   ${delayLog}`);
+        addLog('info', `[Blindage] ${delayLog}`);
         return {
           canSend: true,
           selectedInstanceId: selectedInstance.id,
@@ -553,10 +560,14 @@ async function selectInstance(
         };
       } else {
         console.log(`   ✅ Instância ${selectedInstance.id} pode enviar (${secondsSinceLastSent.toFixed(2)}s desde última mensagem, mínimo: ${config.min_delay_between_instances}s)`);
+        addLog('debug', `[Blindage] Instância ${selectedInstance.id} pode enviar - ${secondsSinceLastSent.toFixed(2)}s desde última mensagem`);
       }
     } else {
       console.log(`   ✅ Instância ${selectedInstance.id} nunca enviou mensagem, sem delay entre instâncias necessário`);
+      addLog('debug', `[Blindage] Instância ${selectedInstance.id} nunca enviou mensagem, sem delay necessário`);
     }
+  } else {
+    console.log(`   ℹ️ Delay entre instâncias não configurado na regra de rotação`);
   }
 
   return {
