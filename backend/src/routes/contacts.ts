@@ -413,6 +413,50 @@ router.delete('/:id', async (req: AuthRequest, res) => {
   try {
     const { id } = req.params;
 
+    // Verificar se o contato existe
+    const contactCheck = await pool.query(
+      `SELECT id FROM contacts WHERE id = $1`,
+      [id]
+    );
+
+    if (contactCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Contato não encontrado' });
+    }
+
+    // Verificar se há referências em messages (que não tem ON DELETE CASCADE)
+    const messagesCheck = await pool.query(
+      `SELECT id FROM messages WHERE contact_id = $1`,
+      [id]
+    );
+
+    if (messagesCheck.rows.length > 0) {
+      // Remover referência (setar para NULL)
+      await pool.query(
+        `UPDATE messages SET contact_id = NULL WHERE contact_id = $1`,
+        [id]
+      );
+      console.log(`   ℹ️ ${messagesCheck.rows.length} referência(s) removida(s) de messages para contato ${id}`);
+    }
+
+    // Verificar se há referências em dispatch_contacts (usando contact_number)
+    const contactInfo = await pool.query(
+      `SELECT phone_number FROM contacts WHERE id = $1`,
+      [id]
+    );
+
+    if (contactInfo.rows.length > 0) {
+      const phoneNumber = contactInfo.rows[0].phone_number;
+      // dispatch_contacts usa contact_number (string), não contact_id
+      // Não precisa fazer nada, pois não há foreign key
+    }
+
+    // As outras tabelas já têm ON DELETE CASCADE:
+    // - contact_tag_relations
+    // - contact_list_items
+    // - ai_detections
+    // - ai_interactions
+
+    // Agora pode deletar o contato
     const result = await pool.query(
       `DELETE FROM contacts WHERE id = $1 RETURNING id`,
       [id]
@@ -425,6 +469,15 @@ router.delete('/:id', async (req: AuthRequest, res) => {
     res.json({ success: true, message: 'Contato deletado com sucesso' });
   } catch (error: any) {
     console.error('❌ Erro ao deletar contato:', error);
+    
+    // Se o erro for de foreign key constraint, dar mensagem mais clara
+    if (error.code === '23503') {
+      return res.status(400).json({ 
+        error: 'Não é possível deletar o contato',
+        message: 'O contato ainda está sendo referenciado em outras tabelas. Tente novamente ou verifique os logs.'
+      });
+    }
+    
     res.status(500).json({ 
       error: 'Erro ao deletar contato',
       message: error.message 
