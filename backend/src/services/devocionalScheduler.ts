@@ -70,17 +70,26 @@ export async function executeDevocionalDispatch(): Promise<void> {
 
     console.log(`   ✅ Horário de disparo detectado: ${config.dispatch_hour}:${config.dispatch_minute}`);
 
-    // Buscar devocional do dia primeiro para verificar se já existe disparo
-    const today = new Date().toISOString().split('T')[0];
+    // Buscar devocional do dia usando o timezone configurado (não UTC)
+    // Formatar data no timezone correto para buscar o devocional
+    const todayInTimezone = new Intl.DateTimeFormat('en-CA', {
+      timeZone: timezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(now);
+    
+    console.log(`   📅 Data no timezone ${timezone}: ${todayInTimezone} (UTC seria: ${new Date().toISOString().split('T')[0]})`);
+    
     const devocionalResult = await pool.query(
       `SELECT id, title, text, versiculo_principal, versiculo_apoio, metadata
        FROM devocionais
        WHERE date = $1`,
-      [today]
+      [todayInTimezone]
     );
 
     if (devocionalResult.rows.length === 0) {
-      console.log(`   ⚠️ Nenhum devocional encontrado para hoje (${today})`);
+      console.log(`   ⚠️ Nenhum devocional encontrado para hoje (${todayInTimezone} no timezone ${timezone})`);
       await sendNotification(config.notification_phone, `⚠️ Disparo de devocional cancelado: nenhum devocional encontrado para hoje.`);
       return;
     }
@@ -89,15 +98,15 @@ export async function executeDevocionalDispatch(): Promise<void> {
     const devocionalId = devocional.id;
 
     // Verificar se já existe um disparo para este devocional hoje (evitar duplicação)
-    // Verificar por devocional_id e data, independente do status
+    // Verificar por devocional_id e data no timezone correto
     const existingDispatch = await pool.query(
       `SELECT id, status FROM dispatches 
        WHERE dispatch_type = 'devocional' 
          AND devocional_id = $1
-         AND DATE(created_at) = $2
+         AND DATE(created_at AT TIME ZONE 'UTC' AT TIME ZONE $2) = $3
        ORDER BY created_at DESC
        LIMIT 1`,
-      [devocionalId, today]
+      [devocionalId, timezone, todayInTimezone]
     );
 
     if (existingDispatch.rows.length > 0) {
