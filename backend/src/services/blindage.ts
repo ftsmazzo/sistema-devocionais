@@ -25,39 +25,34 @@ export interface BlindageResult {
  */
 
 /**
- * Busca regras ativas de blindagem para uma instância
+ * Busca regras ativas de blindagem (APENAS GLOBAIS - instance_id IS NULL)
+ * Removida a busca por instância para garantir que todas as regras sejam globais
  */
 export async function getActiveRules(instanceId?: number): Promise<BlindageRule[]> {
   try {
-    let query: string;
-    const params: any[] = [];
+    // Buscar APENAS regras globais (instance_id IS NULL)
+    // Isso garante que todas as regras sejam aplicadas globalmente, não por instância
+    const query = `
+      SELECT * FROM blindage_rules 
+      WHERE enabled = TRUE
+        AND instance_id IS NULL
+      ORDER BY rule_type, id
+    `;
 
-    if (instanceId) {
-      // Buscar regras globais (instance_id IS NULL) e regras específicas da instância
-      query = `
-        SELECT * FROM blindage_rules 
-        WHERE enabled = TRUE
-          AND (
-            instance_id IS NULL 
-            OR instance_id = $1
-          )
-        ORDER BY instance_id NULLS FIRST, rule_type, id
-      `;
-      params.push(instanceId);
+    const result = await pool.query(query);
+    
+    if (result.rows.length === 0) {
+      console.log(`   ⚠️ Nenhuma regra global de blindagem encontrada`);
+      addLog('warning', `[Blindage] Nenhuma regra global de blindagem encontrada`);
     } else {
-      // Se não há instanceId, buscar TODAS as regras (globais e de todas as instâncias)
-      // Isso permite que o sistema funcione mesmo sem instanceId específico
-      query = `
-        SELECT * FROM blindage_rules 
-        WHERE enabled = TRUE
-        ORDER BY instance_id NULLS FIRST, rule_type, id
-      `;
+      console.log(`   📋 ${result.rows.length} regra(s) global(is) de blindagem encontrada(s)`);
+      addLog('debug', `[Blindage] ${result.rows.length} regra(s) global(is) encontrada(s): ${result.rows.map(r => r.rule_type).join(', ')}`);
     }
-
-    const result = await pool.query(query, params);
+    
     return result.rows;
   } catch (error) {
     console.error('Erro ao buscar regras de blindagem:', error);
+    addLog('error', `[Blindage] Erro ao buscar regras: ${error}`);
     return [];
   }
 }

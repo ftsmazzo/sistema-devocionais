@@ -71,15 +71,24 @@ export async function executeDevocionalDispatch(): Promise<void> {
     console.log(`   ✅ Horário de disparo detectado: ${config.dispatch_hour}:${config.dispatch_minute}`);
 
     // Buscar devocional do dia usando o timezone configurado (não UTC)
-    // Formatar data no timezone correto para buscar o devocional
-    const todayInTimezone = new Intl.DateTimeFormat('en-CA', {
+    // Usar uma abordagem mais confiável para obter a data no timezone correto
+    const dateFormatter = new Intl.DateTimeFormat('en-CA', {
       timeZone: timezone,
       year: 'numeric',
       month: '2-digit',
       day: '2-digit',
-    }).format(now);
+    });
     
-    console.log(`   📅 Data no timezone ${timezone}: ${todayInTimezone} (UTC seria: ${new Date().toISOString().split('T')[0]})`);
+    // Obter partes da data formatada
+    const dateParts = dateFormatter.formatToParts(now);
+    const year = dateParts.find(p => p.type === 'year')?.value || '';
+    const month = dateParts.find(p => p.type === 'month')?.value || '';
+    const day = dateParts.find(p => p.type === 'day')?.value || '';
+    const todayInTimezone = `${year}-${month}-${day}`;
+    
+    const utcDate = new Date().toISOString().split('T')[0];
+    console.log(`   📅 Data no timezone ${timezone}: ${todayInTimezone} (UTC seria: ${utcDate})`);
+    addLog('info', `[Devocional] Buscando devocional para data: ${todayInTimezone} (timezone: ${timezone})`);
     
     const devocionalResult = await pool.query(
       `SELECT id, title, text, versiculo_principal, versiculo_apoio, metadata
