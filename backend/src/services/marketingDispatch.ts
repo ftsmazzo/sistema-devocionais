@@ -159,18 +159,13 @@ export async function processMarketingDispatch(params: MarketingDispatchParams):
       
       try {
         console.log(`\n   📤 [${contactIndex}/${contacts.length}] Processando contato: ${contact.phone_number} (${contact.name || 'Sem nome'})`);
-        
-        // Selecionar instância (rotação)
-        const instance = instances[instanceIndex % instances.length];
-        instanceIndex++;
-        console.log(`      🔄 Usando instância: ${instance.instance_name} (ID: ${instance.id})`);
 
-        // Aplicar blindagem
+        // Aplicar blindagem (define instância e delay; usar instância retornada pela blindagem)
         const blindageStartTime = Date.now();
         const blindageResult = await applyBlindage({
           to: contact.phone_number,
           message: dispatch.message_template,
-          instanceId: instance.id,
+          instanceId: instances[instanceIndex % instances.length]?.id,
           messageType: 'marketing',
         });
         const blindageTime = Date.now() - blindageStartTime;
@@ -185,6 +180,12 @@ export async function processMarketingDispatch(params: MarketingDispatchParams):
           failedCount++;
           continue;
         }
+
+        const instance = blindageResult.selectedInstanceId != null
+          ? instances.find((i: any) => i.id === blindageResult.selectedInstanceId) || instances[instanceIndex % instances.length]
+          : instances[instanceIndex % instances.length];
+        instanceIndex++;
+        console.log(`      🔄 Usando instância: ${instance.instance_name} (ID: ${instance.id})`);
 
         // Aplicar delay
         if (blindageResult.delay && blindageResult.delay > 0) {

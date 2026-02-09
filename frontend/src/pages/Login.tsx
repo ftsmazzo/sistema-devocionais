@@ -45,8 +45,8 @@ export default function Login() {
               <MessageSquare className="h-8 w-8 text-primary" />
             </div>
           </div>
-          <CardTitle className="text-3xl">Evolution Manager</CardTitle>
-          <CardDescription>Faça login para gerenciar suas instâncias</CardDescription>
+          <CardTitle className="text-3xl">MassFlow</CardTitle>
+          <CardDescription>Faça login para gerenciar disparos e instâncias</CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">

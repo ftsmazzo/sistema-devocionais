@@ -10,6 +10,7 @@ import { processMarketingDispatch } from '../services/marketingDispatch';
 import { executeDevocionalDispatch } from '../services/devocionalScheduler';
 import { personalizeDevocionalMessage, formatDevocionalMessage } from '../services/devocionalPersonalization';
 import { canReceiveDevocional, updateDevocionalScore } from '../services/devocionalScoring';
+import { addLog } from './logs';
 
 const router = express.Router();
 
@@ -737,9 +738,6 @@ async function processDevocionalDispatchManually(dispatchId: number): Promise<vo
 
     for (const contact of eligibleContacts) {
       try {
-        const instance = instances[instanceIndex % instances.length];
-        instanceIndex++;
-
         const formattedDevocional = formatDevocionalMessage(devocional);
         const personalizedMessage = personalizeDevocionalMessage(
           formattedDevocional,
@@ -750,21 +748,37 @@ async function processDevocionalDispatchManually(dispatchId: number): Promise<vo
         const blindageResult = await applyBlindage({
           to: contact.phone_number,
           message: personalizedMessage,
-          instanceId: instance.id,
+          instanceId: instances[instanceIndex % instances.length]?.id,
           messageType: 'devocional',
         });
 
         if (!blindageResult.canSend) {
           console.log(`   ⛔ Contato ${contact.phone_number} bloqueado pela blindagem: ${blindageResult.reason}`);
           failedCount++;
-          // NÃO contar como falha de devocional se foi bloqueado pela blindagem antes de enviar
-          // Só conta como falha se a mensagem foi enviada mas não foi entregue/lida
           continue;
         }
 
+        const instance = blindageResult.selectedInstanceId != null
+          ? instances.find((i: any) => i.id === blindageResult.selectedInstanceId) || instances[instanceIndex % instances.length]
+          : instances[instanceIndex % instances.length];
+        instanceIndex++;
+
         if (blindageResult.delay && blindageResult.delay > 0) {
+          const delaySeconds = Math.ceil(blindageResult.delay / 1000);
+          const delayLog = `⏳ [DELAY] Aguardando ${delaySeconds}s (${blindageResult.delay}ms) antes de enviar para ${contact.phone_number}`;
+          console.log(`   ${delayLog}`);
+          addLog('info', `[Devocional Manual ${dispatchId}] ${delayLog}`);
           await new Promise(resolve => setTimeout(resolve, blindageResult.delay));
+        } else if (!blindageResult.delay || blindageResult.delay === 0) {
+          addLog('warning', `[Devocional Manual ${dispatchId}] ⚠️ Nenhum delay configurado - envio imediato para ${contact.phone_number}`);
         }
+
+        await pool.query(
+          `UPDATE instances 
+           SET last_message_sent_at = CURRENT_TIMESTAMP 
+           WHERE id = $1`,
+          [instance.id]
+        );
 
         const sendMessageUrl = `${instance.api_url}/message/sendText/${instance.instance_name}`;
         const response = await axios.post(
