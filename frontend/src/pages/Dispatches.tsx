@@ -576,6 +576,12 @@ export default function Dispatches() {
               ) : detailContacts.length === 0 ? (
                 <p className="text-gray-500 text-center py-8">Nenhum contato registrado neste disparo.</p>
               ) : (
+                <>
+                {(detailDispatch.contacts_failed ?? 0) > 0 && !detailContacts.some((c: any) => c.status === 'failed') && (
+                  <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
+                    <strong>ℹ️ Sobre as {(detailDispatch as any).contacts_failed} falhas:</strong> este disparo é anterior à atualização que passou a registrar por contato quem falhou. Por isso as falhas não aparecem na lista abaixo. Nos <strong>próximos disparos</strong>, as falhas serão listadas aqui com número e motivo.
+                  </div>
+                )}
                 <div className="rounded-xl border-2 border-gray-200 overflow-hidden">
                   <table className="w-full text-sm">
                     <thead className="bg-gray-50 border-b border-gray-200">
@@ -609,6 +615,7 @@ export default function Dispatches() {
                     </tbody>
                   </table>
                 </div>
+                </>
               )}
             </div>
           </div>

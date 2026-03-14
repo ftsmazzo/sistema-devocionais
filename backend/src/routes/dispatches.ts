@@ -55,7 +55,7 @@ router.get('/', async (req: AuthRequest, res) => {
       paramCount++;
     }
 
-    query += ` ORDER BY d.id, d.created_at DESC LIMIT $${paramCount} OFFSET $${paramCount + 1}`;
+    query += ` ORDER BY d.id DESC LIMIT $${paramCount} OFFSET $${paramCount + 1}`;
     params.push(parseInt(limit as string), parseInt(offset as string));
 
     const result = await pool.query(query, params);
