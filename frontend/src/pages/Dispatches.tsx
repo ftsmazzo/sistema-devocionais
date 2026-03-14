@@ -382,6 +382,7 @@ export default function Dispatches() {
           </Button>
         </div>
       ) : (
+        <>
         <div className="grid gap-4">
           {dispatches.map((dispatch) => (
             <div
@@ -535,6 +536,7 @@ export default function Dispatches() {
             </Button>
           </div>
         )}
+        </>
       )}
 
       {/* Modal Detalhe do Disparo - Quem recebeu / não recebeu */}
