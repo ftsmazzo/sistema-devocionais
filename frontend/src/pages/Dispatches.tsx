@@ -15,6 +15,9 @@ import {
   RefreshCw,
   X,
   AlertCircle,
+  ChevronLeft,
+  ChevronRight,
+  Users,
 } from 'lucide-react';
 
 interface Dispatch {
@@ -60,6 +63,12 @@ export default function Dispatches() {
   const [instances, setInstances] = useState<any[]>([]);
   const [startingDispatch, setStartingDispatch] = useState<number | null>(null);
   const [creatingDispatch, setCreatingDispatch] = useState(false);
+  const [totalDispatches, setTotalDispatches] = useState(0);
+  const [page, setPage] = useState(0);
+  const limit = 10;
+  const [detailDispatch, setDetailDispatch] = useState<Dispatch | null>(null);
+  const [detailContacts, setDetailContacts] = useState<any[]>([]);
+  const [loadingDetail, setLoadingDetail] = useState(false);
 
   // Auto-hide toast após 5 segundos
   useEffect(() => {
@@ -72,16 +81,22 @@ export default function Dispatches() {
   }, [toast]);
 
   useEffect(() => {
-    loadDispatches();
     loadLists();
     loadInstances();
   }, []);
 
+  useEffect(() => {
+    loadDispatches();
+  }, [page]);
+
   const loadDispatches = async () => {
     try {
       setLoading(true);
-      const response = await api.get('/dispatches');
+      const response = await api.get('/dispatches', {
+        params: { limit, offset: page * limit }
+      });
       setDispatches(response.data.dispatches || []);
+      setTotalDispatches(response.data.total ?? 0);
     } catch (error: any) {
       console.error('Erro ao carregar disparos:', error);
       setToast({
@@ -92,6 +107,25 @@ export default function Dispatches() {
       setLoading(false);
     }
   };
+
+  const openDetail = async (dispatch: Dispatch) => {
+    setDetailDispatch(dispatch);
+    setDetailContacts([]);
+    setLoadingDetail(true);
+    try {
+      const response = await api.get(`/dispatches/${dispatch.id}/contacts`);
+      setDetailContacts(response.data.contacts || []);
+    } catch (error: any) {
+      setToast({
+        message: error.response?.data?.error || 'Erro ao carregar detalhes',
+        type: 'error'
+      });
+    } finally {
+      setLoadingDetail(false);
+    }
+  };
+
+  const totalPages = Math.max(1, Math.ceil(totalDispatches / limit));
 
   const loadLists = async () => {
     try {
@@ -355,7 +389,7 @@ export default function Dispatches() {
               className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow"
             >
               <div className="flex items-start justify-between">
-                <div className="flex-1">
+                <div className="flex-1 cursor-pointer" onClick={() => openDetail(dispatch)}>
                   <div className="flex items-center gap-3 mb-3">
                     <div
                       className={`w-10 h-10 bg-gradient-to-br ${getTypeColor(
@@ -428,7 +462,7 @@ export default function Dispatches() {
                     <Button
                       size="sm"
                       variant="outline"
-                      onClick={() => handleStart(dispatch.id)}
+                      onClick={(e) => { e.stopPropagation(); handleStart(dispatch.id); }}
                       disabled={startingDispatch === dispatch.id}
                       className="text-green-600 hover:text-green-700 disabled:opacity-50"
                     >
@@ -440,7 +474,7 @@ export default function Dispatches() {
                     <Button
                       size="sm"
                       variant="outline"
-                      onClick={() => handleStop(dispatch.id)}
+                      onClick={(e) => { e.stopPropagation(); handleStop(dispatch.id); }}
                       className="text-red-600 hover:text-red-700"
                     >
                       <Square className="h-4 w-4 mr-1" />
@@ -451,7 +485,17 @@ export default function Dispatches() {
                     <Button
                       size="sm"
                       variant="outline"
-                      onClick={() => handleDelete(dispatch.id)}
+                      onClick={(e) => { e.stopPropagation(); openDetail(dispatch); }}
+                      className="text-indigo-600 hover:text-indigo-700 hover:border-indigo-300"
+                      title="Ver quem recebeu / não recebeu"
+                    >
+                      <Users className="h-4 w-4 mr-1" />
+                      Detalhes
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={(e) => { e.stopPropagation(); handleDelete(dispatch.id); }}
                       className="text-red-600 hover:text-red-700"
                     >
                       <Trash2 className="h-4 w-4" />
@@ -461,6 +505,103 @@ export default function Dispatches() {
               </div>
             </div>
           ))}
+        </div>
+
+        {/* Paginação */}
+        {totalDispatches > limit && (
+          <div className="mt-6 flex items-center justify-center gap-4">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setPage((p) => Math.max(0, p - 1))}
+              disabled={page === 0}
+              className="rounded-xl border-2 border-gray-200 hover:border-indigo-300 disabled:opacity-50"
+            >
+              <ChevronLeft className="h-4 w-4 mr-1" />
+              Anterior
+            </Button>
+            <span className="text-sm text-gray-600">
+              Página {page + 1} de {totalPages} • {totalDispatches} disparo(s)
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+              disabled={page >= totalPages - 1}
+              className="rounded-xl border-2 border-gray-200 hover:border-indigo-300 disabled:opacity-50"
+            >
+              Próxima
+              <ChevronRight className="h-4 w-4 ml-1" />
+            </Button>
+          </div>
+        )}
+      )}
+
+      {/* Modal Detalhe do Disparo - Quem recebeu / não recebeu */}
+      {detailDispatch && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" onClick={() => setDetailDispatch(null)}>
+          <div className="bg-white rounded-2xl shadow-xl max-w-3xl w-full max-h-[85vh] overflow-hidden flex flex-col border-2 border-gray-200" onClick={(e) => e.stopPropagation()}>
+            <div className="p-6 border-b border-gray-200 bg-gradient-to-br from-indigo-50 to-purple-50">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-xl font-bold text-gray-900">{detailDispatch.name}</h2>
+                  <p className="text-sm text-gray-600 mt-1">
+                    {detailDispatch.list_name && <span>{detailDispatch.list_name} • </span>}
+                    {new Date(detailDispatch.created_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                  </p>
+                  <p className="text-sm text-gray-700 mt-2">
+                    ✓ {detailDispatch.contacts_success ?? 0} enviados &nbsp; • &nbsp; ✗ {detailDispatch.contacts_failed ?? 0} falhas
+                  </p>
+                </div>
+                <button onClick={() => setDetailDispatch(null)} className="text-gray-400 hover:text-gray-600 p-1">
+                  <X className="h-6 w-6" />
+                </button>
+              </div>
+            </div>
+            <div className="p-4 overflow-y-auto flex-1">
+              {loadingDetail ? (
+                <div className="flex justify-center py-12">
+                  <RefreshCw className="h-8 w-8 animate-spin text-indigo-500" />
+                </div>
+              ) : detailContacts.length === 0 ? (
+                <p className="text-gray-500 text-center py-8">Nenhum contato registrado neste disparo.</p>
+              ) : (
+                <div className="rounded-xl border-2 border-gray-200 overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50 border-b border-gray-200">
+                      <tr>
+                        <th className="text-left py-3 px-4 font-semibold text-gray-700">Número</th>
+                        <th className="text-left py-3 px-4 font-semibold text-gray-700">Nome</th>
+                        <th className="text-left py-3 px-4 font-semibold text-gray-700">Status</th>
+                        <th className="text-left py-3 px-4 font-semibold text-gray-700">Enviado em</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {detailContacts.map((c: any) => (
+                        <tr key={c.id} className="border-b border-gray-100 hover:bg-gray-50">
+                          <td className="py-2 px-4 font-mono text-gray-900">{c.contact_number}</td>
+                          <td className="py-2 px-4 text-gray-700">{c.contact_name || '—'}</td>
+                          <td className="py-2 px-4">
+                            {c.status === 'sent' || c.status === 'delivered' || c.status === 'read' ? (
+                              <span className="text-green-600 font-medium">✓ Enviado</span>
+                            ) : c.status === 'failed' ? (
+                              <span className="text-red-600 font-medium">✗ Falha</span>
+                            ) : (
+                              <span className="text-gray-500">{c.status || '—'}</span>
+                            )}
+                            {c.failed_reason && <span className="block text-xs text-red-600 mt-0.5">{c.failed_reason}</span>}
+                          </td>
+                          <td className="py-2 px-4 text-gray-600">
+                            {c.sent_at ? new Date(c.sent_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       )}
 

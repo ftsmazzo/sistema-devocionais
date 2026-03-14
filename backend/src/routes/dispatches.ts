@@ -23,7 +23,7 @@ router.use(authenticateToken);
  */
 router.get('/', async (req: AuthRequest, res) => {
   try {
-    const { type, status, limit = 50, offset = 0 } = req.query;
+    const { type, status, limit = 10, offset = 0 } = req.query;
 
     // Buscar disparos sem duplicação
     let query = `
@@ -83,6 +83,46 @@ router.get('/', async (req: AuthRequest, res) => {
     res.status(500).json({ 
       error: 'Erro ao listar disparos',
       message: error.message 
+    });
+  }
+});
+
+/**
+ * Listar contatos do disparo (quem recebeu / falhou)
+ * GET /api/dispatches/:id/contacts
+ */
+router.get('/:id/contacts', async (req: AuthRequest, res) => {
+  try {
+    const { id } = req.params;
+
+    const dispatchCheck = await pool.query(
+      `SELECT id FROM dispatches WHERE id = $1`,
+      [id]
+    );
+    if (dispatchCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Disparo não encontrado' });
+    }
+
+    const result = await pool.query(
+      `SELECT 
+        dc.id,
+        dc.contact_number,
+        dc.contact_name,
+        dc.status,
+        dc.sent_at,
+        dc.failed_reason
+       FROM dispatch_contacts dc
+       WHERE dc.dispatch_id = $1
+       ORDER BY dc.status ASC, dc.sent_at DESC NULLS LAST`,
+      [id]
+    );
+
+    res.json({ contacts: result.rows });
+  } catch (error: any) {
+    console.error('❌ Erro ao listar contatos do disparo:', error);
+    res.status(500).json({
+      error: 'Erro ao listar contatos do disparo',
+      message: error.message
     });
   }
 });

@@ -621,8 +621,8 @@ export async function initializeDatabase() {
     for (const tag of defaultTags) {
       await client.query(
         `INSERT INTO contact_tags (name, color, category, description)
-         VALUES ($1, $2, $3, $4)
-         ON CONFLICT (name) DO NOTHING`,
+         SELECT $1, $2, $3, $4
+         WHERE NOT EXISTS (SELECT 1 FROM contact_tags WHERE LOWER(name) = LOWER($1))`,
         [tag.name, tag.color, tag.category, tag.description]
       );
     }
