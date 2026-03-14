@@ -316,10 +316,9 @@ export async function executeDevocionalDispatch(): Promise<void> {
     let instanceIndex = 0;
 
     for (const contact of eligibleContacts) {
+      const instance = instances[instanceIndex % instances.length];
+      instanceIndex++;
       try {
-        // Selecionar instância (rotação)
-        const instance = instances[instanceIndex % instances.length];
-        instanceIndex++;
 
         // Formatar mensagem personalizada
         const formattedDevocional = formatDevocionalMessage(devocional);
@@ -341,7 +340,6 @@ export async function executeDevocionalDispatch(): Promise<void> {
           console.log(`   ⛔ Contato ${contact.phone_number} bloqueado pela blindagem: ${blindageResult.reason}`);
           failedCount++;
           try {
-            const instance = instances[instanceIndex % instances.length];
             await pool.query(
               `INSERT INTO dispatch_contacts (
                 dispatch_id, instance_id, contact_number, contact_name,
@@ -358,7 +356,6 @@ export async function executeDevocionalDispatch(): Promise<void> {
           } catch (insertErr: any) {
             console.error(`   ⚠️ Erro ao registrar bloqueio em dispatch_contacts:`, insertErr.message);
           }
-          instanceIndex++;
           continue;
         }
 

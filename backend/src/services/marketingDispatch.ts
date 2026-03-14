@@ -157,6 +157,7 @@ export async function processMarketingDispatch(params: MarketingDispatchParams):
       contactIndex++;
       const contactStartTime = Date.now();
       
+      let instance = instances[instanceIndex % instances.length];
       try {
         console.log(`\n   📤 [${contactIndex}/${contacts.length}] Processando contato: ${contact.phone_number} (${contact.name || 'Sem nome'})`);
 
@@ -165,7 +166,7 @@ export async function processMarketingDispatch(params: MarketingDispatchParams):
         const blindageResult = await applyBlindage({
           to: contact.phone_number,
           message: dispatch.message_template,
-          instanceId: instances[instanceIndex % instances.length]?.id,
+          instanceId: instance?.id,
           messageType: 'marketing',
         });
         const blindageTime = Date.now() - blindageStartTime;
@@ -179,18 +180,17 @@ export async function processMarketingDispatch(params: MarketingDispatchParams):
           addLog('warning', `[Marketing ${dispatchId}] ${blockLog} - Contato: ${contact.phone_number}`);
           failedCount++;
           try {
-            const inst = instances[instanceIndex % instances.length];
             await pool.query(
               `INSERT INTO dispatch_contacts (dispatch_id, instance_id, contact_number, contact_name, status, failed_reason)
                VALUES ($1, $2, $3, $4, 'failed', $5)`,
-              [dispatchId, inst.id, contact.phone_number, contact.name, `Blindagem: ${blindageResult.reason || 'bloqueado'}`.slice(0, 500)]
+              [dispatchId, instance.id, contact.phone_number, contact.name, `Blindagem: ${blindageResult.reason || 'bloqueado'}`.slice(0, 500)]
             );
           } catch (e) { /* ignore */ }
           instanceIndex++;
           continue;
         }
 
-        const instance = blindageResult.selectedInstanceId != null
+        instance = blindageResult.selectedInstanceId != null
           ? instances.find((i: any) => i.id === blindageResult.selectedInstanceId) || instances[instanceIndex % instances.length]
           : instances[instanceIndex % instances.length];
         instanceIndex++;
