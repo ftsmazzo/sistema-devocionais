@@ -62,8 +62,8 @@ export async function executeDevocionalDispatch(): Promise<void> {
       10
     );
 
-    // Verificar se é o horário configurado (com tolerância de 1 minuto)
-    if (currentHour !== config.dispatch_hour || Math.abs(currentMinute - config.dispatch_minute) > 1) {
+    // Verificar se é o horário configurado (com tolerância de 2 minutos para o cron que roda a cada minuto)
+    if (currentHour !== config.dispatch_hour || Math.abs(currentMinute - config.dispatch_minute) > 2) {
       console.log(`   ⏰ Não é o horário de disparo (atual: ${currentHour}:${currentMinute}, configurado: ${config.dispatch_hour}:${config.dispatch_minute})`);
       return;
     }
@@ -100,9 +100,10 @@ export async function executeDevocionalDispatch(): Promise<void> {
 
     const devocional = devocionalResult.rows[0];
     const devocionalId = devocional.id;
+    console.log(`   ✅ Devocional encontrado: ID ${devocionalId} - ${devocional.title}`);
+    addLog('info', `[Devocional] Devocional encontrado: ID ${devocionalId}`);
 
     // Verificar se já existe um disparo para este devocional hoje (evitar duplicação)
-    // Verificar por devocional_id e data no timezone correto
     const existingDispatch = await pool.query(
       `SELECT id, status FROM dispatches 
        WHERE dispatch_type = 'devocional' 
@@ -116,14 +117,20 @@ export async function executeDevocionalDispatch(): Promise<void> {
     if (existingDispatch.rows.length > 0) {
       const existing = existingDispatch.rows[0];
       console.log(`   ⚠️ Já existe um disparo de devocional para hoje (ID: ${existing.id}, status: ${existing.status})`);
+      addLog('info', `[Devocional] Disparo já existente para hoje - ID ${existing.id}, status: ${existing.status}`);
       return;
     }
+
+    console.log(`   ✅ Nenhum disparo anterior para hoje; prosseguindo.`);
+    addLog('info', '[Devocional] Nenhum disparo anterior; prosseguindo.');
 
     // Buscar lista de contatos
     if (!config.list_id) {
       console.log('   ⚠️ Nenhuma lista configurada');
+      addLog('warning', '[Devocional] Disparo cancelado: nenhuma lista configurada em Configuração Devocional.');
       return;
     }
+    console.log(`   📋 Lista configurada: ID ${config.list_id}`);
 
     const listResult = await pool.query(
       `SELECT * FROM contact_lists WHERE id = $1`,
@@ -132,6 +139,7 @@ export async function executeDevocionalDispatch(): Promise<void> {
 
     if (listResult.rows.length === 0) {
       console.log(`   ⚠️ Lista ${config.list_id} não encontrada`);
+      addLog('warning', `[Devocional] Lista ${config.list_id} não encontrada.`);
       return;
     }
 
@@ -235,9 +243,11 @@ export async function executeDevocionalDispatch(): Promise<void> {
     const contacts = contactsResult.rows;
 
     console.log(`   📋 ${contacts.length} contatos encontrados na lista`);
+    addLog('info', `[Devocional] ${contacts.length} contatos na lista.`);
 
     if (contacts.length === 0) {
-      console.log('   ⚠️ Nenhum contato elegível para receber devocional');
+      console.log('   ⚠️ Nenhum contato na lista (ou lista vazia).');
+      addLog('warning', '[Devocional] Nenhum contato na lista. Adicione contatos à lista ou verifique filtros.');
       return;
     }
 
@@ -254,6 +264,7 @@ export async function executeDevocionalDispatch(): Promise<void> {
 
     if (eligibleContacts.length === 0) {
       console.log('   ⚠️ Nenhum contato elegível após verificação de pontuação');
+      addLog('warning', '[Devocional] Nenhum contato elegível (pontuação/bloqueio).');
       return;
     }
 
@@ -267,6 +278,7 @@ export async function executeDevocionalDispatch(): Promise<void> {
 
     if (instancesResult.rows.length === 0) {
       console.log('   ⚠️ Nenhuma instância conectada');
+      addLog('warning', '[Devocional] Disparo cancelado: nenhuma instância WhatsApp conectada.');
       await sendNotification(config.notification_phone, `⚠️ Disparo de devocional cancelado: nenhuma instância conectada.`);
       return;
     }
