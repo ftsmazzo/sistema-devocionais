@@ -700,19 +700,33 @@ router.post('/:id/refresh', async (req: AuthRequest, res) => {
         [total, id]
       );
     } else {
-      // Para listas dinâmicas/híbridas, contar baseado em filtros
-      // (implementação simplificada - pode ser melhorada)
+      // Para listas dinâmicas/híbridas, recalcular total_contacts baseado em filtros
       const filterConfig = typeof list.filter_config === 'string' 
-        ? JSON.parse(list.filter_config) 
-        : list.filter_config;
-      
-      // Aqui você pode implementar a lógica de contagem baseada em filtros
-      // Por enquanto, vamos apenas atualizar o timestamp
+        ? (list.filter_config ? JSON.parse(list.filter_config) : {}) 
+        : (list.filter_config || {});
+      const params: any[] = [];
+      const countQuery = buildDynamicListQuery(filterConfig, 1, params);
+      const countQueryFinal = countQuery
+        .replace(/SELECT DISTINCT[\s\S]*?FROM/, 'SELECT COUNT(DISTINCT c.id) as total FROM')
+        .replace(/GROUP BY[\s\S]*$/, '');
+      const countResult = await pool.query(countQueryFinal, params);
+      let total = parseInt(countResult.rows[0]?.total || '0', 10);
+
+      if (list.list_type === 'hybrid') {
+        const staticCountResult = await pool.query(
+          `SELECT COUNT(*) as total FROM contact_list_items WHERE list_id = $1`,
+          [id]
+        );
+        const staticCount = parseInt(staticCountResult.rows[0]?.total || '0', 10);
+        total = staticCount + total;
+      }
+
       await pool.query(
         `UPDATE contact_lists 
-         SET updated_at = CURRENT_TIMESTAMP
-         WHERE id = $1`,
-        [id]
+         SET total_contacts = $1,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $2`,
+        [total, id]
       );
     }
 
@@ -745,9 +759,9 @@ router.get('/:id/preview', async (req: AuthRequest, res) => {
     }
 
     const list = listResult.rows[0];
-    const filterConfig = typeof list.filter_config === 'string' 
-      ? JSON.parse(list.filter_config) 
-      : list.filter_config;
+    let filterConfig: any = typeof list.filter_config === 'string' 
+      ? (list.filter_config ? JSON.parse(list.filter_config) : {}) 
+      : (list.filter_config || {});
 
     if (list.list_type === 'static') {
       // Lista estática - buscar contatos da lista

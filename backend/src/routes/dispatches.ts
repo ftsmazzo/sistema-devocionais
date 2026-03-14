@@ -155,10 +155,21 @@ router.post('/devocional', async (req: AuthRequest, res) => {
       });
     }
 
-    // Buscar devocional (se não fornecido, buscar do dia)
+    // Buscar devocional (se não fornecido, buscar do dia no timezone configurado)
     let devocionalId = devocional_id;
     if (!devocionalId) {
-      const today = new Date().toISOString().split('T')[0];
+      const configResult = await pool.query(
+        `SELECT timezone FROM devocional_config ORDER BY id DESC LIMIT 1`
+      );
+      const timezone = configResult.rows[0]?.timezone || 'America/Sao_Paulo';
+      const dateFormatter = new Intl.DateTimeFormat('en-CA', {
+        timeZone: timezone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      });
+      const today = dateFormatter.format(new Date());
+
       const devocionalResult = await pool.query(
         `SELECT id FROM devocionais WHERE date = $1`,
         [today]
@@ -505,8 +516,19 @@ async function processDevocionalDispatchManually(dispatchId: number): Promise<vo
 
     // Buscar devocional
     if (!dispatch.devocional_id) {
-      // Se não tem devocional_id, buscar do dia
-      const today = new Date().toISOString().split('T')[0];
+      // Se não tem devocional_id, buscar do dia no timezone configurado
+      const configResult = await pool.query(
+        `SELECT timezone FROM devocional_config ORDER BY id DESC LIMIT 1`
+      );
+      const timezone = configResult.rows[0]?.timezone || 'America/Sao_Paulo';
+      const dateFormatter = new Intl.DateTimeFormat('en-CA', {
+        timeZone: timezone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      });
+      const today = dateFormatter.format(new Date());
+
       const devocionalResult = await pool.query(
         `SELECT id, title, text, versiculo_principal, versiculo_apoio, metadata
          FROM devocionais

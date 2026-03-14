@@ -247,8 +247,16 @@ router.get('/config', authenticateToken, async (req: AuthRequest, res) => {
       config = result.rows[0];
     }
 
-    // Buscar devocional do dia
-    const today = new Date().toISOString().split('T')[0];
+    // Buscar devocional do dia usando o timezone da configuração (não UTC)
+    const timezone = config.timezone || 'America/Sao_Paulo';
+    const dateFormatter = new Intl.DateTimeFormat('en-CA', {
+      timeZone: timezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    });
+    const today = dateFormatter.format(new Date());
+
     const devocionalResult = await pool.query(
       `SELECT id, title, date, text, versiculo_principal, versiculo_apoio, metadata
        FROM devocionais 
@@ -502,64 +510,6 @@ router.get('/:id', async (req: express.Request, res: express.Response) => {
     });
   }
 });
-
-/**
- * Buscar devocional por data
- * GET /api/devocional/date/:date (YYYY-MM-DD)
- */
-router.get('/date/:date', async (req: express.Request, res: express.Response) => {
-  try {
-    const { date } = req.params;
-
-    const result = await pool.query(
-      `SELECT 
-        id,
-        text,
-        title,
-        date,
-        versiculo_principal,
-        versiculo_apoio,
-        metadata,
-        created_at,
-        updated_at
-       FROM devocionais
-       WHERE date = $1`,
-      [date]
-    );
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Devocional não encontrado para esta data' });
-    }
-
-    const row = result.rows[0];
-    const devocional = {
-      id: row.id,
-      text: row.text,
-      title: row.title,
-      date: row.date,
-      versiculo_principal: typeof row.versiculo_principal === 'string'
-        ? JSON.parse(row.versiculo_principal)
-        : row.versiculo_principal,
-      versiculo_apoio: typeof row.versiculo_apoio === 'string'
-        ? JSON.parse(row.versiculo_apoio)
-        : row.versiculo_apoio,
-      metadata: typeof row.metadata === 'string'
-        ? JSON.parse(row.metadata)
-        : row.metadata,
-      created_at: row.created_at,
-      updated_at: row.updated_at
-    };
-
-    res.json({ devocional });
-  } catch (error: any) {
-    console.error('❌ Erro ao buscar devocional por data:', error);
-    res.status(500).json({ 
-      error: 'Erro ao buscar devocional',
-      message: error.message 
-    });
-  }
-});
-
 
 /**
  * Atualizar configuração do Devocional
