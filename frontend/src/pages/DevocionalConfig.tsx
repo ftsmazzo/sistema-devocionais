@@ -45,6 +45,20 @@ interface Devocional {
   metadata?: any;
 }
 
+/** Formata a data do devocional como dia civil (evita viés de timezone: backend envia DATE como meia-noite UTC) */
+function formatDevocionalDate(dateValue: string | Date): string {
+  const raw = typeof dateValue === 'string' ? dateValue : (dateValue as Date).toISOString?.() ?? String(dateValue);
+  const dateOnly = raw.slice(0, 10);
+  const [y, m, d] = dateOnly.split('-').map(Number);
+  const localDate = new Date(y, m - 1, d);
+  return localDate.toLocaleDateString('pt-BR', {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  });
+}
+
 export default function DevocionalConfig() {
   const [config, setConfig] = useState<DevocionalConfig>({
     dispatch_hour: 6,
@@ -245,12 +259,7 @@ export default function DevocionalConfig() {
               <div>
                 <h3 className="text-lg font-bold text-gray-900">Devocional de Hoje</h3>
                 <p className="text-sm text-gray-600">
-                  {new Date(todayDevocional.date).toLocaleDateString('pt-BR', {
-                    weekday: 'long',
-                    year: 'numeric',
-                    month: 'long',
-                    day: 'numeric'
-                  })}
+                  {formatDevocionalDate(todayDevocional.date)}
                 </p>
               </div>
             </div>

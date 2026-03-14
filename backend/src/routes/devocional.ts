@@ -267,10 +267,14 @@ router.get('/config', authenticateToken, async (req: AuthRequest, res) => {
     let todayDevocional = null;
     if (devocionalResult.rows.length > 0) {
       const row = devocionalResult.rows[0];
+      const dateVal = row.date;
+      const dateStr = dateVal == null ? null : typeof dateVal === 'string'
+        ? dateVal.slice(0, 10)
+        : (dateVal as Date).toISOString().slice(0, 10);
       todayDevocional = {
         id: row.id,
         title: row.title,
-        date: row.date,
+        date: dateStr,
         text: row.text,
         versiculo_principal: typeof row.versiculo_principal === 'string'
           ? JSON.parse(row.versiculo_principal)
