@@ -609,7 +609,12 @@ export async function initializeDatabase() {
       )
     `);
 
-    // Criar tags padrão se não existirem
+    // Criar tags padrão se não existirem (checar por nome em minúsculo para não duplicar VIP/Teste etc)
+    const existingTags = await client.query(
+      `SELECT LOWER(name) as lower_name FROM contact_tags`
+    );
+    const existingLower = new Set((existingTags.rows || []).map((r: { lower_name: string }) => r.lower_name));
+
     const defaultTags = [
       { name: 'devocional', color: '#10b981', category: 'devocional', description: 'Contatos que recebem devocionais' },
       { name: 'marketing', color: '#3b82f6', category: 'marketing', description: 'Contatos para campanhas de marketing' },
@@ -619,12 +624,14 @@ export async function initializeDatabase() {
     ];
 
     for (const tag of defaultTags) {
+      if (existingLower.has(tag.name.toLowerCase())) continue;
       await client.query(
         `INSERT INTO contact_tags (name, color, category, description)
-         SELECT $1::varchar(100), $2, $3, $4
-         WHERE NOT EXISTS (SELECT 1 FROM contact_tags WHERE LOWER(name) = LOWER($1::varchar(100)))`,
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (name) DO NOTHING`,
         [tag.name, tag.color, tag.category, tag.description]
       );
+      existingLower.add(tag.name.toLowerCase());
     }
 
     // Criar tabela de relação contato-tag

@@ -113,7 +113,7 @@ router.get('/:id/contacts', async (req: AuthRequest, res) => {
         dc.failed_reason
        FROM dispatch_contacts dc
        WHERE dc.dispatch_id = $1
-       ORDER BY dc.status ASC, dc.sent_at DESC NULLS LAST`,
+       ORDER BY LOWER(COALESCE(dc.contact_name, dc.contact_number)) ASC`,
       [id]
     );
 

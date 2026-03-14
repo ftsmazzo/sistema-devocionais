@@ -178,6 +178,15 @@ export async function processMarketingDispatch(params: MarketingDispatchParams):
           console.log(`      ${blockLog}`);
           addLog('warning', `[Marketing ${dispatchId}] ${blockLog} - Contato: ${contact.phone_number}`);
           failedCount++;
+          try {
+            const inst = instances[instanceIndex % instances.length];
+            await pool.query(
+              `INSERT INTO dispatch_contacts (dispatch_id, instance_id, contact_number, contact_name, status, failed_reason)
+               VALUES ($1, $2, $3, $4, 'failed', $5)`,
+              [dispatchId, inst.id, contact.phone_number, contact.name, `Blindagem: ${blindageResult.reason || 'bloqueado'}`.slice(0, 500)]
+            );
+          } catch (e) { /* ignore */ }
+          instanceIndex++;
           continue;
         }
 
@@ -309,6 +318,13 @@ export async function processMarketingDispatch(params: MarketingDispatchParams):
       } catch (error: any) {
         console.error(`   ❌ Erro ao enviar para ${contact.phone_number}:`, error.message);
         failedCount++;
+        try {
+          await pool.query(
+            `INSERT INTO dispatch_contacts (dispatch_id, instance_id, contact_number, contact_name, status, failed_reason)
+             VALUES ($1, $2, $3, $4, 'failed', $5)`,
+            [dispatchId, instance.id, contact.phone_number, contact.name, (error.message || String(error)).slice(0, 500)]
+          );
+        } catch (e) { /* ignore */ }
       }
     }
 

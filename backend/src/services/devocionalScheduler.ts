@@ -340,8 +340,25 @@ export async function executeDevocionalDispatch(): Promise<void> {
         if (!blindageResult.canSend) {
           console.log(`   ⛔ Contato ${contact.phone_number} bloqueado pela blindagem: ${blindageResult.reason}`);
           failedCount++;
-          // NÃO contar como falha de devocional se foi bloqueado pela blindagem antes de enviar
-          // Só conta como falha se a mensagem foi enviada mas não foi entregue/lida
+          try {
+            const instance = instances[instanceIndex % instances.length];
+            await pool.query(
+              `INSERT INTO dispatch_contacts (
+                dispatch_id, instance_id, contact_number, contact_name,
+                status, failed_reason
+              ) VALUES ($1, $2, $3, $4, 'failed', $5)`,
+              [
+                dispatchId,
+                instance.id,
+                contact.phone_number,
+                contact.name,
+                `Blindagem: ${blindageResult.reason || 'bloqueado'}`.slice(0, 500)
+              ]
+            );
+          } catch (insertErr: any) {
+            console.error(`   ⚠️ Erro ao registrar bloqueio em dispatch_contacts:`, insertErr.message);
+          }
+          instanceIndex++;
           continue;
         }
 
@@ -453,9 +470,23 @@ export async function executeDevocionalDispatch(): Promise<void> {
       } catch (error: any) {
         console.error(`   ❌ Erro ao enviar para ${contact.phone_number}:`, error.message);
         failedCount++;
-        // Só contar como falha se a mensagem foi realmente enviada mas falhou
-        // Se deu erro antes de enviar, não contar como falha de devocional
-        // (updateDevocionalScore só deve ser chamado quando a mensagem foi enviada mas não entregue/lida)
+        try {
+          await pool.query(
+            `INSERT INTO dispatch_contacts (
+              dispatch_id, instance_id, contact_number, contact_name,
+              status, failed_reason
+            ) VALUES ($1, $2, $3, $4, 'failed', $5)`,
+            [
+              dispatchId,
+              instance.id,
+              contact.phone_number,
+              contact.name,
+              (error.message || String(error)).slice(0, 500)
+            ]
+          );
+        } catch (insertErr: any) {
+          console.error(`   ⚠️ Erro ao registrar falha em dispatch_contacts:`, insertErr.message);
+        }
       }
     }
 
