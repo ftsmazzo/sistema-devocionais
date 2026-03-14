@@ -483,24 +483,26 @@ export default function Dispatches() {
                     </Button>
                   )}
                   {dispatch.status !== 'running' && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={(e) => { e.stopPropagation(); openDetail(dispatch); }}
-                      className="text-indigo-600 hover:text-indigo-700 hover:border-indigo-300"
-                      title="Ver quem recebeu / não recebeu"
-                    >
-                      <Users className="h-4 w-4 mr-1" />
-                      Detalhes
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={(e) => { e.stopPropagation(); handleDelete(dispatch.id); }}
-                      className="text-red-600 hover:text-red-700"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+                    <>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={(e) => { e.stopPropagation(); openDetail(dispatch); }}
+                        className="text-indigo-600 hover:text-indigo-700 hover:border-indigo-300"
+                        title="Ver quem recebeu / não recebeu"
+                      >
+                        <Users className="h-4 w-4 mr-1" />
+                        Detalhes
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={(e) => { e.stopPropagation(); handleDelete(dispatch.id); }}
+                        className="text-red-600 hover:text-red-700"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </>
                   )}
                 </div>
               </div>
