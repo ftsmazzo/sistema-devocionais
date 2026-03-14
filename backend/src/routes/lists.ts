@@ -779,15 +779,44 @@ router.get('/:id/preview', async (req: AuthRequest, res) => {
       return;
     }
 
-    // Lista dinâmica ou híbrida - usar filtros
+    // Lista dinâmica ou híbrida - query simples só com colunas escalares (evita erro "equality operator for type json")
     const params: any[] = [];
     let query: string;
     
     if (list.list_type === 'dynamic') {
-      // Lista dinâmica - usar buildDynamicListQuery
-      query = buildDynamicListQuery(filterConfig, 1, params);
-      // Adicionar GROUP BY e LIMIT
-      query += ` GROUP BY c.id ORDER BY c.created_at DESC LIMIT $${params.length + 1}`;
+      // Lista dinâmica - SELECT só colunas escalares, sem json_agg/c.* para evitar erro no PostgreSQL
+      let dynamicParamCount = 1;
+      query = `
+        SELECT DISTINCT c.id, c.phone_number, c.name, c.email, c.whatsapp_validated, c.opt_in, c.opt_out, c.created_at
+        FROM contacts c
+        WHERE 1=1
+      `;
+      if (filterConfig.tags && Array.isArray(filterConfig.tags) && filterConfig.tags.length > 0) {
+        query += ` AND EXISTS (SELECT 1 FROM contact_tag_relations ctr2 WHERE ctr2.contact_id = c.id AND ctr2.tag_id = ANY($${dynamicParamCount}::int[]))`;
+        params.push(filterConfig.tags);
+        dynamicParamCount++;
+      }
+      if (filterConfig.exclude_tags && Array.isArray(filterConfig.exclude_tags) && filterConfig.exclude_tags.length > 0) {
+        query += ` AND NOT EXISTS (SELECT 1 FROM contact_tag_relations ctr3 WHERE ctr3.contact_id = c.id AND ctr3.tag_id = ANY($${dynamicParamCount}::int[]))`;
+        params.push(filterConfig.exclude_tags);
+        dynamicParamCount++;
+      }
+      if (filterConfig.opt_in !== undefined) {
+        query += ` AND c.opt_in = $${dynamicParamCount}`;
+        params.push(filterConfig.opt_in);
+        dynamicParamCount++;
+      }
+      if (filterConfig.opt_out !== undefined) {
+        query += ` AND c.opt_out = $${dynamicParamCount}`;
+        params.push(filterConfig.opt_out);
+        dynamicParamCount++;
+      }
+      if (filterConfig.whatsapp_validated !== undefined) {
+        query += ` AND c.whatsapp_validated = $${dynamicParamCount}`;
+        params.push(filterConfig.whatsapp_validated);
+        dynamicParamCount++;
+      }
+      query += ` ORDER BY c.created_at DESC LIMIT $${dynamicParamCount}`;
       params.push(limit);
     } else {
       // Lista híbrida - combina estática + dinâmica
