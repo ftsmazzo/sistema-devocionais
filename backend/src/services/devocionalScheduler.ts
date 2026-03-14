@@ -353,6 +353,7 @@ export async function executeDevocionalDispatch(): Promise<void> {
                 `Blindagem: ${blindageResult.reason || 'bloqueado'}`.slice(0, 500)
               ]
             );
+            console.log(`   📝 Falha (blindagem) registrada em dispatch_contacts: ${contact.phone_number}`);
           } catch (insertErr: any) {
             console.error(`   ⚠️ Erro ao registrar bloqueio em dispatch_contacts:`, insertErr.message);
           }
@@ -481,6 +482,7 @@ export async function executeDevocionalDispatch(): Promise<void> {
               (error.message || String(error)).slice(0, 500)
             ]
           );
+          console.log(`   📝 Falha registrada em dispatch_contacts: ${contact.phone_number}`);
         } catch (insertErr: any) {
           console.error(`   ⚠️ Erro ao registrar falha em dispatch_contacts:`, insertErr.message);
         }

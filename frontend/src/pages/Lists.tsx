@@ -65,7 +65,13 @@ export default function Lists() {
     try {
       setLoading(true);
       const response = await api.get('/lists');
-      setLists(response.data.lists);
+      const raw = response.data.lists || [];
+      const sorted = [...raw].sort((a: any, b: any) => {
+        const da = a.created_at ? new Date(a.created_at).getTime() : 0;
+        const db = b.created_at ? new Date(b.created_at).getTime() : 0;
+        return db - da;
+      });
+      setLists(sorted);
     } catch (error: any) {
       console.error('Erro ao carregar listas:', error);
       setToast({

@@ -109,7 +109,7 @@ router.get('/', async (req: AuthRequest, res) => {
       params.push(listType);
     }
 
-    query += ` GROUP BY l.id, u.name ORDER BY l.id DESC`;
+    query += ` GROUP BY l.id, u.name ORDER BY l.created_at DESC NULLS LAST`;
 
     const result = await pool.query(query, params);
 
