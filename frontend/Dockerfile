@@ -17,7 +17,13 @@ RUN npm run build
 FROM nginx:alpine
 
 COPY --from=builder /app/dist /usr/share/nginx/html
-COPY frontend/nginx.conf /etc/nginx/conf.d/default.conf
+
+# URL do backend usada pelo proxy /api do nginx.
+# Pode ser sobrescrita no EasyPanel sem precisar rebuildar a imagem.
+ENV BACKEND_URL=http://backend:3001
+
+# O nginx oficial processa templates em /etc/nginx/templates via envsubst.
+COPY frontend/nginx.conf /etc/nginx/templates/default.conf.template
 
 EXPOSE 80
 
