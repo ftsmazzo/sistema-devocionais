@@ -9,7 +9,7 @@ import Tags from './pages/Tags';
 import Lists from './pages/Lists';
 import Dispatches from './pages/Dispatches';
 import DevocionalConfig from './pages/DevocionalConfig';
-import MarketingConfig from './pages/MarketingConfig';
+import MensagensPersonalizadas from './pages/MensagensPersonalizadas';
 import Logs from './pages/Logs';
 import Layout from './components/Layout';
 
@@ -22,13 +22,29 @@ function PrivateRoute({ children }: { children: React.ReactNode }) {
     setIsInitialized(true);
   }, [init]);
   
-  // Aguardar inicialização antes de verificar user
   if (!isInitialized) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-600">Carregando...</p>
+      <div style={{
+        minHeight: '100vh',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: 'var(--bg-primary)',
+      }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{
+            width: 48,
+            height: 48,
+            borderRadius: '50%',
+            border: '3px solid var(--gold-primary)',
+            borderTopColor: 'transparent',
+            animation: 'spin 0.8s linear infinite',
+            margin: '0 auto 16px',
+          }} />
+          <p style={{ color: 'var(--text-secondary)', fontFamily: 'Inter, sans-serif', fontSize: '0.9rem' }}>
+            Carregando...
+          </p>
+          <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
         </div>
       </div>
     );
@@ -42,78 +58,18 @@ function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/login" element={<Login />} />
-        <Route
-          path="/"
-          element={
-            <PrivateRoute>
-              <Instances />
-            </PrivateRoute>
-          }
-        />
-        <Route
-          path="/blindage/:instanceId?"
-          element={
-            <PrivateRoute>
-              <Blindage />
-            </PrivateRoute>
-          }
-        />
-        <Route
-          path="/contacts"
-          element={
-            <PrivateRoute>
-              <Contacts />
-            </PrivateRoute>
-          }
-        />
-        <Route
-          path="/tags"
-          element={
-            <PrivateRoute>
-              <Tags />
-            </PrivateRoute>
-          }
-        />
-        <Route
-          path="/lists"
-          element={
-            <PrivateRoute>
-              <Lists />
-            </PrivateRoute>
-          }
-        />
-        <Route
-          path="/dispatches"
-          element={
-            <PrivateRoute>
-              <Dispatches />
-            </PrivateRoute>
-          }
-        />
-        <Route
-          path="/devocional/config"
-          element={
-            <PrivateRoute>
-              <DevocionalConfig />
-            </PrivateRoute>
-          }
-        />
-        <Route
-          path="/marketing/config"
-          element={
-            <PrivateRoute>
-              <MarketingConfig />
-            </PrivateRoute>
-          }
-        />
-        <Route
-          path="/logs"
-          element={
-            <PrivateRoute>
-              <Logs />
-            </PrivateRoute>
-          }
-        />
+        <Route path="/" element={<PrivateRoute><Instances /></PrivateRoute>} />
+        <Route path="/blindage/:instanceId?" element={<PrivateRoute><Blindage /></PrivateRoute>} />
+        <Route path="/contacts" element={<PrivateRoute><Contacts /></PrivateRoute>} />
+        <Route path="/tags" element={<PrivateRoute><Tags /></PrivateRoute>} />
+        <Route path="/lists" element={<PrivateRoute><Lists /></PrivateRoute>} />
+        <Route path="/dispatches" element={<PrivateRoute><Dispatches /></PrivateRoute>} />
+        <Route path="/devocional/config" element={<PrivateRoute><DevocionalConfig /></PrivateRoute>} />
+        {/* Rota nova: Mensagens Personalizadas (antigo /marketing/config) */}
+        <Route path="/mensagens/config" element={<PrivateRoute><MensagensPersonalizadas /></PrivateRoute>} />
+        {/* Compatibilidade retroativa */}
+        <Route path="/marketing/config" element={<Navigate to="/mensagens/config" replace />} />
+        <Route path="/logs" element={<PrivateRoute><Logs /></PrivateRoute>} />
       </Routes>
     </BrowserRouter>
   );

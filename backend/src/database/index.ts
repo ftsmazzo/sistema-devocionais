@@ -965,6 +965,33 @@ export async function initializeDatabase() {
       console.log('👤 Usuário admin criado');
     }
 
+    // ============================================
+    // MIGRAÇÃO: Campos de Retry para dispatch_contacts
+    // ============================================
+    await client.query(`
+      DO $$ 
+      BEGIN 
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                       WHERE table_name = 'dispatch_contacts' AND column_name = 'retry_count') THEN
+          ALTER TABLE dispatch_contacts ADD COLUMN retry_count INTEGER DEFAULT 0;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                       WHERE table_name = 'dispatch_contacts' AND column_name = 'last_retry_at') THEN
+          ALTER TABLE dispatch_contacts ADD COLUMN last_retry_at TIMESTAMP;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                       WHERE table_name = 'dispatch_contacts' AND column_name = 'retry_instance_id') THEN
+          ALTER TABLE dispatch_contacts ADD COLUMN retry_instance_id INTEGER REFERENCES instances(id) ON DELETE SET NULL;
+        END IF;
+      END $$;
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_dispatch_contacts_retry_status 
+      ON dispatch_contacts(status) 
+      WHERE status = 'pending_retry';
+    `);
+
     console.log('✅ Tabelas criadas/verificadas');
   } finally {
     client.release();

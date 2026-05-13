@@ -18,6 +18,7 @@ import logsRoutes from './routes/logs';
 import { errorHandler } from './middleware/errorHandler';
 import { executeDevocionalDispatch } from './services/devocionalScheduler';
 import { createGlobalDefaultRules } from './services/blindage';
+import { processRetryQueue } from './services/retryQueue';
 
 dotenv.config();
 
@@ -36,7 +37,7 @@ app.get('/health', (req, res) => {
 app.get('/', (req, res) => {
   res.status(200).json({ 
     status: 'ok', 
-    message: 'Evolution Manager API',
+    message: 'Devocional Diário API',
     timestamp: new Date().toISOString()
   });
 });
@@ -129,6 +130,16 @@ async function start() {
       });
       
       console.log('📅 Cron job de devocional iniciado (verifica a cada minuto)');
+
+      // Cron job para processar fila de retry (instâncias que falharam)
+      cron.schedule('*/5 * * * *', async () => {
+        try {
+          await processRetryQueue();
+        } catch (error: any) {
+          console.error('❌ Erro no cron job de retry:', error);
+        }
+      });
+      console.log('🔄 Cron job de retry iniciado (processa a cada 5 minutos)');
     });
 
     // Manter o processo vivo

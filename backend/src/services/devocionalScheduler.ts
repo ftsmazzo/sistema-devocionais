@@ -4,6 +4,7 @@ import { applyBlindage } from './blindage';
 import { personalizeDevocionalMessage, formatDevocionalMessage } from './devocionalPersonalization';
 import { canReceiveDevocional, updateDevocionalScore } from './devocionalScoring';
 import { addLog } from '../routes/logs';
+import { pingInstanceHealth } from './retryQueue';
 
 /**
  * Serviço de agendamento para disparo automático de devocionais
@@ -268,7 +269,7 @@ export async function executeDevocionalDispatch(): Promise<void> {
       return;
     }
 
-    // Buscar instâncias conectadas
+    // Buscar instâncias conectadas e verificar saúde REAL via ping
     const instancesResult = await pool.query(
       `SELECT id, instance_name, api_url, api_key, phone_number
        FROM instances
@@ -283,8 +284,24 @@ export async function executeDevocionalDispatch(): Promise<void> {
       return;
     }
 
-    const instances = instancesResult.rows;
-    console.log(`   📱 ${instances.length} instância(s) disponível(is)`);
+    // Verificar saúde REAL de cada instância via ping
+    const instances: any[] = [];
+    for (const inst of instancesResult.rows) {
+      const isOnline = await pingInstanceHealth(inst.id);
+      if (isOnline) {
+        instances.push(inst);
+      } else {
+        console.log(`   ⚠️ Instância ${inst.instance_name} offline no ping - ignorada`);
+        addLog('warning', `[Devocional] Instância ${inst.instance_name} não respondeu ao ping - removida do disparo`);
+      }
+    }
+
+    if (instances.length === 0) {
+      console.log('   ⚠️ Nenhuma instância passóu no ping de saúde');
+      addLog('warning', '[Devocional] Disparo cancelado: nenhuma instância respondeu ao ping.');
+      await sendNotification(config.notification_phone, `⚠️ Disparo cancelado: todas as instâncias estão offline.`);
+      return;
+    }
 
     // Criar registro de disparo
     const dispatchResult = await pool.query(
@@ -466,22 +483,55 @@ export async function executeDevocionalDispatch(): Promise<void> {
         );
 
       } catch (error: any) {
+        const isInstanceError =
+          error.code === 'ECONNREFUSED' ||
+          error.code === 'ETIMEDOUT' ||
+          error.code === 'ENOTFOUND' ||
+          (error.response?.status >= 500);
+
         console.error(`   ❌ Erro ao enviar para ${contact.phone_number}:`, error.message);
         failedCount++;
         try {
-          await pool.query(
-            `INSERT INTO dispatch_contacts (
-              dispatch_id, instance_id, contact_number, contact_name,
-              status, failed_reason
-            ) VALUES ($1, $2, $3, $4, 'failed', $5)`,
-            [
-              dispatchId,
-              instance.id,
-              contact.phone_number,
-              contact.name,
-              (error.message || String(error)).slice(0, 500)
-            ]
-          );
+          if (isInstanceError) {
+            // Marcar instância como offline
+            await pool.query(
+              `UPDATE instances SET status = 'disconnected', updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
+              [instance.id]
+            );
+            addLog('warning', `[Devocional] Instância ${instance.id} marcada como offline após falha de envio`);
+
+            // Colocar na fila de retry
+            await pool.query(
+              `INSERT INTO dispatch_contacts (
+                dispatch_id, instance_id, contact_number, contact_name,
+                status, failed_reason, retry_count, last_retry_at, retry_instance_id
+              ) VALUES ($1, $2, $3, $4, 'pending_retry', $5, 1, CURRENT_TIMESTAMP, $2)`,
+              [
+                dispatchId,
+                instance.id,
+                contact.phone_number,
+                contact.name,
+                `Instância offline: ${error.message}`.slice(0, 500)
+              ]
+            );
+            console.log(`   🔄 Lead ${contact.phone_number} adicionado à fila de retry`);
+            addLog('info', `[Devocional] Lead ${contact.phone_number} adicionado à fila de retry (instância offline)`);
+          } else {
+            // Erro real (número inválido, bloqueado, etc): falha definitiva
+            await pool.query(
+              `INSERT INTO dispatch_contacts (
+                dispatch_id, instance_id, contact_number, contact_name,
+                status, failed_reason
+              ) VALUES ($1, $2, $3, $4, 'failed', $5)`,
+              [
+                dispatchId,
+                instance.id,
+                contact.phone_number,
+                contact.name,
+                (error.message || String(error)).slice(0, 500)
+              ]
+            );
+          }
           console.log(`   📝 Falha registrada em dispatch_contacts: ${contact.phone_number}`);
         } catch (insertErr: any) {
           console.error(`   ⚠️ Erro ao registrar falha em dispatch_contacts:`, insertErr.message);

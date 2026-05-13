@@ -12,6 +12,7 @@ import {
   XCircle,
   BookOpen,
   Megaphone,
+  MessageCircle,
   RefreshCw,
   X,
   AlertCircle,
@@ -19,6 +20,7 @@ import {
   ChevronRight,
   Users,
 } from 'lucide-react';
+
 
 interface Dispatch {
   id: number;
@@ -339,7 +341,7 @@ export default function Dispatches() {
               Disparos
             </h1>
             <p className="text-gray-600 text-sm ml-13">
-              Gerencie seus disparos de marketing e testes de devocional
+              Gerencie seus disparos e mensagens personalizadas
             </p>
             <div className="bg-blue-50 border-l-4 border-blue-400 p-4 mt-4 rounded-r-lg">
               <div className="flex items-start gap-3">
@@ -349,7 +351,7 @@ export default function Dispatches() {
                   <p className="text-blue-800">
                     O disparo de devocional é <strong>automático</strong> e configurado na página <strong>"Config. Devocional"</strong>.
                     Ele dispara automaticamente todos os dias no horário configurado. Você não precisa criar disparos manuais de devocional aqui.
-                    Esta página é apenas para <strong>disparos de marketing</strong> ou <strong>testes manuais</strong> de devocional.
+                    Esta página é apenas para <strong>mensagens personalizadas</strong> ou <strong>testes manuais</strong> de devocional.
                   </p>
                 </div>
               </div>
@@ -410,7 +412,9 @@ export default function Dispatches() {
                         {dispatch.name}
                       </h3>
                       <div className="flex items-center gap-4 text-sm text-gray-600">
-                        <span className="capitalize">{dispatch.dispatch_type}</span>
+                        <span className="capitalize">
+                          {dispatch.dispatch_type === 'marketing' ? 'Mensagem Personalizada' : dispatch.dispatch_type}
+                        </span>
                         {dispatch.list_name && (
                           <>
                             <span>•</span>
@@ -675,10 +679,10 @@ export default function Dispatches() {
                         : 'border-gray-200 hover:border-gray-300'
                     }`}
                   >
-                    <Megaphone className="h-6 w-6 mx-auto mb-2 text-blue-600" />
-                    <div className="font-medium">Marketing</div>
+                    <MessageCircle className="h-6 w-6 mx-auto mb-2 text-blue-600" />
+                    <div className="font-medium">Mensagem Personalizada</div>
                     <div className="text-xs text-gray-600 mt-1">
-                      Campanhas promocionais
+                      Mensagens customizadas para contatos
                     </div>
                   </button>
                 </div>

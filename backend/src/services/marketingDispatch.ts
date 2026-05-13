@@ -2,6 +2,7 @@ import { pool } from '../database';
 import axios from 'axios';
 import { applyBlindage } from './blindage';
 import { addLog } from '../routes/logs';
+import { pingInstanceHealth } from './retryQueue';
 
 /**
  * Serviço para processar disparos de marketing
@@ -135,7 +136,21 @@ export async function processMarketingDispatch(params: MarketingDispatchParams):
       throw new Error('Nenhuma instância conectada disponível');
     }
 
-    console.log(`   📱 ${instances.length} instância(s) disponível(is)`);
+    // Verificar saúde REAL de cada instância via ping antes de usar
+    const verifiedInstances: any[] = [];
+    for (const inst of instances) {
+      const isOnline = await pingInstanceHealth(inst.id);
+      if (isOnline) {
+        verifiedInstances.push(inst);
+      } else {
+        console.log(`   ⚠️ Instância ${inst.instance_name} offline no ping - removida do disparo`);
+        addLog('warning', `[Mensagem ${dispatchId}] Instância ${inst.instance_name} não respondeu ao ping`);
+      }
+    }
+
+    if (verifiedInstances.length === 0) {
+      throw new Error('Todas as instâncias estão offline. Verifique a conexão WhatsApp.');
+    }
 
     // Parse metadata
     const metadata = typeof dispatch.metadata === 'string' 
@@ -152,6 +167,8 @@ export async function processMarketingDispatch(params: MarketingDispatchParams):
 
     const startTime = Date.now();
     let contactIndex = 0;
+    const instances = verifiedInstances; // usar apenas instâncias verificadas
+    console.log(`   📱 ${instances.length} instância(s) verificada(s) e disponível(is)`);
 
     for (const contact of contacts) {
       contactIndex++;
@@ -316,14 +333,47 @@ export async function processMarketingDispatch(params: MarketingDispatchParams):
         );
 
       } catch (error: any) {
+        const isInstanceError =
+          error.code === 'ECONNREFUSED' ||
+          error.code === 'ETIMEDOUT' ||
+          error.code === 'ENOTFOUND' ||
+          (error.response?.status >= 500);
+
         console.error(`   ❌ Erro ao enviar para ${contact.phone_number}:`, error.message);
         failedCount++;
         try {
-          await pool.query(
-            `INSERT INTO dispatch_contacts (dispatch_id, instance_id, contact_number, contact_name, status, failed_reason)
-             VALUES ($1, $2, $3, $4, 'failed', $5)`,
-            [dispatchId, instance.id, contact.phone_number, contact.name, (error.message || String(error)).slice(0, 500)]
-          );
+          if (isInstanceError) {
+            // Marcar instância como offline
+            await pool.query(
+              `UPDATE instances SET status = 'disconnected', updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
+              [instance.id]
+            );
+            addLog('warning', `[Mensagem ${dispatchId}] Instância ${instance.id} marcada offline após falha`);
+
+            // Colocar na fila de retry
+            await pool.query(
+              `INSERT INTO dispatch_contacts (
+                dispatch_id, instance_id, contact_number, contact_name,
+                status, failed_reason, retry_count, last_retry_at, retry_instance_id
+              ) VALUES ($1, $2, $3, $4, 'pending_retry', $5, 1, CURRENT_TIMESTAMP, $2)`,
+              [
+                dispatchId,
+                instance.id,
+                contact.phone_number,
+                contact.name,
+                `Instância offline: ${error.message}`.slice(0, 500)
+              ]
+            );
+            console.log(`   🔄 Lead ${contact.phone_number} adicionado à fila de retry`);
+            addLog('info', `[Mensagem ${dispatchId}] Lead ${contact.phone_number} na fila de retry`);
+          } else {
+            // Falha real
+            await pool.query(
+              `INSERT INTO dispatch_contacts (dispatch_id, instance_id, contact_number, contact_name, status, failed_reason)
+               VALUES ($1, $2, $3, $4, 'failed', $5)`,
+              [dispatchId, instance.id, contact.phone_number, contact.name, (error.message || String(error)).slice(0, 500)]
+            );
+          }
         } catch (e) { /* ignore */ }
       }
     }
