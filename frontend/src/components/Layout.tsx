@@ -348,12 +348,12 @@ export default function Layout({ children }: LayoutProps) {
 
       {/* ── Main Content ── */}
       <div
+        id="main-content-area"
         style={{
+          marginLeft: 260,
+          minWidth: 0,
           flex: 1,
-          marginLeft: 0,
-          paddingTop: 0,
         }}
-        className="md:ml-[260px]"
       >
         <main
           style={{
@@ -361,7 +361,7 @@ export default function Layout({ children }: LayoutProps) {
             padding: '32px 24px',
             background: 'var(--bg-primary)',
           }}
-          className="pt-[70px] md:pt-8 page-enter"
+          className="page-enter"
         >
           <div style={{ maxWidth: 1280, margin: '0 auto' }}>
             {children}
