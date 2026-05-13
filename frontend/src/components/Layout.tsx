@@ -14,6 +14,7 @@ import {
   Send,
   Settings,
   FileText,
+  Smartphone,
   ChevronRight,
   Brain,
 } from 'lucide-react';

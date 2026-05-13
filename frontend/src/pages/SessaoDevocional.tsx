@@ -14,7 +14,6 @@ import {
   Brain,
   MessageSquare,
   History,
-  Calendar,
   Key
 } from 'lucide-react';
 
