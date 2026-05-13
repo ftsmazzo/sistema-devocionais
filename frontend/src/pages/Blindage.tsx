@@ -8,16 +8,12 @@ import {
   RotateCcw,
   Calendar,
   Heart,
-  FileText,
-  Phone,
   Save,
   CheckCircle2,
   Server,
   Info,
-  ChevronRight,
   AlertTriangle,
   RefreshCw,
-  Search,
 } from 'lucide-react';
 
 interface BlindageRule {
@@ -41,7 +37,6 @@ export default function Blindage() {
   const [rules, setRules] = useState<BlindageRule[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' | 'warning' } | null>(null);
   const [hasChanges, setHasChanges] = useState(false);
   const [allInstances, setAllInstances] = useState<any[]>([]);
@@ -136,7 +131,6 @@ export default function Blindage() {
   const handleSave = async (ruleId?: number) => {
     try {
       setSaving(true);
-      setSaved(false);
 
       const rulesToSave = ruleId 
         ? rules.filter(r => r.id === ruleId)
@@ -152,7 +146,6 @@ export default function Blindage() {
         savedCount++;
       }
 
-      setSaved(true);
       if (!ruleId) setHasChanges(false);
       setToast({
         message: `${savedCount} configuração(ões) salva(s) com sucesso!`,
@@ -232,7 +225,7 @@ export default function Blindage() {
 
       {/* Header Area */}
       <div style={{ marginBottom: 40 }}>
-        <div style={{ display: 'flex', flexDirection: 'column', md: { flexDirection: 'row' }, alignItems: 'flex-start', justifyContent: 'space-between', gap: 20 }}>
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-5">
           <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
             <div style={{
               width: 56, height: 56, borderRadius: 16,
@@ -301,8 +294,8 @@ export default function Blindage() {
                 <span className="toggle-slider" />
               </label>
             </div>
-            <div style={{ padding: 24, flex: 1 }}>
-              <div style={{ spaceY: 20 }}>
+            <div style={{ padding: 24, flex: 1 }} className="flex flex-col gap-5">
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
                 <div style={{ marginBottom: 20 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
                     <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Mínimo (segundos)</span>
@@ -549,7 +542,7 @@ export default function Blindage() {
 
         {/* 6. Seleção de Instâncias */}
         {groupedRules.selection && (
-          <div className="glass-card" style={{ padding: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column', gridColumn: 'span 1', md: { gridColumn: 'span 2' } }}>
+          <div className="glass-card flex flex-col col-span-1 md:col-span-2" style={{ padding: 0, overflow: 'hidden' }}>
             <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--border)', background: 'rgba(245, 158, 11, 0.03)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                 <div style={{ width: 40, height: 40, borderRadius: 10, background: 'rgba(245, 158, 11, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -622,7 +615,7 @@ export default function Blindage() {
         display: 'flex', alignItems: 'center', gap: 24,
       }}>
         <div style={{ width: 48, height: 48, borderRadius: 14, background: 'var(--bg-elevated)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-          <Sparkles size={24} color="var(--gold-primary)" />
+          <SparklesIcon size={24} color="var(--gold-primary)" />
         </div>
         <div style={{ flex: 1 }}>
           <h4 style={{ margin: 0, fontSize: '1rem', fontWeight: 700, color: 'var(--text-primary)' }}>Dica do Sistema de Blindagem</h4>
@@ -638,7 +631,7 @@ export default function Blindage() {
   );
 }
 
-function Sparkles({ size, color }: { size: number; color: string }) {
+function SparklesIcon({ size, color }: { size: number; color: string }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
