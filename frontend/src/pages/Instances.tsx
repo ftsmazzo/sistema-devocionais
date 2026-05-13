@@ -13,7 +13,6 @@ import {
   Clock,
   Shield,
   Smartphone,
-  ExternalLink,
   Edit,
   X,
   QrCode,
