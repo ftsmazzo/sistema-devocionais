@@ -962,17 +962,16 @@ const storage = multer.diskStorage({
 const upload = multer({
   storage: storage,
   limits: {
-    fileSize: 50 * 1024 * 1024 // 50MB
+    fileSize: 100 * 1024 * 1024 // 100MB para vídeos
   },
   fileFilter: (req, file, cb) => {
-    const allowedTypes = /jpeg|jpg|png|gif|pdf|doc|docx|mp4|avi|mov|mp3|ogg|wav|m4a/;
-    const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
-    const mimetype = allowedTypes.test(file.mimetype);
+    const allowedExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.pdf', '.doc', '.docx', '.mp4', '.avi', '.mov', '.mp3', '.ogg', '.wav', '.m4a', '.mpeg'];
+    const ext = path.extname(file.originalname).toLowerCase();
     
-    if (mimetype && extname) {
+    if (allowedExtensions.includes(ext) || file.mimetype.startsWith('image/') || file.mimetype.startsWith('video/') || file.mimetype.startsWith('audio/')) {
       return cb(null, true);
     } else {
-      cb(new Error('Tipo de arquivo não permitido. Use: imagens, PDF, documentos, MP4 ou Áudios'));
+      cb(new Error(`Tipo de arquivo ${file.mimetype} não permitido. Use: Imagens, PDF, Vídeos ou Áudios.`));
     }
   }
 });
@@ -1002,9 +1001,16 @@ router.post('/upload-media', upload.single('media'), async (req: AuthRequest, re
 
     // Construir URL (assumindo que o backend está servindo arquivos estáticos)
     // Em produção, você pode usar um CDN ou serviço de storage
-    const baseUrl = process.env.WEBHOOK_BASE_URL || process.env.API_BASE_URL || 'http://localhost:3001';
-    // Remover /api do baseUrl se existir, pois /uploads está na raiz
-    const cleanBaseUrl = baseUrl.replace('/api', '');
+    // Construir URL (assumindo que o backend está servindo arquivos estáticos)
+    const baseUrl = process.env.API_BASE_URL || process.env.WEBHOOK_BASE_URL || '';
+    let cleanBaseUrl = baseUrl;
+    
+    if (!cleanBaseUrl && req.headers.host) {
+      const protocol = req.secure ? 'https' : 'http';
+      cleanBaseUrl = `${protocol}://${req.headers.host}`;
+    }
+
+    cleanBaseUrl = cleanBaseUrl.replace('/api', '');
     const mediaUrl = `${cleanBaseUrl}/uploads/${req.file.filename}`;
 
     res.json({

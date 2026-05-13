@@ -155,7 +155,10 @@ export default function Dispatches() {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
+        timeout: 300000, // 5 minutos para vídeos grandes
       });
+
+      console.log('✅ Upload response:', response.data);
 
       setFormData(prev => ({
         ...prev,
