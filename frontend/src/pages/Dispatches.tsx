@@ -6,22 +6,14 @@ import {
   Play,
   Square,
   Trash2,
-  Clock,
   CheckCircle2,
-  XCircle,
   BookOpen,
   Megaphone,
   MessageCircle,
   RefreshCw,
   X,
   AlertCircle,
-  ChevronLeft,
-  ChevronRight,
   Users,
-  Video,
-  Mic,
-  FileText,
-  Image as ImageIcon,
   ExternalLink,
 } from 'lucide-react';
 
@@ -65,7 +57,6 @@ export default function Dispatches() {
     media_type: undefined,
   });
   const [lists, setLists] = useState<any[]>([]);
-  const [instances, setInstances] = useState<any[]>([]);
   const [startingDispatch, setStartingDispatch] = useState<number | null>(null);
   const [creatingDispatch, setCreatingDispatch] = useState(false);
   const [totalDispatches, setTotalDispatches] = useState(0);
@@ -326,7 +317,7 @@ export default function Dispatches() {
                   </div>
                 </div>
 
-                <div style={{ display: 'flex', items: 'center', gap: 12 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                   {dispatch.status === 'pending' && (
                     <button
                       onClick={() => handleStart(dispatch.id)}
@@ -374,7 +365,7 @@ export default function Dispatches() {
       {showCreateModal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100, padding: 20 }}>
           <div className="glass-card" style={{ width: '100%', maxWidth: 700, maxHeight: '90vh', overflowY: 'auto', padding: 0 }}>
-            <div style={{ padding: '24px 32px', borderBottom: '1px solid var(--border)', display: 'flex', items: 'center', justifyContent: 'space-between' }}>
+            <div style={{ padding: '24px 32px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <h2 style={{ margin: 0, fontSize: '1.5rem', fontWeight: 800, color: 'var(--text-primary)', fontFamily: 'Outfit' }}>Configurar Novo Disparo</h2>
               <button onClick={() => setShowCreateModal(false)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}><X size={28} /></button>
             </div>
@@ -495,7 +486,7 @@ export default function Dispatches() {
       {detailDispatch && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100, padding: 20 }}>
           <div className="glass-card" style={{ width: '100%', maxWidth: 800, maxHeight: '85vh', overflow: 'hidden', padding: 0, display: 'flex', flexDirection: 'column' }}>
-            <div style={{ padding: '24px 32px', borderBottom: '1px solid var(--border)', background: 'rgba(255,255,255,0.02)', display: 'flex', items: 'center', justifyContent: 'space-between' }}>
+            <div style={{ padding: '24px 32px', borderBottom: '1px solid var(--border)', background: 'rgba(255,255,255,0.02)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <div>
                 <h3 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-primary)' }}>{detailDispatch.name}</h3>
                 <p style={{ margin: '4px 0 0', fontSize: '0.8rem', color: 'var(--text-muted)' }}>Detalhes de entrega e logs</p>
