@@ -9,7 +9,6 @@ import {
   Link,
   Key,
   X,
-  Sparkles,
   Info,
 } from 'lucide-react';
 

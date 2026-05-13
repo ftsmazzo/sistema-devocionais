@@ -16,7 +16,6 @@ import {
   FileText,
   Smartphone,
   ChevronRight,
-  Sparkles,
 } from 'lucide-react';
 
 interface LayoutProps {
