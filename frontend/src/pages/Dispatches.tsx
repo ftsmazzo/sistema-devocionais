@@ -75,7 +75,6 @@ export default function Dispatches() {
 
   useEffect(() => {
     loadLists();
-    loadInstances();
   }, []);
 
   useEffect(() => {
@@ -106,14 +105,7 @@ export default function Dispatches() {
     }
   };
 
-  const loadInstances = async () => {
-    try {
-      const response = await api.get('/instances');
-      setInstances(response.data.instances?.filter((i: any) => i.status === 'connected') || []);
-    } catch (error) {
-      console.error('Erro ao carregar instâncias:', error);
-    }
-  };
+
 
   const handleCreate = async () => {
     if (creatingDispatch) return;
