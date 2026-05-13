@@ -965,14 +965,14 @@ const upload = multer({
     fileSize: 50 * 1024 * 1024 // 50MB
   },
   fileFilter: (req, file, cb) => {
-    const allowedTypes = /jpeg|jpg|png|gif|pdf|doc|docx/;
+    const allowedTypes = /jpeg|jpg|png|gif|pdf|doc|docx|mp4|avi|mov|mp3|ogg|wav|m4a/;
     const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
     const mimetype = allowedTypes.test(file.mimetype);
     
     if (mimetype && extname) {
       return cb(null, true);
     } else {
-      cb(new Error('Tipo de arquivo não permitido. Use: jpeg, jpg, png, gif, pdf, doc, docx'));
+      cb(new Error('Tipo de arquivo não permitido. Use: imagens, PDF, documentos, MP4 ou Áudios'));
     }
   }
 });
@@ -994,6 +994,10 @@ router.post('/upload-media', upload.single('media'), async (req: AuthRequest, re
       mediaType = 'image';
     } else if (ext === '.pdf') {
       mediaType = 'pdf';
+    } else if (['.mp4', '.avi', '.mov'].includes(ext)) {
+      mediaType = 'video';
+    } else if (['.mp3', '.ogg', '.wav', '.m4a'].includes(ext)) {
+      mediaType = 'audio';
     }
 
     // Construir URL (assumindo que o backend está servindo arquivos estáticos)

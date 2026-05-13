@@ -139,6 +139,37 @@ export default function Dispatches() {
     }
   };
 
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const uploadFormData = new FormData();
+      uploadFormData.append('media', file);
+
+      setToast({ message: 'Fazendo upload do arquivo...', type: 'success' });
+      
+      const response = await api.post('/dispatches/upload-media', uploadFormData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+
+      setFormData({
+        ...formData,
+        media_url: response.data.media_url,
+        media_type: response.data.media_type,
+      });
+      setToast({ message: 'Upload concluído com sucesso!', type: 'success' });
+    } catch (error: any) {
+      console.error('Erro no upload:', error);
+      setToast({ 
+        message: error.response?.data?.error || 'Erro ao fazer upload do arquivo', 
+        type: 'error' 
+      });
+    }
+  };
+
   const handleStart = async (id: number) => {
     if (startingDispatch === id) return;
     try {
@@ -430,7 +461,7 @@ export default function Dispatches() {
                       <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 6 }}>Use <code>{"{{name}}"}</code> para personalizar com o nome do contato.</p>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div>
                         <label className="label-premium">Tipo de Anexo</label>
                         <select
@@ -445,17 +476,43 @@ export default function Dispatches() {
                           <option value="pdf">Documento PDF</option>
                         </select>
                       </div>
+                      
                       {formData.media_type && (
                         <div>
-                          <label className="label-premium">URL do Arquivo</label>
-                          <input
-                            type="url" value={formData.media_url}
-                            onChange={(e) => setFormData({ ...formData, media_url: e.target.value })}
-                            placeholder="https://exemplo.com/arquivo.mp4" className="input-dark"
-                          />
+                          <label className="label-premium">Upload de Arquivo</label>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                            <input
+                              type="file"
+                              onChange={handleFileUpload}
+                              className="input-dark"
+                              accept={
+                                formData.media_type === 'image' ? 'image/*' :
+                                formData.media_type === 'video' ? 'video/*' :
+                                formData.media_type === 'audio' ? 'audio/*' :
+                                '.pdf,.doc,.docx'
+                              }
+                            />
+                            {formData.media_url && (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.75rem', color: '#34d399' }}>
+                                <CheckCircle2 size={14} /> Arquivo pronto para envio
+                              </div>
+                            )}
+                          </div>
                         </div>
                       )}
                     </div>
+
+                    {formData.media_url && (
+                      <div>
+                        <label className="label-premium">URL do Arquivo (Automático)</label>
+                        <input
+                          type="url" value={formData.media_url}
+                          onChange={(e) => setFormData({ ...formData, media_url: e.target.value })}
+                          placeholder="https://exemplo.com/arquivo.mp4" className="input-dark"
+                          readOnly
+                        />
+                      </div>
+                    )}
                   </>
                 )}
               </div>
