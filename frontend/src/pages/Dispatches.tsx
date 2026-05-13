@@ -65,6 +65,7 @@ export default function Dispatches() {
   const [detailDispatch, setDetailDispatch] = useState<Dispatch | null>(null);
   const [detailContacts, setDetailContacts] = useState<any[]>([]);
   const [loadingDetail, setLoadingDetail] = useState(false);
+  const [loadingUpload, setLoadingUpload] = useState(false);
 
   useEffect(() => {
     if (toast) {
@@ -124,7 +125,7 @@ export default function Dispatches() {
         payload.message_template = formData.message_template;
         if (formData.media_url) {
           payload.media_url = formData.media_url;
-          payload.media_type = formData.media_type || 'image';
+          payload.media_type = formData.media_type;
         }
       }
       await api.post(`/dispatches/${dispatchType}`, payload);
@@ -144,6 +145,7 @@ export default function Dispatches() {
     if (!file) return;
 
     try {
+      setLoadingUpload(true);
       const uploadFormData = new FormData();
       uploadFormData.append('media', file);
 
@@ -155,11 +157,11 @@ export default function Dispatches() {
         },
       });
 
-      setFormData({
-        ...formData,
+      setFormData(prev => ({
+        ...prev,
         media_url: response.data.media_url,
         media_type: response.data.media_type,
-      });
+      }));
       setToast({ message: 'Upload concluído com sucesso!', type: 'success' });
     } catch (error: any) {
       console.error('Erro no upload:', error);
@@ -167,6 +169,8 @@ export default function Dispatches() {
         message: error.response?.data?.error || 'Erro ao fazer upload do arquivo', 
         type: 'error' 
       });
+    } finally {
+      setLoadingUpload(false);
     }
   };
 
@@ -263,8 +267,8 @@ export default function Dispatches() {
               <Send size={28} color="#0d0c14" strokeWidth={2} />
             </div>
             <div>
-              <h1 style={{ fontSize: '2rem', fontWeight: 800, color: 'var(--text-primary)', margin: 0, fontFamily: 'Outfit' }}>Histórico de Disparos</h1>
-              <p style={{ margin: '4px 0 0', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Gerencie e acompanhe o status de suas campanhas e devocionais.</p>
+              <h1 style={{ fontSize: '2rem', fontWeight: 800, color: 'var(--text-primary)', margin: 0, fontFamily: 'Outfit' }}>Disparos</h1>
+              <p style={{ margin: '4px 0 0', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Gerencie e acompanhe o status de suas mensagens personalizadas e devocionais.</p>
             </div>
           </div>
 
@@ -290,7 +294,7 @@ export default function Dispatches() {
         <Info size={20} color="#38bdf8" style={{ marginTop: 2, flexShrink: 0 }} />
         <p style={{ margin: 0, fontSize: '0.85rem', color: '#7dd3fc', lineHeight: 1.5 }}>
           <strong>Nota sobre Devocionais:</strong> O envio diário é <strong>automático</strong> e configurado em <em>"Config. Devocional"</em>.
-          Esta tela serve para disparos manuais de teste ou interações de marketing personalizadas.
+          Esta tela serve para disparos manuais de teste ou mensagens personalizadas.
         </p>
       </div>
 
@@ -299,7 +303,7 @@ export default function Dispatches() {
         <div className="glass-card" style={{ padding: '80px 24px', textAlign: 'center' }}>
           <Megaphone size={64} color="var(--border)" style={{ marginBottom: 20 }} />
           <h3 style={{ color: 'var(--text-primary)', margin: 0 }}>Nenhum disparo realizado</h3>
-          <p style={{ color: 'var(--text-muted)', marginTop: 8 }}>Clique em "Novo Disparo" para começar sua primeira campanha.</p>
+          <p style={{ color: 'var(--text-muted)', marginTop: 8 }}>Clique em "Novo Disparo" para começar.</p>
         </div>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 16 }}>
@@ -318,7 +322,7 @@ export default function Dispatches() {
                       <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 700, color: 'var(--text-primary)' }}>{dispatch.name}</h3>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 2 }}>
                         <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                          {dispatch.dispatch_type === 'marketing' ? 'Campanha' : 'Devocional'}
+                          {dispatch.dispatch_type === 'marketing' ? 'Mensagem Personalizada' : 'Devocional Manual'}
                         </span>
                         <span style={{ color: 'var(--border)' }}>•</span>
                         <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{dispatch.list_name || 'Individual'}</span>
@@ -406,8 +410,8 @@ export default function Dispatches() {
                   }}
                 >
                   <MessageCircle size={28} color={dispatchType === 'marketing' ? '#0ea5e9' : 'var(--text-muted)'} style={{ margin: '0 auto 12px' }} />
-                  <div style={{ fontWeight: 700, color: dispatchType === 'marketing' ? 'var(--text-primary)' : 'var(--text-muted)' }}>Campanha de Marketing</div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 4 }}>Disparo personalizado para listas</div>
+                  <div style={{ fontWeight: 700, color: dispatchType === 'marketing' ? 'var(--text-primary)' : 'var(--text-muted)' }}>Mensagem Personalizada</div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 4 }}>Disparo direto para listas de contatos</div>
                 </button>
                 <button
                   onClick={() => setDispatchType('devocional')}
@@ -419,8 +423,8 @@ export default function Dispatches() {
                   }}
                 >
                   <BookOpen size={28} color={dispatchType === 'devocional' ? '#10b981' : 'var(--text-muted)'} style={{ margin: '0 auto 12px' }} />
-                  <div style={{ fontWeight: 700, color: dispatchType === 'devocional' ? 'var(--text-primary)' : 'var(--text-muted)' }}>Teste de Devocional</div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 4 }}>Envio manual do conteúdo do dia</div>
+                  <div style={{ fontWeight: 700, color: dispatchType === 'devocional' ? 'var(--text-primary)' : 'var(--text-muted)' }}>Devocional Manual</div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 4 }}>Envio de teste com conteúdo do dia</div>
                 </button>
               </div>
 
@@ -430,7 +434,7 @@ export default function Dispatches() {
                   <input
                     type="text" value={formData.name}
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                    placeholder="Ex: Oferta Especial de Segunda" className="input-dark"
+                    placeholder="Ex: Mensagem Especial de Segunda" className="input-dark"
                   />
                 </div>
 
@@ -451,7 +455,7 @@ export default function Dispatches() {
                 {dispatchType === 'marketing' && (
                   <>
                     <div>
-                      <label className="label-premium">Mensagem da Campanha *</label>
+                      <label className="label-premium">Conteúdo da Mensagem *</label>
                       <textarea
                         value={formData.message_template}
                         onChange={(e) => setFormData({ ...formData, message_template: e.target.value })}
@@ -485,6 +489,7 @@ export default function Dispatches() {
                               type="file"
                               onChange={handleFileUpload}
                               className="input-dark"
+                              disabled={loadingUpload}
                               accept={
                                 formData.media_type === 'image' ? 'image/*' :
                                 formData.media_type === 'video' ? 'video/*' :
@@ -492,9 +497,14 @@ export default function Dispatches() {
                                 '.pdf,.doc,.docx'
                               }
                             />
-                            {formData.media_url && (
+                            {loadingUpload && (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.75rem', color: 'var(--gold-primary)' }}>
+                                <RefreshCw size={14} className="animate-spin" /> Fazendo upload...
+                              </div>
+                            )}
+                            {!loadingUpload && formData.media_url && (
                               <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.75rem', color: '#34d399' }}>
-                                <CheckCircle2 size={14} /> Arquivo pronto para envio
+                                <CheckCircle2 size={14} /> Arquivo pronto para envio ({formData.media_type})
                               </div>
                             )}
                           </div>
