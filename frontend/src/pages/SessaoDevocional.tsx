@@ -84,14 +84,20 @@ export default function SessaoDevocional() {
     }
   };
 
+  const [testDate, setTestDate] = useState(new Date().toISOString().split('T')[0]);
+
   const handleTestGeneration = async () => {
-    if (!confirm('Deseja gerar um devocional de teste para a data de hoje?')) return;
+    if (!testDate) {
+      setToast({ message: 'Selecione uma data para o teste.', type: 'error' });
+      return;
+    }
+    
+    if (!confirm(`Deseja gerar um devocional para a data ${testDate}? Isso atualizará o conteúdo dessa data no sistema.`)) return;
     
     setGenerating(true);
     setTestResult(null);
     try {
-      const today = new Date().toISOString().split('T')[0];
-      const response = await api.post('/devocional/generate', { date: today });
+      const response = await api.post('/devocional/generate', { date: testDate });
       setTestResult(response.data.devocional);
       setToast({ message: 'Devocional gerado com sucesso!', type: 'success' });
     } catch (error: any) {
@@ -277,6 +283,17 @@ export default function SessaoDevocional() {
               
               <div style={{ height: 1, background: 'var(--border)', margin: '4px 0' }} />
               
+              <div>
+                <label className="label-premium" style={{ fontSize: '0.7rem' }}>Data para Teste</label>
+                <input
+                  type="date"
+                  value={testDate}
+                  onChange={(e) => setTestDate(e.target.value)}
+                  className="input-dark"
+                  style={{ padding: '8px 12px', fontSize: '0.85rem', marginBottom: 12 }}
+                />
+              </div>
+
               <button
                 onClick={handleTestGeneration}
                 disabled={generating}
