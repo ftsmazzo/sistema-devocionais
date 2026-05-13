@@ -152,6 +152,10 @@ export async function processMarketingDispatch(params: MarketingDispatchParams):
       throw new Error('Todas as instâncias estão offline. Verifique a conexão WhatsApp.');
     }
 
+    // Usar apenas instâncias verificadas
+    instances = verifiedInstances;
+    console.log(`   📱 ${instances.length} instância(s) verificada(s) e disponível(is)`);
+
     // Parse metadata
     const metadata = typeof dispatch.metadata === 'string' 
       ? JSON.parse(dispatch.metadata) 
@@ -167,8 +171,6 @@ export async function processMarketingDispatch(params: MarketingDispatchParams):
 
     const startTime = Date.now();
     let contactIndex = 0;
-    const instances = verifiedInstances; // usar apenas instâncias verificadas
-    console.log(`   📱 ${instances.length} instância(s) verificada(s) e disponível(is)`);
 
     for (const contact of contacts) {
       contactIndex++;
