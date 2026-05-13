@@ -85,7 +85,7 @@ export async function executeDevocionalDispatch(): Promise<void> {
     console.log(`   📅 Data no timezone ${timezone}: ${finalDate} (UTC seria: ${utcDate})`);
     addLog('info', `[Devocional] Buscando devocional para data: ${finalDate} (timezone: ${timezone}, UTC: ${utcDate})`);
     
-    const devocionalResult = await pool.query(
+    let devocionalResult = await pool.query(
       `SELECT id, title, text, versiculo_principal, versiculo_apoio, metadata
        FROM devocionais
        WHERE date = $1`,
@@ -93,9 +93,31 @@ export async function executeDevocionalDispatch(): Promise<void> {
     );
 
     if (devocionalResult.rows.length === 0) {
-      console.log(`   ⚠️ Nenhum devocional encontrado para hoje (${finalDate} no timezone ${timezone})`);
-      addLog('warning', `[Devocional] Nenhum devocional encontrado para data: ${finalDate} (timezone: ${timezone})`);
-      await sendNotification(config.notification_phone, `⚠️ Disparo de devocional cancelado: nenhum devocional encontrado para hoje (${finalDate}).`);
+      console.log(`   ✨ Nenhum devocional encontrado para hoje (${finalDate}). Tentando gerar via IA...`);
+      addLog('info', `[Devocional] Gerando devocional via IA para data: ${finalDate}`);
+      
+      try {
+        const { DevocionalGenerator } = await import('./DevocionalGenerator');
+        const generator = new DevocionalGenerator();
+        await generator.generate(finalDate);
+        
+        // Buscar novamente após gerar
+        devocionalResult = await pool.query(
+          `SELECT id, title, text, versiculo_principal, versiculo_apoio, metadata
+           FROM devocionais
+           WHERE date = $1`,
+          [finalDate]
+        );
+      } catch (genError: any) {
+        console.error(`   ❌ Falha ao gerar devocional via IA:`, genError.message);
+        addLog('error', `[Devocional] Falha na geração automática: ${genError.message}`);
+      }
+    }
+
+    if (devocionalResult.rows.length === 0) {
+      console.log(`   ⚠️ Disparo abortado: devocional não disponível para ${finalDate}`);
+      addLog('warning', `[Devocional] Disparo cancelado: devocional não disponível para data: ${finalDate}`);
+      await sendNotification(config.notification_phone, `⚠️ Disparo de devocional cancelado: não foi possível encontrar ou gerar o devocional para hoje (${finalDate}).`);
       return;
     }
 

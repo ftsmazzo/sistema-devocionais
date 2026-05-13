@@ -14,8 +14,8 @@ import {
   Send,
   Settings,
   FileText,
-  Smartphone,
   ChevronRight,
+  Brain,
 } from 'lucide-react';
 
 interface LayoutProps {
@@ -42,6 +42,7 @@ const navSections = [
     label: 'Disparos',
     items: [
       { name: 'Disparos', href: '/dispatches', icon: Send },
+      { name: 'Sessão Devocional', href: '/devocional/criativo', icon: Brain },
       { name: 'Config. Devocional', href: '/devocional/config', icon: Settings },
       { name: 'Mensagens Personalizadas', href: '/mensagens/config', icon: MessageCircle },
     ],

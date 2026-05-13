@@ -572,4 +572,132 @@ router.put('/config', authenticateToken, async (req: AuthRequest, res) => {
   }
 });
 
+/**
+ * Buscar configuração de IA do Devocional
+ * GET /api/devocional/ai-config
+ */
+router.get('/ai-config', authenticateToken, async (req: AuthRequest, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT * FROM devocional_ai_config ORDER BY id DESC LIMIT 1`
+    );
+
+    if (result.rows.length === 0) {
+      // Retornar valores padrão se não existir (o initializeDatabase deveria ter criado)
+      return res.json({
+        config: {
+          central_theme: 'Expressar',
+          journey_description: 'Uma jornada de fé focada em expressar Cristo no dia a dia.',
+          preaching_tone: 'Afetuoso, inspirador, levemente bem humorado e acolhedor.',
+          bible_version: 'ACF',
+          signature: 'Alex e Daniela Mantovani',
+          model_name: 'gemini-1.5-flash',
+          character_limit: 4000
+        }
+      });
+    }
+
+    // Não retornar a API Key por segurança, apenas indicar se está configurada
+    const config = result.rows[0];
+    const hasApiKey = !!(config.gemini_api_key || process.env.GEMINI_API_KEY);
+
+    res.json({
+      config: {
+        ...config,
+        gemini_api_key: hasApiKey ? '********' : null
+      }
+    });
+  } catch (error: any) {
+    console.error('❌ Erro ao buscar configuração de IA:', error);
+    res.status(500).json({ error: 'Erro ao buscar configuração de IA' });
+  }
+});
+
+/**
+ * Atualizar configuração de IA do Devocional
+ * PUT /api/devocional/ai-config
+ */
+router.put('/ai-config', authenticateToken, async (req: AuthRequest, res) => {
+  try {
+    const { 
+      central_theme, journey_description, preaching_tone, 
+      bible_version, signature, gemini_api_key, 
+      model_name, character_limit, enabled 
+    } = req.body;
+
+    const existing = await pool.query(
+      `SELECT id FROM devocional_ai_config ORDER BY id DESC LIMIT 1`
+    );
+
+    let result;
+    const queryParams = [
+      central_theme, journey_description, preaching_tone,
+      bible_version, signature, 
+      gemini_api_key === '********' ? undefined : gemini_api_key,
+      model_name, character_limit, enabled
+    ];
+
+    if (existing.rows.length === 0) {
+      result = await pool.query(
+        `INSERT INTO devocional_ai_config (
+          central_theme, journey_description, preaching_tone,
+          bible_version, signature, gemini_api_key,
+          model_name, character_limit, enabled
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        RETURNING *`,
+        queryParams
+      );
+    } else {
+      // Só atualiza a API key se ela foi enviada e não é o placeholder
+      const updateKey = gemini_api_key && gemini_api_key !== '********';
+      
+      result = await pool.query(
+        `UPDATE devocional_ai_config 
+         SET central_theme = COALESCE($1, central_theme),
+             journey_description = COALESCE($2, journey_description),
+             preaching_tone = COALESCE($3, preaching_tone),
+             bible_version = COALESCE($4, bible_version),
+             signature = COALESCE($5, signature),
+             ${updateKey ? 'gemini_api_key = $6,' : ''}
+             model_name = COALESCE($7, model_name),
+             character_limit = COALESCE($8, character_limit),
+             enabled = COALESCE($9, enabled),
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $10
+         RETURNING *`,
+        [...queryParams, existing.rows[0].id]
+      );
+    }
+
+    res.json({ 
+      success: true, 
+      config: { ...result.rows[0], gemini_api_key: '********' },
+      message: 'Configuração de IA salva com sucesso' 
+    });
+  } catch (error: any) {
+    console.error('❌ Erro ao atualizar configuração de IA:', error);
+    res.status(500).json({ error: 'Erro ao salvar configuração de IA' });
+  }
+});
+
+/**
+ * Gerar devocional manualmente via IA
+ * POST /api/devocional/generate
+ */
+router.post('/generate', authenticateToken, async (req: AuthRequest, res) => {
+  try {
+    const { date } = req.body;
+    if (!date) return res.status(400).json({ error: 'Data é obrigatória' });
+
+    const { DevocionalGenerator } = await import('../services/DevocionalGenerator');
+    const generator = new DevocionalGenerator();
+    const result = await generator.generate(date);
+
+    res.json({ success: true, devocional: result });
+  } catch (error: any) {
+    console.error('❌ Erro na geração manual:', error);
+    res.status(500).json({ error: 'Falha na geração do devocional', message: error.message });
+  }
+});
+
 export default router;

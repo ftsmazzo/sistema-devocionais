@@ -439,6 +439,31 @@ export async function initializeDatabase() {
       )
     `);
 
+    // Criar tabela de configuração de IA para geração de devocionais
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS devocional_ai_config (
+        id SERIAL PRIMARY KEY,
+        central_theme VARCHAR(255) DEFAULT 'Expressar',
+        journey_description TEXT DEFAULT 'Uma jornada de fé focada em expressar Cristo no dia a dia.',
+        preaching_tone TEXT DEFAULT 'Afetuoso, inspirador, levemente bem humorado e acolhedor.',
+        bible_version VARCHAR(50) DEFAULT 'ACF',
+        signature VARCHAR(255) DEFAULT 'Alex e Daniela Mantovani',
+        gemini_api_key TEXT,
+        model_name VARCHAR(100) DEFAULT 'gemini-1.5-flash',
+        character_limit INTEGER DEFAULT 4000,
+        enabled BOOLEAN DEFAULT TRUE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // Inserir configuração padrão de IA se não existir
+    await client.query(`
+      INSERT INTO devocional_ai_config (central_theme, journey_description, preaching_tone, bible_version, signature, model_name)
+      SELECT 'Expressar', 'Uma jornada de fé focada em expressar Cristo no dia a dia.', 'Afetuoso, inspirador, levemente bem humorado e acolhedor.', 'ACF', 'Alex e Daniela Mantovani', 'gemini-1.5-flash'
+      WHERE NOT EXISTS (SELECT 1 FROM devocional_ai_config)
+    `);
+
     // Criar tabela de configuração de IA para marketing
     await client.query(`
       CREATE TABLE IF NOT EXISTS marketing_ai_config (

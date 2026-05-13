@@ -11,6 +11,7 @@ import Dispatches from './pages/Dispatches';
 import DevocionalConfig from './pages/DevocionalConfig';
 import MensagensPersonalizadas from './pages/MensagensPersonalizadas';
 import Logs from './pages/Logs';
+import SessaoDevocional from './pages/SessaoDevocional';
 import Layout from './components/Layout';
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
@@ -65,6 +66,7 @@ function App() {
         <Route path="/lists" element={<PrivateRoute><Lists /></PrivateRoute>} />
         <Route path="/dispatches" element={<PrivateRoute><Dispatches /></PrivateRoute>} />
         <Route path="/devocional/config" element={<PrivateRoute><DevocionalConfig /></PrivateRoute>} />
+        <Route path="/devocional/criativo" element={<PrivateRoute><SessaoDevocional /></PrivateRoute>} />
         {/* Rota nova: Mensagens Personalizadas (antigo /marketing/config) */}
         <Route path="/mensagens/config" element={<PrivateRoute><MensagensPersonalizadas /></PrivateRoute>} />
         {/* Compatibilidade retroativa */}
