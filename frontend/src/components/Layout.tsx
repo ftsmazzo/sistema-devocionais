@@ -196,18 +196,25 @@ export default function Layout({ children }: LayoutProps) {
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{
-                fontSize: '0.8rem',
-                fontWeight: 600,
+                fontSize: '0.85rem',
+                fontWeight: 700,
                 color: 'var(--text-primary)',
                 fontFamily: 'Outfit, sans-serif',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
               }}>
-                {user?.name || user?.email || 'Admin'}
+                {import.meta.env.VITE_ADMIN_NAME || user?.name || user?.email || 'Administrador'}
               </div>
-              <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginTop: 1 }}>
-                Administrador
+              <div style={{ 
+                fontSize: '0.65rem', 
+                color: 'var(--gold-primary)', 
+                fontWeight: 700, 
+                textTransform: 'uppercase', 
+                letterSpacing: '0.05em',
+                marginTop: 2 
+              }}>
+                Painel Admin
               </div>
             </div>
           </div>

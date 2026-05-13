@@ -2,20 +2,21 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '@/lib/api';
 import { useAuthStore } from '@/store/authStore';
-import Button from '@/components/ui/Button';
-import Input from '@/components/ui/Input';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card';
 import {
   Plus,
   Trash2,
   Power,
   PowerOff,
   RefreshCw,
-  MessageSquare,
   CheckCircle2,
   XCircle,
   Clock,
   Shield,
+  Smartphone,
+  ExternalLink,
+  Edit,
+  X,
+  QrCode,
 } from 'lucide-react';
 
 interface Instance {
@@ -42,6 +43,7 @@ export default function Instances() {
     instance_name: '',
   });
   const [refreshing, setRefreshing] = useState<number | null>(null);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const navigate = useNavigate();
   const { user } = useAuthStore();
 
@@ -53,8 +55,16 @@ export default function Instances() {
     loadInstances();
   }, [user, navigate]);
 
+  useEffect(() => {
+    if (toast) {
+      const timer = setTimeout(() => setToast(null), 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [toast]);
+
   const loadInstances = async () => {
     try {
+      setLoading(true);
       const response = await api.get('/instances');
       setInstances(response.data.instances);
     } catch (error) {
@@ -75,9 +85,10 @@ export default function Instances() {
       setShowModal(false);
       setEditingInstance(null);
       setFormData({ name: '', instance_name: '' });
+      setToast({ message: `Instância ${editingInstance ? 'atualizada' : 'criada'} com sucesso!`, type: 'success' });
       loadInstances();
     } catch (error: any) {
-      alert(error.response?.data?.error || 'Erro ao salvar instância');
+      setToast({ message: error.response?.data?.error || 'Erro ao salvar instância', type: 'error' });
     }
   };
 
@@ -85,9 +96,10 @@ export default function Instances() {
     if (!confirm('Tem certeza que deseja deletar esta instância?')) return;
     try {
       await api.delete(`/instances/${id}`);
+      setToast({ message: 'Instância removida com sucesso!', type: 'success' });
       loadInstances();
     } catch (error: any) {
-      alert(error.response?.data?.error || 'Erro ao deletar instância');
+      setToast({ message: error.response?.data?.error || 'Erro ao deletar instância', type: 'error' });
     }
   };
 
@@ -103,7 +115,7 @@ export default function Instances() {
       }
       loadInstances();
     } catch (error: any) {
-      alert(error.response?.data?.error || 'Erro ao conectar instância');
+      setToast({ message: error.response?.data?.error || 'Erro ao conectar instância', type: 'error' });
     } finally {
       setRefreshing(null);
     }
@@ -113,9 +125,10 @@ export default function Instances() {
     setRefreshing(id);
     try {
       await api.post(`/instances/${id}/disconnect`);
+      setToast({ message: 'Instância desconectada!', type: 'success' });
       loadInstances();
     } catch (error: any) {
-      alert(error.response?.data?.error || 'Erro ao desconectar instância');
+      setToast({ message: error.response?.data?.error || 'Erro ao desconectar instância', type: 'error' });
     } finally {
       setRefreshing(null);
     }
@@ -124,336 +137,303 @@ export default function Instances() {
   const handleCheckStatus = async (id: number) => {
     setRefreshing(id);
     try {
-      const response = await api.get(`/instances/${id}/status`);
-      console.log('Status atualizado:', response.data);
+      await api.get(`/instances/${id}/status`);
       loadInstances();
     } catch (error: any) {
-      console.error('Erro ao verificar status:', error);
-      alert(error.response?.data?.error || error.response?.data?.message || 'Erro ao verificar status');
+      setToast({ message: 'Erro ao verificar status da instância', type: 'error' });
     } finally {
       setRefreshing(null);
     }
   };
 
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case 'connected':
-        return <CheckCircle2 className="h-4 w-4 text-green-500" />;
-      case 'connecting':
-        return <Clock className="h-4 w-4 text-yellow-500" />;
-      default:
-        return <XCircle className="h-4 w-4 text-gray-400" />;
-    }
-  };
-
-  const getStatusText = (status: string) => {
-    switch (status) {
-      case 'connected':
-        return 'Conectado';
-      case 'connecting':
-        return 'Conectando';
-      default:
-        return 'Desconectado';
-    }
-  };
-
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <RefreshCw className="h-8 w-8 animate-spin mx-auto mb-4 text-primary" />
-          <p>Carregando...</p>
-        </div>
+      <div style={{ minHeight: '60vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <RefreshCw size={40} className="animate-spin text-amber-500" />
       </div>
     );
   }
 
   return (
-    <div>
-      {/* Main Content */}
-      <div>
-        <div className="flex justify-between items-center mb-8">
-          <div>
-            <h2 className="text-3xl font-bold bg-gradient-to-r from-gray-900 to-gray-700 bg-clip-text text-transparent mb-1">
-              Instâncias WhatsApp
-            </h2>
-            <p className="text-gray-500 text-sm">Gerencie e configure suas instâncias</p>
-          </div>
-          <Button 
-            onClick={() => setShowModal(true)}
-            className="bg-gradient-to-r from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600 text-white shadow-md shadow-indigo-500/30 rounded-xl px-6"
-          >
-            <Plus className="h-4 w-4 mr-2" />
-            Nova Instância
-          </Button>
+    <div style={{ maxWidth: 1200, margin: '0 auto' }}>
+      {/* Toast */}
+      {toast && (
+        <div style={{
+          position: 'fixed', bottom: 24, right: 24, zIndex: 1000,
+          background: toast.type === 'success' ? 'rgba(16,185,129,0.15)' : 'rgba(244,63,94,0.15)',
+          border: `1px solid ${toast.type === 'success' ? 'rgba(16,185,129,0.4)' : 'rgba(244,63,94,0.4)'}`,
+          padding: '14px 20px', borderRadius: 12, backdropFilter: 'blur(10px)',
+          display: 'flex', alignItems: 'center', gap: 10, color: toast.type === 'success' ? '#34d399' : '#fb7185'
+        }}>
+          {toast.type === 'success' ? <CheckCircle2 size={18} /> : <XCircle size={18} />}
+          <span style={{ fontSize: '0.9rem', fontWeight: 500 }}>{toast.message}</span>
         </div>
+      )}
 
-        {/* Instances Grid */}
-        {instances.length === 0 ? (
-          <Card>
-            <CardContent className="py-12 text-center">
-              <MessageSquare className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-              <p className="text-muted-foreground">Nenhuma instância cadastrada</p>
-            </CardContent>
-          </Card>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-6 gap-3">
-            {instances.map((instance) => (
-              <Card key={instance.id} className="hover:shadow-lg hover:shadow-indigo-500/10 transition-all duration-300 border border-gray-200 hover:border-indigo-300 bg-white rounded-lg overflow-hidden group">
-                <CardHeader className="pb-2.5 bg-gradient-to-br from-gray-50 to-white border-b border-gray-100">
-                  <div className="flex justify-between items-start">
-                    <div className="flex-1 min-w-0">
-                      <CardTitle className="text-sm font-bold text-gray-900 mb-0.5 truncate">
-                        {instance.name}
-                      </CardTitle>
-                      <CardDescription className="text-xs font-mono text-gray-400 truncate">
-                        {instance.instance_name}
-                      </CardDescription>
-                    </div>
-                    <div className="ml-2 flex-shrink-0">
-                      {getStatusIcon(instance.status)}
-                    </div>
-                  </div>
-                </CardHeader>
-                <CardContent className="pt-2.5">
-                  <div className="space-y-2">
-                    {/* Status Badge */}
-                    <div className="flex items-center justify-between p-1.5 bg-gray-50 rounded-lg border border-gray-100">
-                      <span className="text-xs font-medium text-gray-600">Status</span>
-                      <span className={`text-xs font-semibold px-1.5 py-0.5 rounded-full ${
-                        instance.status === 'connected' 
-                          ? 'bg-green-100 text-green-700' 
-                          : instance.status === 'connecting'
-                          ? 'bg-yellow-100 text-yellow-700'
-                          : 'bg-gray-100 text-gray-700'
-                      }`}>
-                        {getStatusText(instance.status)}
-                      </span>
-                    </div>
-
-                    {/* Número de Telefone */}
-                    {instance.phone_number ? (
-                      <div className="flex items-center gap-1.5 p-2 bg-gradient-to-br from-indigo-50 to-purple-50 rounded-lg border border-indigo-100">
-                        <svg className="w-4 h-4 text-blue-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
-                        </svg>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-xs text-blue-600 font-medium">Telefone</p>
-                          <p className="text-xs font-semibold text-blue-900 truncate">
-                            {instance.phone_number}
-                          </p>
-                        </div>
-                      </div>
-                    ) : instance.status === 'connected' ? (
-                      <div className="p-2 bg-gray-50 rounded-lg border border-gray-100">
-                        <p className="text-xs text-gray-400">Número não disponível</p>
-                      </div>
-                    ) : (
-                      <div className="p-2 bg-amber-50 rounded-lg border border-amber-100">
-                        <p className="text-xs text-amber-600">Conecte para ver o número</p>
-                      </div>
-                    )}
-                    {/* Botões de Ação */}
-                    <div className="flex flex-col gap-1.5 pt-2 border-t border-gray-100">
-                      <div className="flex gap-1.5">
-                        {instance.status === 'disconnected' ? (
-                          <Button
-                            size="sm"
-                            variant="default"
-                            onClick={() => handleConnect(instance.id)}
-                            disabled={refreshing === instance.id}
-                            className="flex-1 bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600 text-white rounded-lg shadow-sm text-xs py-1.5"
-                          >
-                            {refreshing === instance.id ? (
-                              <RefreshCw className="h-3 w-3 animate-spin" />
-                            ) : (
-                              <>
-                                <Power className="h-3 w-3 mr-1" />
-                                Conectar
-                              </>
-                            )}
-                          </Button>
-                        ) : (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => handleDisconnect(instance.id)}
-                            disabled={refreshing === instance.id}
-                            className="flex-1 border-red-200 text-red-600 hover:bg-red-50 hover:border-red-300 rounded-lg text-xs py-1.5"
-                          >
-                            {refreshing === instance.id ? (
-                              <RefreshCw className="h-3 w-3 animate-spin" />
-                            ) : (
-                              <>
-                                <PowerOff className="h-3 w-3 mr-1" />
-                                Desconectar
-                              </>
-                            )}
-                          </Button>
-                        )}
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => handleCheckStatus(instance.id)}
-                          disabled={refreshing === instance.id}
-                          title="Atualizar status"
-                          className="px-2 rounded-lg"
-                        >
-                          <RefreshCw
-                            className={`h-3 w-3 ${refreshing === instance.id ? 'animate-spin' : ''}`}
-                          />
-                        </Button>
-                      </div>
-                      <div className="flex gap-1.5">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => {
-                            setEditingInstance(instance);
-                            setFormData({
-                              name: instance.name,
-                              instance_name: instance.instance_name,
-                            });
-                            setShowModal(true);
-                          }}
-                          className="flex-1 rounded-lg text-xs py-1.5"
-                        >
-                          Editar
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="destructive"
-                          onClick={() => handleDelete(instance.id)}
-                          className="px-2 rounded-lg"
-                        >
-                          <Trash2 className="h-3 w-3" />
-                        </Button>
-                      </div>
-                      <Button
-                        size="sm"
-                        variant="default"
-                        onClick={() => navigate(`/blindage/${instance.id}`)}
-                        className="w-full bg-gradient-to-r from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600 text-white rounded-lg shadow-sm text-xs py-1.5"
-                      >
-                        <Shield className="h-3 w-3 mr-1" />
-                        Configurar Blindagem
-                      </Button>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
+      {/* Header */}
+      <div style={{ marginBottom: 40 }}>
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-5">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+            <div style={{
+              width: 56, height: 56, borderRadius: 16, background: 'linear-gradient(135deg, #f59e0b, #d97706)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 8px 20px rgba(245, 158, 11, 0.3)'
+            }}>
+              <Smartphone size={28} color="#0d0c14" strokeWidth={2} />
+            </div>
+            <div>
+              <h1 style={{ fontSize: '2rem', fontWeight: 800, color: 'var(--text-primary)', margin: 0, fontFamily: 'Outfit' }}>Instâncias WhatsApp</h1>
+              <p style={{ margin: '4px 0 0', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Gerencie e conecte seus números para envios automáticos.</p>
+            </div>
           </div>
-        )}
+
+          <button
+            onClick={() => {
+              setEditingInstance(null);
+              setFormData({ name: '', instance_name: '' });
+              setShowModal(true);
+            }}
+            className="btn-gold"
+            style={{ padding: '12px 28px', fontSize: '1rem', display: 'flex', alignItems: 'center', gap: 10, border: 'none', cursor: 'pointer' }}
+          >
+            <Plus size={20} strokeWidth={3} />
+            <span>Nova Instância</span>
+          </button>
+        </div>
       </div>
 
-      {/* Modal de Formulário */}
-      {showModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-          <Card className="w-full max-w-md">
-            <CardHeader>
-              <CardTitle className="text-2xl">{editingInstance ? 'Editar' : 'Nova'} Instância</CardTitle>
-              <CardDescription>
-                {editingInstance 
-                  ? 'Atualize os dados da instância' 
-                  : 'Crie uma nova instância do Evolution API. API Key e URL são configuradas automaticamente.'}
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <form onSubmit={handleSubmit} className="space-y-4">
+      {/* Instances Grid */}
+      {instances.length === 0 ? (
+        <div className="glass-card" style={{ padding: '80px 24px', textAlign: 'center' }}>
+          <Smartphone size={64} color="var(--border)" style={{ marginBottom: 20 }} />
+          <h3 style={{ color: 'var(--text-primary)', margin: 0 }}>Nenhuma instância cadastrada</h3>
+          <p style={{ color: 'var(--text-muted)', marginTop: 8 }}>Clique em "Nova Instância" para conectar seu WhatsApp.</p>
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 20 }}>
+          {instances.map((instance) => (
+            <div key={instance.id} className="glass-card hover-glow" style={{ padding: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+              {/* Card Header */}
+              <div style={{ padding: '20px 24px', background: 'rgba(255,255,255,0.02)', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                 <div>
-                  <label className="text-sm font-medium mb-2 block text-gray-700">
-                    Nome da Instância
-                  </label>
-                  <Input
-                    value={formData.name}
-                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFormData({ ...formData, name: e.target.value })}
-                    placeholder="Ex: Instância Principal"
-                    required
-                    className="w-full"
-                  />
-                  <p className="text-xs text-gray-500 mt-1">Nome amigável para identificar esta instância</p>
+                  <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-primary)' }}>{instance.name}</h3>
+                  <code style={{ fontSize: '0.7rem', color: 'var(--text-muted)', background: 'rgba(0,0,0,0.2)', padding: '2px 6px', borderRadius: 4, marginTop: 4, display: 'inline-block' }}>
+                    {instance.instance_name}
+                  </code>
                 </div>
-                <div>
-                  <label className="text-sm font-medium mb-2 block text-gray-700">
-                    Instance Name
-                  </label>
-                  <Input
-                    value={formData.instance_name}
-                    onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                      setFormData({ ...formData, instance_name: e.target.value })
-                    }
-                    placeholder="Ex: instance-01"
-                    required
-                    className="w-full font-mono"
-                  />
-                  <p className="text-xs text-gray-500 mt-1">Nome técnico usado na Evolution API (sem espaços)</p>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  {instance.status === 'connected' ? (
+                    <span style={{ fontSize: '0.65rem', padding: '4px 8px', borderRadius: 20, background: 'rgba(16, 185, 129, 0.1)', color: '#10b981', fontWeight: 700, textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <CheckCircle2 size={12} /> Conectado
+                    </span>
+                  ) : instance.status === 'connecting' ? (
+                    <span style={{ fontSize: '0.65rem', padding: '4px 8px', borderRadius: 20, background: 'rgba(245, 158, 11, 0.1)', color: '#f59e0b', fontWeight: 700, textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <Clock size={12} className="animate-spin" /> Conectando
+                    </span>
+                  ) : (
+                    <span style={{ fontSize: '0.65rem', padding: '4px 8px', borderRadius: 20, background: 'rgba(255, 255, 255, 0.05)', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <XCircle size={12} /> Offline
+                    </span>
+                  )}
                 </div>
-                {!editingInstance && (
-                  <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                    <p className="text-xs text-blue-800">
-                      <strong>ℹ️ Nota:</strong> API Key e API URL serão obtidas automaticamente das variáveis de ambiente.
-                    </p>
+              </div>
+
+              {/* Card Body */}
+              <div style={{ padding: 24, flex: 1 }}>
+                <div style={{ 
+                  padding: '16px', borderRadius: 12, background: 'rgba(0,0,0,0.2)', border: '1px solid var(--border)',
+                  marginBottom: 20, display: 'flex', alignItems: 'center', gap: 12
+                }}>
+                  <div style={{ width: 40, height: 40, borderRadius: 10, background: 'var(--bg-elevated)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--gold-primary)' }}>
+                    <Smartphone size={20} />
                   </div>
-                )}
-                <div className="flex gap-2 pt-4">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="flex-1"
-                    onClick={() => {
-                      setShowModal(false);
-                      setEditingInstance(null);
-                      setFormData({ name: '', instance_name: '' });
-                    }}
-                  >
-                    Cancelar
-                  </Button>
-                  <Button type="submit" className="flex-1">
-                    Salvar
-                  </Button>
+                  <div>
+                    <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>Número Conectado</div>
+                    <div style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                      {instance.phone_number || 'Aguardando...'}
+                    </div>
+                  </div>
                 </div>
-              </form>
-            </CardContent>
-          </Card>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                  {instance.status === 'disconnected' ? (
+                    <button
+                      onClick={() => handleConnect(instance.id)}
+                      disabled={refreshing === instance.id}
+                      className="btn-gold"
+                      style={{ padding: '10px', borderRadius: 10, fontSize: '0.85rem', border: 'none' }}
+                    >
+                      {refreshing === instance.id ? <RefreshCw size={18} className="animate-spin" /> : (
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+                          <Power size={16} /> Conectar
+                        </div>
+                      )}
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => handleDisconnect(instance.id)}
+                      disabled={refreshing === instance.id}
+                      className="btn-outline"
+                      style={{ padding: '10px', borderRadius: 10, fontSize: '0.85rem', color: '#fb7185', borderColor: 'rgba(244,63,94,0.2)' }}
+                    >
+                      {refreshing === instance.id ? <RefreshCw size={18} className="animate-spin" /> : (
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+                          <PowerOff size={16} /> Desconectar
+                        </div>
+                      )}
+                    </button>
+                  )}
+                  <button
+                    onClick={() => handleCheckStatus(instance.id)}
+                    disabled={refreshing === instance.id}
+                    className="btn-outline"
+                    style={{ padding: '10px', borderRadius: 10, fontSize: '0.85rem' }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+                      <RefreshCw size={16} className={refreshing === instance.id ? 'animate-spin' : ''} /> Status
+                    </div>
+                  </button>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 12, marginTop: 12 }}>
+                  <button
+                    onClick={() => {
+                      setEditingInstance(instance);
+                      setFormData({ name: instance.name, instance_name: instance.instance_name });
+                      setShowModal(true);
+                    }}
+                    className="btn-outline"
+                    style={{ padding: '10px', borderRadius: 10, fontSize: '0.85rem' }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+                      <Edit size={16} /> Editar
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => handleDelete(instance.id)}
+                    className="btn-outline"
+                    style={{ padding: '10px', borderRadius: 10, color: '#fb7185', borderColor: 'rgba(244,63,94,0.1)', background: 'rgba(244,63,94,0.03)' }}
+                  >
+                    <Trash2 size={18} />
+                  </button>
+                </div>
+              </div>
+
+              {/* Card Footer Action */}
+              <button
+                onClick={() => navigate(`/blindage/${instance.id}`)}
+                style={{
+                  width: '100%', padding: '16px', background: 'rgba(167, 139, 250, 0.05)', border: 'none',
+                  borderTop: '1px solid var(--border)', color: '#a78bfa', fontWeight: 600, fontSize: '0.85rem',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, cursor: 'pointer',
+                  transition: '0.2s'
+                }}
+              >
+                <Shield size={16} /> Configurar Blindagem
+              </button>
+            </div>
+          ))}
         </div>
       )}
 
-      {/* Modal de QR Code */}
-      {showQrModal && qrCode && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-          <Card className="w-full max-w-md">
-            <CardHeader>
-              <CardTitle>Escaneie o QR Code</CardTitle>
-              <CardDescription>
-                Escaneie este QR code com o WhatsApp para conectar a instância <strong>{qrInstanceName}</strong>
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex justify-center bg-white p-4 rounded-lg">
-                <img src={qrCode} alt="QR Code" className="max-w-full h-auto" />
+      {/* Modal Criar/Editar */}
+      {showModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100, padding: 20 }}>
+          <div className="glass-card" style={{ width: '100%', maxWidth: 500, padding: 0 }}>
+            <div style={{ padding: '24px 32px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <h2 style={{ margin: 0, fontSize: '1.5rem', fontWeight: 800, color: 'var(--text-primary)', fontFamily: 'Outfit' }}>
+                {editingInstance ? 'Editar Instância' : 'Nova Instância'}
+              </h2>
+              <button onClick={() => setShowModal(false)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}><X size={28} /></button>
+            </div>
+            
+            <form onSubmit={handleSubmit} style={{ padding: 32 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+                <div>
+                  <label className="label-premium">Nome da Instância *</label>
+                  <input
+                    type="text" value={formData.name}
+                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                    placeholder="Ex: WhatsApp Principal" className="input-dark" required
+                  />
+                  <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 6 }}>Identificação interna no sistema.</p>
+                </div>
+
+                <div>
+                  <label className="label-premium">Instance Name (ID Técnico) *</label>
+                  <input
+                    type="text" value={formData.instance_name}
+                    onChange={(e) => setFormData({ ...formData, instance_name: e.target.value })}
+                    placeholder="Ex: whatsapp-01" className="input-dark" required
+                  />
+                  <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 6 }}>ID sem espaços usado na Evolution API.</p>
+                </div>
               </div>
-              <div className="text-center text-sm text-muted-foreground">
-                <p>1. Abra o WhatsApp no seu celular</p>
-                <p>2. Vá em Configurações → Aparelhos conectados</p>
-                <p>3. Toque em "Conectar um aparelho"</p>
-                <p>4. Escaneie este QR code</p>
+
+              <div style={{ marginTop: 40, display: 'flex', gap: 16 }}>
+                <button type="button" onClick={() => setShowModal(false)} className="btn-outline" style={{ flex: 1, padding: '14px 0', borderRadius: 12 }}>Cancelar</button>
+                <button type="submit" className="btn-gold" style={{ flex: 1, padding: '14px 0', borderRadius: 12, border: 'none' }}>
+                  Salvar Instância
+                </button>
               </div>
-              <Button
-                variant="outline"
-                className="w-full"
-                onClick={() => {
-                  setShowQrModal(false);
-                  setQrCode(null);
-                  setQrInstanceName('');
-                }}
-              >
-                Fechar
-              </Button>
-            </CardContent>
-          </Card>
+            </form>
+          </div>
         </div>
       )}
+
+      {/* Modal QR Code */}
+      {showQrModal && qrCode && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.9)', backdropFilter: 'blur(10px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1200, padding: 20 }}>
+          <div className="glass-card" style={{ width: '100%', maxWidth: 450, padding: 32, textAlign: 'center' }}>
+            <div style={{ 
+              width: 64, height: 64, borderRadius: 20, background: 'rgba(16, 185, 129, 0.1)', color: '#10b981',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 24px'
+            }}>
+              <QrCode size={32} />
+            </div>
+            <h2 style={{ fontSize: '1.5rem', fontWeight: 800, color: 'var(--text-primary)', marginBottom: 8, fontFamily: 'Outfit' }}>Escaneie o QR Code</h2>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: 32 }}>
+              Conecte o WhatsApp à instância <strong>{qrInstanceName}</strong>
+            </p>
+
+            <div style={{ background: '#fff', padding: 20, borderRadius: 20, display: 'inline-block', boxShadow: '0 0 40px rgba(0,0,0,0.5)', marginBottom: 32 }}>
+              <img src={qrCode} alt="QR Code" style={{ width: 260, height: 260 }} />
+            </div>
+
+            <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 16, padding: 20, textAlign: 'left', marginBottom: 32 }}>
+              <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div style={{ display: 'flex', gap: 12 }}>
+                  <span style={{ width: 20, height: 20, borderRadius: '50%', background: 'var(--gold-primary)', color: '#000', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.7rem', fontWeight: 800, flexShrink: 0 }}>1</span>
+                  <span>Abra o WhatsApp no seu celular</span>
+                </div>
+                <div style={{ display: 'flex', gap: 12 }}>
+                  <span style={{ width: 20, height: 20, borderRadius: '50%', background: 'var(--gold-primary)', color: '#000', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.7rem', fontWeight: 800, flexShrink: 0 }}>2</span>
+                  <span>Toque em Menu ou Configurações e selecione Aparelhos Conectados</span>
+                </div>
+                <div style={{ display: 'flex', gap: 12 }}>
+                  <span style={{ width: 20, height: 20, borderRadius: '50%', background: 'var(--gold-primary)', color: '#000', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.7rem', fontWeight: 800, flexShrink: 0 }}>3</span>
+                  <span>Aponte seu celular para esta tela para capturar o código</span>
+                </div>
+              </div>
+            </div>
+
+            <button onClick={() => setShowQrModal(false)} className="btn-outline" style={{ width: '100%', padding: '14px 0', borderRadius: 12 }}>
+              Fechar e Atualizar
+            </button>
+          </div>
+        </div>
+      )}
+
+      <style>{`
+        .label-premium {
+          display: block;
+          font-size: 0.8rem;
+          font-weight: 600;
+          color: var(--text-secondary);
+          margin-bottom: 8px;
+          text-transform: uppercase;
+          letter-spacing: 0.05em;
+        }
+      `}</style>
     </div>
   );
 }
