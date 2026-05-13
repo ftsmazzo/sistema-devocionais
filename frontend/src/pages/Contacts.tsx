@@ -6,10 +6,8 @@ import {
   Search,
   Edit,
   Trash2,
-  Tag,
   Upload,
   CheckCircle2,
-  XCircle,
   Phone,
   Mail,
   Grid3x3,
@@ -17,7 +15,6 @@ import {
   X,
   RefreshCw,
   AlertTriangle,
-  ChevronRight,
   Filter,
   MoreVertical,
 } from 'lucide-react';
@@ -60,7 +57,7 @@ export default function Contacts() {
   const [total, setTotal] = useState(0);
   const [limit] = useState(50);
   const [offset, setOffset] = useState(0);
-  const [showAll, setShowAll] = useState(false);
+  const [showAll] = useState(false);
   const [viewMode, setViewMode] = useState<'cards' | 'list'>('cards');
   const [selectedContacts, setSelectedContacts] = useState<number[]>([]);
   const [showBulkTagModal, setShowBulkTagModal] = useState(false);
@@ -164,15 +161,6 @@ export default function Contacts() {
     });
     setContactTags(contact.tags?.map(t => t.id) || []);
     setShowModal(true);
-  };
-
-  const handleAddTag = async (contactId: number, tagId: number) => {
-    try {
-      await api.post(`/contacts/${contactId}/tags`, { tag_id: tagId });
-      loadContacts();
-    } catch (error: any) {
-      setToast({ message: error.response?.data?.error || 'Erro ao adicionar tag', type: 'error' });
-    }
   };
 
   const handleRemoveTag = async (contactId: number, tagId: number) => {
