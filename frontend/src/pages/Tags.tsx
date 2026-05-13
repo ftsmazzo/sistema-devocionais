@@ -5,11 +5,9 @@ import {
   Plus,
   Edit,
   Trash2,
-  RefreshCw,
   AlertCircle,
   CheckCircle2,
   Users,
-  ChevronRight,
 } from 'lucide-react';
 
 interface Tag {
