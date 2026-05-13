@@ -1,14 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import api from '@/lib/api';
-import Button from '@/components/ui/Button';
-import Input from '@/components/ui/Input';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/Card';
-import Switch from '@/components/ui/Switch';
-import Label from '@/components/ui/Label';
-import Tooltip from '@/components/ui/Tooltip';
-import Toast from '@/components/ui/Toast';
-import Slider from '@/components/ui/Slider';
 import {
   Shield,
   Clock,
@@ -22,6 +14,10 @@ import {
   CheckCircle2,
   Server,
   Info,
+  ChevronRight,
+  AlertTriangle,
+  RefreshCw,
+  Search,
 } from 'lucide-react';
 
 interface BlindageRule {
@@ -54,6 +50,13 @@ export default function Blindage() {
     loadData();
   }, [instanceId]);
 
+  useEffect(() => {
+    if (toast) {
+      const timer = setTimeout(() => setToast(null), 4000);
+      return () => clearTimeout(timer);
+    }
+  }, [toast]);
+
   const loadData = async () => {
     try {
       setLoading(true);
@@ -72,6 +75,7 @@ export default function Blindage() {
         config: typeof rule.config === 'string' ? JSON.parse(rule.config) : rule.config,
       }));
       
+      // Auto-create selection rule if missing
       const selectionRule = loadedRules.find((r: any) => r.rule_type === 'instance_selection');
       if (!selectionRule) {
         try {
@@ -92,7 +96,7 @@ export default function Blindage() {
             ...rule,
             config: typeof rule.config === 'string' ? JSON.parse(rule.config) : rule.config,
           }));
-        } catch (error: any) {
+        } catch (error) {
           console.error('Erro ao criar regra de seleção:', error);
         }
       }
@@ -100,7 +104,7 @@ export default function Blindage() {
       setRules(loadedRules);
     } catch (error) {
       console.error('Erro ao carregar dados:', error);
-      alert('Erro ao carregar configurações de blindagem');
+      setToast({ message: 'Erro ao carregar configurações de blindagem', type: 'error' });
     } finally {
       setLoading(false);
     }
@@ -139,42 +143,27 @@ export default function Blindage() {
         : rules;
 
       let savedCount = 0;
-      const errors: string[] = [];
       
       for (const rule of rulesToSave) {
-        try {
-          await api.put(`/blindage/rules/${rule.id}`, {
-            enabled: rule.enabled,
-            config: rule.config,
-          });
-          savedCount++;
-        } catch (error: any) {
-          const errorMsg = error.response?.data?.error || error.message || 'Erro desconhecido';
-          errors.push(`Regra ${rule.id}: ${errorMsg}`);
-        }
+        await api.put(`/blindage/rules/${rule.id}`, {
+          enabled: rule.enabled,
+          config: rule.config,
+        });
+        savedCount++;
       }
 
-      if (errors.length > 0) {
-        setToast({
-          message: `⚠️ ${savedCount} salva(s), ${errors.length} erro(s): ${errors.join(', ')}`,
-          type: 'warning',
-        });
-      } else {
-        setSaved(true);
-        if (!ruleId) {
-          setHasChanges(false);
-        }
-        setToast({
-          message: `✅ ${savedCount} configuração(ões) salva(s) com sucesso!`,
-          type: 'success',
-        });
-      }
+      setSaved(true);
+      if (!ruleId) setHasChanges(false);
+      setToast({
+        message: `${savedCount} configuração(ões) salva(s) com sucesso!`,
+        type: 'success',
+      });
       
       await loadData();
     } catch (error: any) {
       console.error('Erro ao salvar:', error);
       setToast({
-        message: `❌ Erro ao salvar: ${error.response?.data?.error || error.message || 'Erro desconhecido'}`,
+        message: `Erro ao salvar: ${error.response?.data?.error || error.message}`,
         type: 'error',
       });
     } finally {
@@ -182,7 +171,6 @@ export default function Blindage() {
     }
   };
 
-  // Helper para configurar horários com seletor visual
   const handleTimeRangeChange = (ruleId: number, startHour: number, endHour: number) => {
     const hours = [];
     for (let h = startHour; h <= endHour; h++) {
@@ -193,10 +181,15 @@ export default function Blindage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mx-auto mb-4"></div>
-          <p className="text-gray-600">Carregando configurações...</p>
+      <div style={{ minHeight: '60vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{
+            width: 44, height: 44, borderRadius: '50%',
+            border: '3px solid var(--gold-primary)', borderTopColor: 'transparent',
+            animation: 'spin 0.8s linear infinite', margin: '0 auto 12px',
+          }} />
+          <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Carregando blindagens...</p>
+          <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
         </div>
       </div>
     );
@@ -213,7 +206,6 @@ export default function Blindage() {
     selection: rules.find(r => r.rule_type === 'instance_selection'),
   };
 
-  // Calcular horário inicial e final para o seletor
   const allowedHours = Array.isArray(groupedRules.hours?.config.allowed_hours) 
     ? groupedRules.hours.config.allowed_hours 
     : [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20];
@@ -221,917 +213,436 @@ export default function Blindage() {
   const endHour = allowedHours.length > 0 ? Math.max(...allowedHours) : 20;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Header */}
-        <div className="mb-8">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-            <div>
-              <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-3 mb-2">
-                <div className="w-10 h-10 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-xl flex items-center justify-center shadow-lg">
-                  <Shield className="h-6 w-6 text-white" />
-                </div>
-                Configurações de Blindagem
-              </h1>
-              {instance && (
-                <p className="text-gray-600 text-sm ml-13">
-                  Instância: <span className="font-semibold text-gray-900">{instance.name}</span>
-                </p>
-              )}
-              <p className="text-gray-500 text-sm ml-13 mt-1">
-                Configure as regras de proteção para otimizar o envio de mensagens
-              </p>
-            </div>
-            
-            <Button
-              onClick={() => handleSave()}
-              disabled={saving || !hasChanges}
-              className={`flex items-center gap-2 px-6 py-3 text-base font-medium rounded-xl transition-all shadow-lg ${
-                hasChanges
-                  ? 'bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white'
-                  : 'bg-gray-200 text-gray-400 cursor-not-allowed'
-              }`}
-            >
-              {saving ? (
-                <>
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                  Salvando...
-                </>
-              ) : saved ? (
-                <>
-                  <CheckCircle2 className="h-5 w-5" />
-                  Salvo!
-                </>
-              ) : (
-                <>
-                  <Save className="h-5 w-5" />
-                  {hasChanges ? 'Salvar Todas as Alterações' : 'Sem alterações'}
-                </>
-              )}
-            </Button>
-          </div>
+    <div style={{ maxWidth: 1200, margin: '0 auto' }}>
+      {/* Toast Notification */}
+      {toast && (
+        <div style={{
+          position: 'fixed', bottom: 24, right: 24, zIndex: 100,
+          display: 'flex', alignItems: 'center', gap: 10,
+          padding: '14px 18px', borderRadius: 12, boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+          background: toast.type === 'success' ? 'rgba(16,185,129,0.15)' : 'rgba(244,63,94,0.15)',
+          border: `1px solid ${toast.type === 'success' ? 'rgba(16,185,129,0.4)' : 'rgba(244,63,94,0.4)'}`,
+          color: toast.type === 'success' ? '#34d399' : '#fb7185',
+          backdropFilter: 'blur(12px)',
+        }}>
+          {toast.type === 'success' ? <CheckCircle2 size={18} /> : <AlertTriangle size={18} />}
+          <span style={{ fontFamily: 'Inter, sans-serif', fontSize: '0.875rem', fontWeight: 500 }}>{toast.message}</span>
         </div>
+      )}
 
-        {/* Grid de Cards - Layout em 2 colunas para melhor espaçamento */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* 1. Delay Entre Mensagens */}
-          <Card className="border-2 border-gray-200 hover:border-indigo-300 hover:shadow-lg transition-all duration-300 rounded-2xl overflow-hidden bg-white shadow-md">
-            <CardHeader className="bg-gradient-to-br from-blue-50 to-cyan-50 border-b-2 border-gray-100 px-6 py-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-cyan-500 rounded-xl flex items-center justify-center shadow-md">
-                    <Clock className="h-5 w-5 text-white" />
-                  </div>
-                  <div>
-                    <CardTitle className="text-lg font-bold text-gray-900">
-                      Delay Entre Mensagens
-                    </CardTitle>
-                    <CardDescription className="text-xs text-gray-600 mt-0.5">
-                      Controle o tempo entre envios
-                    </CardDescription>
-                  </div>
-                </div>
-                <Tooltip content="Controla o tempo mínimo entre o envio de mensagens. O delay progressivo aumenta automaticamente conforme o volume de mensagens enviadas, ajudando a evitar bloqueios.">
-                  <Info className="h-5 w-5 text-gray-400 hover:text-indigo-600 cursor-help" />
-                </Tooltip>
+      {/* Header Area */}
+      <div style={{ marginBottom: 40 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', md: { flexDirection: 'row' }, alignItems: 'flex-start', justifyContent: 'space-between', gap: 20 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+            <div style={{
+              width: 56, height: 56, borderRadius: 16,
+              background: 'linear-gradient(135deg, #f59e0b, #d97706)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              boxShadow: '0 8px 20px rgba(245, 158, 11, 0.3)',
+              flexShrink: 0,
+            }}>
+              <Shield size={28} color="#0d0c14" strokeWidth={2} />
+            </div>
+            <div>
+              <h1 style={{ fontSize: '2rem', fontWeight: 800, color: 'var(--text-primary)', margin: 0, letterSpacing: '-0.02em', fontFamily: 'Outfit, sans-serif' }}>
+                Blindagem de Contas
+              </h1>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+                <span className="badge badge-gold">Proteção Ativa</span>
+                {instance && (
+                  <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 5 }}>
+                    <Server size={14} /> {instance.name}
+                  </span>
+                )}
               </div>
-            </CardHeader>
-            <CardContent className="p-6 space-y-6">
-              {groupedRules.delay ? (
-                <>
-                  <div className="flex items-center justify-between py-2">
-                    <Label className="text-sm font-medium text-gray-700">Habilitar Regra</Label>
-                    <Switch
-                      checked={groupedRules.delay.enabled}
-                      onCheckedChange={(checked) => updateRule(groupedRules.delay!.id, { enabled: checked })}
-                    />
-                  </div>
-                  
-                  {groupedRules.delay.enabled && (
-                    <div className="space-y-6 pt-4 border-t-2 border-gray-100">
-                      <div className="space-y-3">
-                        <div className="flex items-center justify-between">
-                          <Label htmlFor="min_delay" className="text-sm font-medium text-gray-700">
-                            Delay Mínimo
-                            <span className="block text-xs font-normal text-gray-500 mt-0.5">Tempo mínimo entre mensagens</span>
-                          </Label>
-                          <div className="flex items-center gap-2">
-                            <span className="text-lg font-bold text-indigo-600 min-w-[3rem] text-right">
-                              {groupedRules.delay.config.min_delay_seconds || 3}s
-                            </span>
-                          </div>
-                        </div>
-                        <Slider
-                          value={groupedRules.delay.config.min_delay_seconds || 3}
-                          min={1}
-                          max={60}
-                          step={1}
-                          onChange={(value) => updateRuleConfig(groupedRules.delay!.id, 'min_delay_seconds', value)}
-                          className="w-full"
-                        />
-                      </div>
-                      
-                      <div className="space-y-3">
-                        <div className="flex items-center justify-between">
-                          <Label htmlFor="max_delay" className="text-sm font-medium text-gray-700">
-                            Delay Máximo
-                            <span className="block text-xs font-normal text-gray-500 mt-0.5">Tempo máximo do delay progressivo</span>
-                          </Label>
-                          <span className="text-lg font-bold text-indigo-600 min-w-[3rem] text-right">
-                            {groupedRules.delay.config.max_delay_seconds || 10}s
-                          </span>
-                        </div>
-                        <Slider
-                          value={groupedRules.delay.config.max_delay_seconds || 10}
-                          min={1}
-                          max={300}
-                          step={1}
-                          onChange={(value) => updateRuleConfig(groupedRules.delay!.id, 'max_delay_seconds', value)}
-                          className="w-full"
-                        />
-                      </div>
-                      
-                      <div className="flex items-center justify-between py-2 border-t border-gray-100 pt-4">
-                        <Label className="text-sm font-medium text-gray-700">
-                          Delay Progressivo
-                          <span className="block text-xs font-normal text-gray-500 mt-0.5">Aumenta automaticamente</span>
-                        </Label>
-                        <Switch
-                          checked={groupedRules.delay.config.progressive !== false}
-                          onCheckedChange={(checked) => updateRuleConfig(groupedRules.delay!.id, 'progressive', checked)}
-                        />
-                      </div>
-                      
-                      {groupedRules.delay.config.progressive !== false && (
-                        <div className="space-y-4 pt-4 border-t border-gray-100">
-                          <div className="space-y-3">
-                            <div className="flex items-center justify-between">
-                              <Label htmlFor="base_delay" className="text-sm font-medium text-gray-700">
-                                Delay Base
-                                <span className="block text-xs font-normal text-gray-500 mt-0.5">Valor inicial</span>
-                              </Label>
-                              <span className="text-lg font-bold text-indigo-600 min-w-[3rem] text-right">
-                                {groupedRules.delay.config.base_delay || 3}s
-                              </span>
-                            </div>
-                            <Slider
-                              value={groupedRules.delay.config.base_delay || 3}
-                              min={1}
-                              max={30}
-                              step={0.5}
-                              onChange={(value) => updateRuleConfig(groupedRules.delay!.id, 'base_delay', value)}
-                              className="w-full"
-                            />
-                          </div>
-                          
-                          <div className="space-y-3">
-                            <div className="flex items-center justify-between">
-                              <Label htmlFor="increment" className="text-sm font-medium text-gray-700">
-                                Incremento por Mensagem
-                                <span className="block text-xs font-normal text-gray-500 mt-0.5">Segundos adicionados</span>
-                              </Label>
-                              <span className="text-lg font-bold text-indigo-600 min-w-[3rem] text-right">
-                                +{groupedRules.delay.config.increment_per_message || 0.5}s
-                              </span>
-                            </div>
-                            <Slider
-                              value={groupedRules.delay.config.increment_per_message || 0.5}
-                              min={0}
-                              max={2}
-                              step={0.1}
-                              onChange={(value) => updateRuleConfig(groupedRules.delay!.id, 'increment_per_message', value)}
-                              className="w-full"
-                            />
-                          </div>
-                        </div>
-                      )}
-                      
-                      <div className="pt-4 border-t-2 border-gray-100">
-                        <Button
-                          onClick={() => handleSave(groupedRules.delay!.id)}
-                          disabled={saving}
-                          className="w-full bg-gradient-to-r from-blue-500 to-cyan-500 hover:from-blue-600 hover:to-cyan-600 text-white font-medium py-2.5 rounded-xl shadow-md"
-                        >
-                          {saving ? 'Salvando...' : 'Salvar Configuração'}
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-                </>
-              ) : (
-                <p className="text-gray-400 text-sm text-center py-4">Regra não encontrada</p>
-              )}
-            </CardContent>
-          </Card>
+            </div>
+          </div>
 
-          {/* 2. Limite de Mensagens */}
-          <Card className="border-2 border-gray-200 hover:border-green-300 hover:shadow-lg transition-all duration-300 rounded-2xl overflow-hidden bg-white shadow-md">
-            <CardHeader className="bg-gradient-to-br from-green-50 to-emerald-50 border-b-2 border-gray-100 px-6 py-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-gradient-to-br from-green-500 to-emerald-500 rounded-xl flex items-center justify-center shadow-md">
-                    <BarChart3 className="h-5 w-5 text-white" />
-                  </div>
-                  <div>
-                    <CardTitle className="text-lg font-bold text-gray-900">
-                      Limite de Mensagens
-                    </CardTitle>
-                    <CardDescription className="text-xs text-gray-600 mt-0.5">
-                      Controle o volume de envios
-                    </CardDescription>
-                  </div>
-                </div>
-                <Tooltip content="Define limites máximos de mensagens que podem ser enviadas por hora e por dia. Ajuda a evitar bloqueios por excesso de envios.">
-                  <Info className="h-5 w-5 text-gray-400 hover:text-green-600 cursor-help" />
-                </Tooltip>
-              </div>
-            </CardHeader>
-            <CardContent className="p-6 space-y-6">
-              {groupedRules.limit ? (
-                <>
-                  <div className="flex items-center justify-between py-2">
-                    <Label className="text-sm font-medium text-gray-700">Habilitar Regra</Label>
-                    <Switch
-                      checked={groupedRules.limit.enabled}
-                      onCheckedChange={(checked) => updateRule(groupedRules.limit!.id, { enabled: checked })}
-                    />
-                  </div>
-                  
-                  {groupedRules.limit.enabled && (
-                    <div className="space-y-6 pt-4 border-t-2 border-gray-100">
-                      <div className="space-y-3">
-                        <div className="flex items-center justify-between">
-                          <Label htmlFor="max_hour" className="text-sm font-medium text-gray-700">
-                            Limite por Hora
-                            <span className="block text-xs font-normal text-gray-500 mt-0.5">Máximo de mensagens/hora</span>
-                          </Label>
-                          <span className="text-lg font-bold text-green-600 min-w-[4rem] text-right">
-                            {groupedRules.limit.config.max_per_hour || 50}
-                          </span>
-                        </div>
-                        <Slider
-                          value={groupedRules.limit.config.max_per_hour || 50}
-                          min={1}
-                          max={1000}
-                          step={1}
-                          onChange={(value) => updateRuleConfig(groupedRules.limit!.id, 'max_per_hour', value)}
-                          className="w-full"
-                        />
-                      </div>
-                      
-                      <div className="space-y-3">
-                        <div className="flex items-center justify-between">
-                          <Label htmlFor="max_day" className="text-sm font-medium text-gray-700">
-                            Limite por Dia
-                            <span className="block text-xs font-normal text-gray-500 mt-0.5">Máximo de mensagens/dia</span>
-                          </Label>
-                          <span className="text-lg font-bold text-green-600 min-w-[4rem] text-right">
-                            {groupedRules.limit.config.max_per_day || 500}
-                          </span>
-                        </div>
-                        <Slider
-                          value={groupedRules.limit.config.max_per_day || 500}
-                          min={1}
-                          max={10000}
-                          step={10}
-                          onChange={(value) => updateRuleConfig(groupedRules.limit!.id, 'max_per_day', value)}
-                          className="w-full"
-                        />
-                      </div>
-                      
-                      <div className="pt-4 border-t-2 border-gray-100">
-                        <Button
-                          onClick={() => handleSave(groupedRules.limit!.id)}
-                          disabled={saving}
-                          className="w-full bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600 text-white font-medium py-2.5 rounded-xl shadow-md"
-                        >
-                          {saving ? 'Salvando...' : 'Salvar Configuração'}
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-                </>
-              ) : (
-                <p className="text-gray-400 text-sm text-center py-4">Regra não encontrada</p>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* 3. Horários Permitidos - COM SELETOR VISUAL */}
-          <Card className="border-2 border-gray-200 hover:border-amber-300 hover:shadow-lg transition-all duration-300 rounded-2xl overflow-hidden bg-white shadow-md">
-            <CardHeader className="bg-gradient-to-br from-amber-50 to-orange-50 border-b-2 border-gray-100 px-6 py-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-gradient-to-br from-amber-500 to-orange-500 rounded-xl flex items-center justify-center shadow-md">
-                    <Calendar className="h-5 w-5 text-white" />
-                  </div>
-                  <div>
-                    <CardTitle className="text-lg font-bold text-gray-900">
-                      Horários Permitidos
-                    </CardTitle>
-                    <CardDescription className="text-xs text-gray-600 mt-0.5">
-                      Configure o período de envio
-                    </CardDescription>
-                  </div>
-                </div>
-                <Tooltip content="Define em quais horários as mensagens podem ser enviadas. Bloqueia envios em horários de risco (madrugada) e permite apenas em horários comerciais.">
-                  <Info className="h-5 w-5 text-gray-400 hover:text-amber-600 cursor-help" />
-                </Tooltip>
-              </div>
-            </CardHeader>
-            <CardContent className="p-6 space-y-6">
-              {groupedRules.hours ? (
-                <>
-                  <div className="flex items-center justify-between py-2">
-                    <Label className="text-sm font-medium text-gray-700">Habilitar Regra</Label>
-                    <Switch
-                      checked={groupedRules.hours.enabled}
-                      onCheckedChange={(checked) => updateRule(groupedRules.hours!.id, { enabled: checked })}
-                    />
-                  </div>
-                  
-                  {groupedRules.hours.enabled && (
-                    <div className="space-y-6 pt-4 border-t-2 border-gray-100">
-                      <div className="space-y-4">
-                        <Label className="text-sm font-medium text-gray-700 block">
-                          Período de Envio
-                          <span className="block text-xs font-normal text-gray-500 mt-0.5">Selecione o horário inicial e final</span>
-                        </Label>
-                        
-                        <div className="grid grid-cols-2 gap-4">
-                          <div className="space-y-2">
-                            <Label htmlFor="start_hour" className="text-xs font-medium text-gray-600">
-                              Horário Inicial
-                            </Label>
-                            <div className="flex items-center gap-2">
-                              <Input
-                                type="number"
-                                id="start_hour"
-                                min={0}
-                                max={23}
-                                value={startHour}
-                                onChange={(e) => {
-                                  const hour = parseInt(e.target.value) || 0;
-                                  if (hour >= 0 && hour <= 23 && hour <= endHour) {
-                                    handleTimeRangeChange(groupedRules.hours!.id, hour, endHour);
-                                  }
-                                }}
-                                className="h-12 text-center text-lg font-bold border-2 border-gray-300 rounded-xl focus:border-amber-500"
-                              />
-                              <span className="text-gray-500 font-medium">h</span>
-                            </div>
-                          </div>
-                          
-                          <div className="space-y-2">
-                            <Label htmlFor="end_hour" className="text-xs font-medium text-gray-600">
-                              Horário Final
-                            </Label>
-                            <div className="flex items-center gap-2">
-                              <Input
-                                type="number"
-                                id="end_hour"
-                                min={0}
-                                max={23}
-                                value={endHour}
-                                onChange={(e) => {
-                                  const hour = parseInt(e.target.value) || 23;
-                                  if (hour >= 0 && hour <= 23 && hour >= startHour) {
-                                    handleTimeRangeChange(groupedRules.hours!.id, startHour, hour);
-                                  }
-                                }}
-                                className="h-12 text-center text-lg font-bold border-2 border-gray-300 rounded-xl focus:border-amber-500"
-                              />
-                              <span className="text-gray-500 font-medium">h</span>
-                            </div>
-                          </div>
-                        </div>
-                        
-                        <div className="bg-gray-50 rounded-xl p-4 border-2 border-gray-200">
-                          <p className="text-xs font-medium text-gray-600 mb-2">Horários configurados:</p>
-                          <p className="text-sm font-semibold text-gray-900">
-                            {startHour}h às {endHour}h ({endHour - startHour + 1} horas)
-                          </p>
-                          <p className="text-xs text-gray-500 mt-1">
-                            {allowedHours.join(', ')}
-                          </p>
-                        </div>
-                      </div>
-                      
-                      <div className="pt-4 border-t-2 border-gray-100">
-                        <Button
-                          onClick={() => handleSave(groupedRules.hours!.id)}
-                          disabled={saving}
-                          className="w-full bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white font-medium py-2.5 rounded-xl shadow-md"
-                        >
-                          {saving ? 'Salvando...' : 'Salvar Configuração'}
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-                </>
-              ) : (
-                <p className="text-gray-400 text-sm text-center py-4">Regra não encontrada</p>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* 4. Rotação de Instâncias */}
-          <Card className="border-2 border-gray-200 hover:border-purple-300 hover:shadow-lg transition-all duration-300 rounded-2xl overflow-hidden bg-white shadow-md">
-            <CardHeader className="bg-gradient-to-br from-purple-50 to-pink-50 border-b-2 border-gray-100 px-6 py-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-gradient-to-br from-purple-500 to-pink-500 rounded-xl flex items-center justify-center shadow-md">
-                    <RotateCcw className="h-5 w-5 text-white" />
-                  </div>
-                  <div>
-                    <CardTitle className="text-lg font-bold text-gray-900">
-                      Rotação de Instâncias
-                    </CardTitle>
-                    <CardDescription className="text-xs text-gray-600 mt-0.5">
-                      Distribua mensagens entre instâncias
-                    </CardDescription>
-                  </div>
-                </div>
-                <Tooltip content="Distribui mensagens entre todas as instâncias conectadas, evitando sobrecarga em uma única instância. Funciona em modo round-robin (rodízio).">
-                  <Info className="h-5 w-5 text-gray-400 hover:text-purple-600 cursor-help" />
-                </Tooltip>
-              </div>
-            </CardHeader>
-            <CardContent className="p-6 space-y-6">
-              {groupedRules.rotation ? (
-                <>
-                  <div className="flex items-center justify-between py-2">
-                    <Label className="text-sm font-medium text-gray-700">Habilitar Regra</Label>
-                    <Switch
-                      checked={groupedRules.rotation.enabled}
-                      onCheckedChange={(checked) => updateRule(groupedRules.rotation!.id, { enabled: checked })}
-                    />
-                  </div>
-                  
-                  {groupedRules.rotation.enabled && (
-                    <div className="space-y-6 pt-4 border-t-2 border-gray-100">
-                      <div className="space-y-3">
-                        <div className="flex items-center justify-between">
-                          <Label htmlFor="min_delay_instances" className="text-sm font-medium text-gray-700">
-                            Delay Entre Instâncias
-                            <span className="block text-xs font-normal text-gray-500 mt-0.5">Tempo mínimo entre trocas</span>
-                          </Label>
-                          <span className="text-lg font-bold text-purple-600 min-w-[3rem] text-right">
-                            {groupedRules.rotation.config.min_delay_between_instances || 1}s
-                          </span>
-                        </div>
-                        <Slider
-                          value={groupedRules.rotation.config.min_delay_between_instances || 1}
-                          min={0}
-                          max={60}
-                          step={1}
-                          onChange={(value) => updateRuleConfig(groupedRules.rotation!.id, 'min_delay_between_instances', value)}
-                          className="w-full"
-                        />
-                      </div>
-                      
-                      <div className="pt-4 border-t-2 border-gray-100">
-                        <Button
-                          onClick={() => handleSave(groupedRules.rotation!.id)}
-                          disabled={saving}
-                          className="w-full bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white font-medium py-2.5 rounded-xl shadow-md"
-                        >
-                          {saving ? 'Salvando...' : 'Salvar Configuração'}
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-                </>
-              ) : (
-                <p className="text-gray-400 text-sm text-center py-4">Regra não encontrada</p>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* 5. Health Check */}
-          <Card className="border-2 border-gray-200 hover:border-red-300 hover:shadow-lg transition-all duration-300 rounded-2xl overflow-hidden bg-white shadow-md">
-            <CardHeader className="bg-gradient-to-br from-red-50 to-rose-50 border-b-2 border-gray-100 px-6 py-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-gradient-to-br from-red-500 to-rose-500 rounded-xl flex items-center justify-center shadow-md">
-                    <Heart className="h-5 w-5 text-white" />
-                  </div>
-                  <div>
-                    <CardTitle className="text-lg font-bold text-gray-900">
-                      Health Check
-                    </CardTitle>
-                    <CardDescription className="text-xs text-gray-600 mt-0.5">
-                      Monitoramento automático
-                    </CardDescription>
-                  </div>
-                </div>
-                <Tooltip content="Monitora a saúde das instâncias e pausa envios automaticamente se uma instância estiver com problemas (degradada ou down).">
-                  <Info className="h-5 w-5 text-gray-400 hover:text-red-600 cursor-help" />
-                </Tooltip>
-              </div>
-            </CardHeader>
-            <CardContent className="p-6 space-y-6">
-              {groupedRules.health ? (
-                <>
-                  <div className="flex items-center justify-between py-2">
-                    <Label className="text-sm font-medium text-gray-700">Habilitar Regra</Label>
-                    <Switch
-                      checked={groupedRules.health.enabled}
-                      onCheckedChange={(checked) => updateRule(groupedRules.health!.id, { enabled: checked })}
-                    />
-                  </div>
-                  
-                  {groupedRules.health.enabled && (
-                    <div className="space-y-4 pt-4 border-t-2 border-gray-100">
-                      <div className="flex items-center justify-between py-3 bg-gray-50 rounded-xl px-4">
-                        <Label className="text-sm font-medium text-gray-700">
-                          Pausar se Degradada
-                          <span className="block text-xs font-normal text-gray-500 mt-0.5">Instância com problemas</span>
-                        </Label>
-                        <Switch
-                          checked={groupedRules.health.config.pause_if_degraded !== false}
-                          onCheckedChange={(checked) => updateRuleConfig(groupedRules.health!.id, 'pause_if_degraded', checked)}
-                        />
-                      </div>
-                      
-                      <div className="flex items-center justify-between py-3 bg-gray-50 rounded-xl px-4">
-                        <Label className="text-sm font-medium text-gray-700">
-                          Pausar se Down
-                          <span className="block text-xs font-normal text-gray-500 mt-0.5">Instância offline</span>
-                        </Label>
-                        <Switch
-                          checked={groupedRules.health.config.pause_if_down !== false}
-                          onCheckedChange={(checked) => updateRuleConfig(groupedRules.health!.id, 'pause_if_down', checked)}
-                        />
-                      </div>
-                      
-                      <div className="pt-4 border-t-2 border-gray-100">
-                        <Button
-                          onClick={() => handleSave(groupedRules.health!.id)}
-                          disabled={saving}
-                          className="w-full bg-gradient-to-r from-red-500 to-rose-500 hover:from-red-600 hover:to-rose-600 text-white font-medium py-2.5 rounded-xl shadow-md"
-                        >
-                          {saving ? 'Salvando...' : 'Salvar Configuração'}
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-                </>
-              ) : (
-                <p className="text-gray-400 text-sm text-center py-4">Regra não encontrada</p>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* 6. Validação de Conteúdo */}
-          <Card className="border-2 border-gray-200 hover:border-indigo-300 hover:shadow-lg transition-all duration-300 rounded-2xl overflow-hidden bg-white shadow-md">
-            <CardHeader className="bg-gradient-to-br from-indigo-50 to-blue-50 border-b-2 border-gray-100 px-6 py-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-gradient-to-br from-indigo-500 to-blue-500 rounded-xl flex items-center justify-center shadow-md">
-                    <FileText className="h-5 w-5 text-white" />
-                  </div>
-                  <div>
-                    <CardTitle className="text-lg font-bold text-gray-900">
-                      Validação de Conteúdo
-                    </CardTitle>
-                    <CardDescription className="text-xs text-gray-600 mt-0.5">
-                      Controle de qualidade
-                    </CardDescription>
-                  </div>
-                </div>
-                <Tooltip content="Valida o conteúdo das mensagens antes do envio. Pode bloquear mensagens muito longas ou com palavras proibidas.">
-                  <Info className="h-5 w-5 text-gray-400 hover:text-indigo-600 cursor-help" />
-                </Tooltip>
-              </div>
-            </CardHeader>
-            <CardContent className="p-6 space-y-6">
-              {groupedRules.content ? (
-                <>
-                  <div className="flex items-center justify-between py-2">
-                    <Label className="text-sm font-medium text-gray-700">Habilitar Regra</Label>
-                    <Switch
-                      checked={groupedRules.content.enabled}
-                      onCheckedChange={(checked) => updateRule(groupedRules.content!.id, { enabled: checked })}
-                    />
-                  </div>
-                  
-                  {groupedRules.content.enabled && (
-                    <div className="space-y-6 pt-4 border-t-2 border-gray-100">
-                      <div className="space-y-3">
-                        <div className="flex items-center justify-between">
-                          <Label htmlFor="max_length" className="text-sm font-medium text-gray-700">
-                            Tamanho Máximo
-                            <span className="block text-xs font-normal text-gray-500 mt-0.5">Caracteres permitidos</span>
-                          </Label>
-                          <span className="text-lg font-bold text-indigo-600 min-w-[4rem] text-right">
-                            {groupedRules.content.config.max_length || 4096}
-                          </span>
-                        </div>
-                        <Slider
-                          value={groupedRules.content.config.max_length || 4096}
-                          min={100}
-                          max={4096}
-                          step={50}
-                          onChange={(value) => updateRuleConfig(groupedRules.content!.id, 'max_length', value)}
-                          className="w-full"
-                        />
-                      </div>
-                      
-                      <div className="space-y-2">
-                        <Label htmlFor="blocked_words" className="text-sm font-medium text-gray-700">
-                          Palavras Bloqueadas
-                          <span className="block text-xs font-normal text-gray-500 mt-0.5">Separadas por vírgula</span>
-                        </Label>
-                        <Input
-                          id="blocked_words"
-                          placeholder="Ex: palavra1, palavra2, palavra3"
-                          value={Array.isArray(groupedRules.content.config.blocked_words) 
-                            ? groupedRules.content.config.blocked_words.join(', ') 
-                            : ''}
-                          onChange={(e) => {
-                            const words = e.target.value
-                              .split(',')
-                              .map(w => w.trim())
-                              .filter(w => w.length > 0);
-                            updateRuleConfig(groupedRules.content!.id, 'blocked_words', words);
-                          }}
-                          className="h-12 text-sm border-2 border-gray-300 rounded-xl focus:border-indigo-500"
-                        />
-                      </div>
-                      
-                      <div className="pt-4 border-t-2 border-gray-100">
-                        <Button
-                          onClick={() => handleSave(groupedRules.content!.id)}
-                          disabled={saving}
-                          className="w-full bg-gradient-to-r from-indigo-500 to-blue-500 hover:from-indigo-600 hover:to-blue-600 text-white font-medium py-2.5 rounded-xl shadow-md"
-                        >
-                          {saving ? 'Salvando...' : 'Salvar Configuração'}
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-                </>
-              ) : (
-                <p className="text-gray-400 text-sm text-center py-4">Regra não encontrada</p>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* 7. Validação de Número */}
-          <Card className="border-2 border-gray-200 hover:border-teal-300 hover:shadow-lg transition-all duration-300 rounded-2xl overflow-hidden bg-white shadow-md">
-            <CardHeader className="bg-gradient-to-br from-teal-50 to-cyan-50 border-b-2 border-gray-100 px-6 py-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-gradient-to-br from-teal-500 to-cyan-500 rounded-xl flex items-center justify-center shadow-md">
-                    <Phone className="h-5 w-5 text-white" />
-                  </div>
-                  <div>
-                    <CardTitle className="text-lg font-bold text-gray-900">
-                      Validação de Número
-                    </CardTitle>
-                    <CardDescription className="text-xs text-gray-600 mt-0.5">
-                      Verificação de telefones
-                    </CardDescription>
-                  </div>
-                </div>
-                <Tooltip content="Valida o formato do número de telefone e verifica se está cadastrado no WhatsApp antes de enviar. Usa cache para melhor performance.">
-                  <Info className="h-5 w-5 text-gray-400 hover:text-teal-600 cursor-help" />
-                </Tooltip>
-              </div>
-            </CardHeader>
-            <CardContent className="p-6 space-y-6">
-              {groupedRules.number ? (
-                <>
-                  <div className="flex items-center justify-between py-2">
-                    <Label className="text-sm font-medium text-gray-700">Habilitar Regra</Label>
-                    <Switch
-                      checked={groupedRules.number.enabled}
-                      onCheckedChange={(checked) => updateRule(groupedRules.number!.id, { enabled: checked })}
-                    />
-                  </div>
-                  
-                  {groupedRules.number.enabled && (
-                    <div className="space-y-4 pt-4 border-t-2 border-gray-100">
-                      <div className="flex items-center justify-between py-3 bg-gray-50 rounded-xl px-4">
-                        <Label className="text-sm font-medium text-gray-700">
-                          Validar Formato
-                          <span className="block text-xs font-normal text-gray-500 mt-0.5">Verificar estrutura do número</span>
-                        </Label>
-                        <Switch
-                          checked={groupedRules.number.config.validate_format !== false}
-                          onCheckedChange={(checked) => updateRuleConfig(groupedRules.number!.id, 'validate_format', checked)}
-                        />
-                      </div>
-                      
-                      <div className="flex items-center justify-between py-3 bg-gray-50 rounded-xl px-4">
-                        <Label className="text-sm font-medium text-gray-700">
-                          Verificar WhatsApp
-                          <span className="block text-xs font-normal text-gray-500 mt-0.5">Confirmar se tem WhatsApp</span>
-                        </Label>
-                        <Switch
-                          checked={groupedRules.number.config.check_whatsapp !== false}
-                          onCheckedChange={(checked) => updateRuleConfig(groupedRules.number!.id, 'check_whatsapp', checked)}
-                        />
-                      </div>
-                      
-                      <div className="flex items-center justify-between py-3 bg-gray-50 rounded-xl px-4">
-                        <Label className="text-sm font-medium text-gray-700">
-                          Verificação Obrigatória
-                          <span className="block text-xs font-normal text-gray-500 mt-0.5">Bloquear se não verificar</span>
-                        </Label>
-                        <Switch
-                          checked={groupedRules.number.config.require_whatsapp_check === true}
-                          onCheckedChange={(checked) => updateRuleConfig(groupedRules.number!.id, 'require_whatsapp_check', checked)}
-                        />
-                      </div>
-                      
-                      <div className="space-y-3 pt-2">
-                        <div className="flex items-center justify-between">
-                          <Label htmlFor="cache_hours" className="text-sm font-medium text-gray-700">
-                            Cache de Validação
-                            <span className="block text-xs font-normal text-gray-500 mt-0.5">Tempo de cache em horas</span>
-                          </Label>
-                          <span className="text-lg font-bold text-teal-600 min-w-[3rem] text-right">
-                            {groupedRules.number.config.cache_hours || 24}h
-                          </span>
-                        </div>
-                        <Slider
-                          value={groupedRules.number.config.cache_hours || 24}
-                          min={1}
-                          max={168}
-                          step={1}
-                          onChange={(value) => updateRuleConfig(groupedRules.number!.id, 'cache_hours', value)}
-                          className="w-full"
-                        />
-                      </div>
-                      
-                      <div className="pt-4 border-t-2 border-gray-100">
-                        <Button
-                          onClick={() => handleSave(groupedRules.number!.id)}
-                          disabled={saving}
-                          className="w-full bg-gradient-to-r from-teal-500 to-cyan-500 hover:from-teal-600 hover:to-cyan-600 text-white font-medium py-2.5 rounded-xl shadow-md"
-                        >
-                          {saving ? 'Salvando...' : 'Salvar Configuração'}
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-                </>
-              ) : (
-                <p className="text-gray-400 text-sm text-center py-4">Regra não encontrada</p>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* 8. Seleção de Instâncias */}
-          <Card className="border-2 border-gray-200 hover:border-violet-300 hover:shadow-lg transition-all duration-300 rounded-2xl overflow-hidden bg-white shadow-md lg:col-span-2">
-            <CardHeader className="bg-gradient-to-br from-violet-50 to-purple-50 border-b-2 border-gray-100 px-6 py-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-gradient-to-br from-violet-500 to-purple-500 rounded-xl flex items-center justify-center shadow-md">
-                    <Server className="h-5 w-5 text-white" />
-                  </div>
-                  <div>
-                    <CardTitle className="text-lg font-bold text-gray-900">
-                      Seleção de Instâncias
-                    </CardTitle>
-                    <CardDescription className="text-xs text-gray-600 mt-0.5">
-                      Escolha quais instâncias participarão dos disparos
-                    </CardDescription>
-                  </div>
-                </div>
-                <Tooltip content="Escolha quais instâncias participarão dos disparos. Quando uma instância cair, o sistema automaticamente trocará para outra disponível.">
-                  <Info className="h-5 w-5 text-gray-400 hover:text-violet-600 cursor-help" />
-                </Tooltip>
-              </div>
-            </CardHeader>
-            <CardContent className="p-6 space-y-6">
-              {groupedRules.selection ? (
-                <>
-                  <div className="flex items-center justify-between py-2">
-                    <Label className="text-sm font-medium text-gray-700">Habilitar Regra</Label>
-                    <Switch
-                      checked={groupedRules.selection.enabled}
-                      onCheckedChange={(checked) => updateRule(groupedRules.selection!.id, { enabled: checked })}
-                    />
-                  </div>
-                  
-                  {groupedRules.selection.enabled && (
-                    <div className="space-y-6 pt-4 border-t-2 border-gray-100">
-                      <div className="space-y-3">
-                        <div className="flex items-center justify-between">
-                          <Label htmlFor="max_instances" className="text-sm font-medium text-gray-700">
-                            Máximo de Instâncias Simultâneas
-                            <span className="block text-xs font-normal text-gray-500 mt-0.5">Quantas usar ao mesmo tempo</span>
-                          </Label>
-                          <span className="text-lg font-bold text-violet-600 min-w-[3rem] text-right">
-                            {groupedRules.selection.config.max_simultaneous || 1}
-                          </span>
-                        </div>
-                        <Slider
-                          value={groupedRules.selection.config.max_simultaneous || 1}
-                          min={1}
-                          max={allInstances.length || 10}
-                          step={1}
-                          onChange={(value) => updateRuleConfig(groupedRules.selection!.id, 'max_simultaneous', value)}
-                          className="w-full"
-                        />
-                      </div>
-                      
-                      <div className="space-y-3">
-                        <Label className="text-sm font-medium text-gray-700 block">
-                          Instâncias Disponíveis
-                          <span className="block text-xs font-normal text-gray-500 mt-0.5">Marque as que participarão dos disparos</span>
-                        </Label>
-                        <div className="max-h-64 overflow-y-auto space-y-2 p-4 bg-gray-50 rounded-xl border-2 border-gray-200">
-                          {allInstances.length === 0 ? (
-                            <p className="text-sm text-gray-400 text-center py-4">Carregando instâncias...</p>
-                          ) : (
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                              {allInstances.map((inst) => {
-                                const selectedIds = Array.isArray(groupedRules.selection?.config.selected_instance_ids) 
-                                  ? groupedRules.selection.config.selected_instance_ids 
-                                  : [];
-                                const isSelected = selectedIds.includes(inst.id);
-                                
-                                return (
-                                  <div 
-                                    key={inst.id} 
-                                    className={`flex items-center gap-3 p-3 rounded-xl border-2 transition-all cursor-pointer ${
-                                      isSelected 
-                                        ? 'bg-violet-50 border-violet-300' 
-                                        : 'bg-white border-gray-200 hover:border-gray-300'
-                                    }`}
-                                    onClick={() => {
-                                      const currentIds = Array.isArray(groupedRules.selection?.config.selected_instance_ids) 
-                                        ? groupedRules.selection.config.selected_instance_ids 
-                                        : [];
-                                      const newIds = !isSelected
-                                        ? [...currentIds, inst.id]
-                                        : currentIds.filter((id: number) => id !== inst.id);
-                                      updateRuleConfig(groupedRules.selection!.id, 'selected_instance_ids', newIds);
-                                    }}
-                                  >
-                                    <input
-                                      type="checkbox"
-                                      id={`instance-${inst.id}`}
-                                      checked={isSelected}
-                                      onChange={() => {}}
-                                      className="w-5 h-5 text-violet-600 rounded border-gray-300 focus:ring-violet-500 cursor-pointer"
-                                    />
-                                    <label 
-                                      htmlFor={`instance-${inst.id}`} 
-                                      className="flex-1 cursor-pointer"
-                                    >
-                                      <div className="flex items-center gap-2">
-                                        <span className="font-semibold text-gray-900">{inst.name}</span>
-                                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                                          inst.status === 'connected' 
-                                            ? 'bg-green-100 text-green-700' 
-                                            : inst.status === 'connecting'
-                                            ? 'bg-yellow-100 text-yellow-700'
-                                            : 'bg-gray-100 text-gray-500'
-                                        }`}>
-                                          {inst.status === 'connected' ? 'Conectado' : inst.status === 'connecting' ? 'Conectando' : 'Desconectado'}
-                                        </span>
-                                      </div>
-                                    </label>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                      
-                      <div className="pt-4 border-t-2 border-gray-100">
-                        <Button
-                          onClick={() => handleSave(groupedRules.selection!.id)}
-                          disabled={saving}
-                          className="w-full bg-gradient-to-r from-violet-500 to-purple-500 hover:from-violet-600 hover:to-purple-600 text-white font-medium py-2.5 rounded-xl shadow-md"
-                        >
-                          {saving ? 'Salvando...' : 'Salvar Configuração'}
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-                </>
-              ) : (
-                <p className="text-gray-400 text-sm text-center py-4">Regra não encontrada</p>
-              )}
-            </CardContent>
-          </Card>
+          <button
+            onClick={() => handleSave()}
+            disabled={saving || !hasChanges}
+            className="btn-gold"
+            style={{
+              padding: '12px 28px', fontSize: '0.95rem',
+              display: 'flex', alignItems: 'center', gap: 10,
+              opacity: (saving || !hasChanges) ? 0.6 : 1,
+              cursor: (saving || !hasChanges) ? 'not-allowed' : 'pointer',
+              border: 'none',
+            }}
+          >
+            {saving ? <RefreshCw size={18} className="animate-spin" /> : <Save size={18} />}
+            {saving ? 'Salvando Alterações...' : hasChanges ? 'Salvar Configurações' : 'Tudo Atualizado'}
+          </button>
         </div>
       </div>
 
-      {toast && (
-        <Toast
-          message={toast.message}
-          type={toast.type}
-          onClose={() => setToast(null)}
-        />
-      )}
+      {/* Rules Grid */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', gap: 24 }}>
+        
+        {/* 1. Delay Inteligente */}
+        {groupedRules.delay && (
+          <div className="glass-card" style={{ padding: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--border)', background: 'rgba(56, 189, 248, 0.03)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div style={{ width: 40, height: 40, borderRadius: 10, background: 'rgba(56, 189, 248, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <Clock size={20} color="#38bdf8" />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 700, color: 'var(--text-primary)' }}>Delay Inteligente</h3>
+                  <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-muted)' }}>Intervalo entre envios</p>
+                </div>
+              </div>
+              <label className="toggle">
+                <input
+                  type="checkbox"
+                  checked={groupedRules.delay.enabled}
+                  onChange={(e) => updateRule(groupedRules.delay!.id, { enabled: e.target.checked })}
+                />
+                <span className="toggle-slider" />
+              </label>
+            </div>
+            <div style={{ padding: 24, flex: 1 }}>
+              <div style={{ spaceY: 20 }}>
+                <div style={{ marginBottom: 20 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
+                    <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Mínimo (segundos)</span>
+                    <span style={{ fontWeight: 700, color: 'var(--sky)' }}>{groupedRules.delay.config.min_delay_seconds || 3}s</span>
+                  </div>
+                  <input
+                    type="range" min="1" max="60"
+                    value={groupedRules.delay.config.min_delay_seconds || 3}
+                    onChange={(e) => updateRuleConfig(groupedRules.delay!.id, 'min_delay_seconds', parseInt(e.target.value))}
+                    style={{ width: '100%', accentColor: 'var(--sky)' }}
+                  />
+                </div>
+                <div style={{ marginBottom: 20 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
+                    <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Máximo (segundos)</span>
+                    <span style={{ fontWeight: 700, color: 'var(--sky)' }}>{groupedRules.delay.config.max_delay_seconds || 10}s</span>
+                  </div>
+                  <input
+                    type="range" min="1" max="300"
+                    value={groupedRules.delay.config.max_delay_seconds || 10}
+                    onChange={(e) => updateRuleConfig(groupedRules.delay!.id, 'max_delay_seconds', parseInt(e.target.value))}
+                    style={{ width: '100%', accentColor: 'var(--sky)' }}
+                  />
+                </div>
+                <div style={{ padding: '12px 16px', borderRadius: 12, background: 'var(--bg-elevated)', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span style={{ fontSize: '0.85rem', color: 'var(--text-primary)' }}>Delay Progressivo</span>
+                  <label className="toggle">
+                    <input
+                      type="checkbox"
+                      checked={groupedRules.delay.config.progressive !== false}
+                      onChange={(e) => updateRuleConfig(groupedRules.delay!.id, 'progressive', e.target.checked)}
+                    />
+                    <span className="toggle-slider" />
+                  </label>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 2. Limite de Volume */}
+        {groupedRules.limit && (
+          <div className="glass-card" style={{ padding: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--border)', background: 'rgba(16, 185, 129, 0.03)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div style={{ width: 40, height: 40, borderRadius: 10, background: 'rgba(16, 185, 129, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <BarChart3 size={20} color="#10b981" />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 700, color: 'var(--text-primary)' }}>Limite de Volume</h3>
+                  <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-muted)' }}>Controle de disparos</p>
+                </div>
+              </div>
+              <label className="toggle">
+                <input
+                  type="checkbox"
+                  checked={groupedRules.limit.enabled}
+                  onChange={(e) => updateRule(groupedRules.limit!.id, { enabled: e.target.checked })}
+                />
+                <span className="toggle-slider" />
+              </label>
+            </div>
+            <div style={{ padding: 24, flex: 1 }}>
+              <div style={{ marginBottom: 20 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
+                  <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Por Hora</span>
+                  <span style={{ fontWeight: 700, color: 'var(--emerald)' }}>{groupedRules.limit.config.max_per_hour || 50} msg</span>
+                </div>
+                <input
+                  type="range" min="1" max="500"
+                  value={groupedRules.limit.config.max_per_hour || 50}
+                  onChange={(e) => updateRuleConfig(groupedRules.limit!.id, 'max_per_hour', parseInt(e.target.value))}
+                  style={{ width: '100%', accentColor: 'var(--emerald)' }}
+                />
+              </div>
+              <div style={{ marginBottom: 20 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
+                  <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Por Dia</span>
+                  <span style={{ fontWeight: 700, color: 'var(--emerald)' }}>{groupedRules.limit.config.max_per_day || 500} msg</span>
+                </div>
+                <input
+                  type="range" min="10" max="5000"
+                  value={groupedRules.limit.config.max_per_day || 500}
+                  onChange={(e) => updateRuleConfig(groupedRules.limit!.id, 'max_per_day', parseInt(e.target.value))}
+                  style={{ width: '100%', accentColor: 'var(--emerald)' }}
+                />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 3. Janela de Horário */}
+        {groupedRules.hours && (
+          <div className="glass-card" style={{ padding: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--border)', background: 'rgba(245, 158, 11, 0.03)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div style={{ width: 40, height: 40, borderRadius: 10, background: 'rgba(245, 158, 11, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <Calendar size={20} color="#f59e0b" />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 700, color: 'var(--text-primary)' }}>Janela de Horário</h3>
+                  <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-muted)' }}>Horários permitidos</p>
+                </div>
+              </div>
+              <label className="toggle">
+                <input
+                  type="checkbox"
+                  checked={groupedRules.hours.enabled}
+                  onChange={(e) => updateRule(groupedRules.hours!.id, { enabled: e.target.checked })}
+                />
+                <span className="toggle-slider" />
+              </label>
+            </div>
+            <div style={{ padding: 24, flex: 1 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
+                <div style={{ background: 'var(--bg-elevated)', padding: 16, borderRadius: 12, border: '1px solid var(--border)', textAlign: 'center' }}>
+                  <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', display: 'block', textTransform: 'uppercase', marginBottom: 4 }}>Início</span>
+                  <input
+                    type="number" min="0" max="23"
+                    value={startHour}
+                    onChange={(e) => handleTimeRangeChange(groupedRules.hours!.id, parseInt(e.target.value), endHour)}
+                    style={{ background: 'none', border: 'none', fontSize: '1.5rem', fontWeight: 800, color: 'var(--gold-primary)', width: '100%', textAlign: 'center', outline: 'none' }}
+                  />
+                  <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>horas</span>
+                </div>
+                <div style={{ background: 'var(--bg-elevated)', padding: 16, borderRadius: 12, border: '1px solid var(--border)', textAlign: 'center' }}>
+                  <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', display: 'block', textTransform: 'uppercase', marginBottom: 4 }}>Fim</span>
+                  <input
+                    type="number" min="0" max="23"
+                    value={endHour}
+                    onChange={(e) => handleTimeRangeChange(groupedRules.hours!.id, startHour, parseInt(e.target.value))}
+                    style={{ background: 'none', border: 'none', fontSize: '1.5rem', fontWeight: 800, color: 'var(--gold-primary)', width: '100%', textAlign: 'center', outline: 'none' }}
+                  />
+                  <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>horas</span>
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                {Array.from({ length: 24 }).map((_, h) => {
+                  const isActive = h >= startHour && h <= endHour;
+                  return (
+                    <div key={h} style={{
+                      width: 'calc(100% / 12 - 4px)', height: 20, borderRadius: 4,
+                      background: isActive ? 'var(--gold-primary)' : 'var(--bg-elevated)',
+                      opacity: isActive ? 1 : 0.3,
+                    }} title={`${h}h`} />
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 4. Saúde da Conta */}
+        {groupedRules.health && (
+          <div className="glass-card" style={{ padding: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--border)', background: 'rgba(244, 63, 94, 0.03)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div style={{ width: 40, height: 40, borderRadius: 10, background: 'rgba(244, 63, 94, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <Heart size={20} color="#f43f5e" />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 700, color: 'var(--text-primary)' }}>Saúde da Conta</h3>
+                  <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-muted)' }}>Pausa em erros</p>
+                </div>
+              </div>
+              <label className="toggle">
+                <input
+                  type="checkbox"
+                  checked={groupedRules.health.enabled}
+                  onChange={(e) => updateRule(groupedRules.health!.id, { enabled: e.target.checked })}
+                />
+                <span className="toggle-slider" />
+              </label>
+            </div>
+            <div style={{ padding: 24, flex: 1 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', borderRadius: 12, background: 'var(--bg-elevated)', marginBottom: 12 }}>
+                <span style={{ fontSize: '0.85rem', color: 'var(--text-primary)' }}>Pausar se Degradada</span>
+                <label className="toggle">
+                  <input
+                    type="checkbox"
+                    checked={groupedRules.health.config.pause_if_degraded !== false}
+                    onChange={(e) => updateRuleConfig(groupedRules.health!.id, 'pause_if_degraded', e.target.checked)}
+                  />
+                  <span className="toggle-slider" />
+                </label>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', borderRadius: 12, background: 'var(--bg-elevated)' }}>
+                <span style={{ fontSize: '0.85rem', color: 'var(--text-primary)' }}>Pausar se Desconectada</span>
+                <label className="toggle">
+                  <input
+                    type="checkbox"
+                    checked={groupedRules.health.config.pause_if_down !== false}
+                    onChange={(e) => updateRuleConfig(groupedRules.health!.id, 'pause_if_down', e.target.checked)}
+                  />
+                  <span className="toggle-slider" />
+                </label>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 5. Rodízio Automático */}
+        {groupedRules.rotation && (
+          <div className="glass-card" style={{ padding: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--border)', background: 'rgba(167, 139, 250, 0.03)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div style={{ width: 40, height: 40, borderRadius: 10, background: 'rgba(167, 139, 250, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <RotateCcw size={20} color="#a78bfa" />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 700, color: 'var(--text-primary)' }}>Rodízio Ativo</h3>
+                  <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-muted)' }}>Múltiplas instâncias</p>
+                </div>
+              </div>
+              <label className="toggle">
+                <input
+                  type="checkbox"
+                  checked={groupedRules.rotation.enabled}
+                  onChange={(e) => updateRule(groupedRules.rotation!.id, { enabled: e.target.checked })}
+                />
+                <span className="toggle-slider" />
+              </label>
+            </div>
+            <div style={{ padding: 24, flex: 1 }}>
+              <div style={{ marginBottom: 20 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
+                  <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Intervalo entre Trocas</span>
+                  <span style={{ fontWeight: 700, color: 'var(--violet)' }}>{groupedRules.rotation.config.min_delay_between_instances || 1}s</span>
+                </div>
+                <input
+                  type="range" min="0" max="60"
+                  value={groupedRules.rotation.config.min_delay_between_instances || 1}
+                  onChange={(e) => updateRuleConfig(groupedRules.rotation!.id, 'min_delay_between_instances', parseInt(e.target.value))}
+                  style={{ width: '100%', accentColor: 'var(--violet)' }}
+                />
+              </div>
+              <div style={{ padding: '12px 16px', borderRadius: 12, background: 'rgba(167,139,250,0.05)', border: '1px solid rgba(167,139,250,0.2)', display: 'flex', gap: 10 }}>
+                <Info size={16} color="var(--violet)" style={{ flexShrink: 0, marginTop: 2 }} />
+                <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-secondary)' }}>O rodízio ajuda a simular comportamento humano e distribui o risco entre as contas.</p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 6. Seleção de Instâncias */}
+        {groupedRules.selection && (
+          <div className="glass-card" style={{ padding: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column', gridColumn: 'span 1', md: { gridColumn: 'span 2' } }}>
+            <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--border)', background: 'rgba(245, 158, 11, 0.03)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div style={{ width: 40, height: 40, borderRadius: 10, background: 'rgba(245, 158, 11, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <Server size={20} color="#f59e0b" />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 700, color: 'var(--text-primary)' }}>Pool de Disparo</h3>
+                  <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-muted)' }}>Selecione as contas do rodízio</p>
+                </div>
+              </div>
+              <label className="toggle">
+                <input
+                  type="checkbox"
+                  checked={groupedRules.selection.enabled}
+                  onChange={(e) => updateRule(groupedRules.selection!.id, { enabled: e.target.checked })}
+                />
+                <span className="toggle-slider" />
+              </label>
+            </div>
+            <div style={{ padding: 24, flex: 1 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 12 }}>
+                {allInstances.map((inst) => {
+                  const isSelected = Array.isArray(groupedRules.selection?.config.selected_instance_ids) 
+                    ? groupedRules.selection.config.selected_instance_ids.includes(inst.id)
+                    : false;
+                  
+                  return (
+                    <div
+                      key={inst.id}
+                      onClick={() => {
+                        const current = Array.isArray(groupedRules.selection?.config.selected_instance_ids) ? [...groupedRules.selection.config.selected_instance_ids] : [];
+                        const updated = isSelected ? current.filter(id => id !== inst.id) : [...current, inst.id];
+                        updateRuleConfig(groupedRules.selection!.id, 'selected_instance_ids', updated);
+                      }}
+                      style={{
+                        padding: '12px 16px', borderRadius: 12, cursor: 'pointer',
+                        border: '1px solid',
+                        borderColor: isSelected ? 'var(--gold-primary)' : 'var(--border)',
+                        background: isSelected ? 'rgba(245, 158, 11, 0.08)' : 'var(--bg-elevated)',
+                        transition: 'all 0.2s',
+                        display: 'flex', alignItems: 'center', gap: 10,
+                      }}
+                    >
+                      <div style={{
+                        width: 18, height: 18, borderRadius: 4, border: '2px solid',
+                        borderColor: isSelected ? 'var(--gold-primary)' : 'var(--text-muted)',
+                        background: isSelected ? 'var(--gold-primary)' : 'transparent',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      }}>
+                        {isSelected && <CheckCircle2 size={12} color="#0d0c14" strokeWidth={3} />}
+                      </div>
+                      <span style={{ fontSize: '0.85rem', fontWeight: isSelected ? 600 : 400, color: isSelected ? 'var(--text-primary)' : 'var(--text-secondary)' }}>
+                        {inst.instance_name}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+
+      </div>
+
+      {/* Info Banner */}
+      <div style={{
+        marginTop: 40, padding: '24px 32px', borderRadius: 20,
+        background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.05), rgba(167, 139, 250, 0.05))',
+        border: '1px solid var(--border)',
+        display: 'flex', alignItems: 'center', gap: 24,
+      }}>
+        <div style={{ width: 48, height: 48, borderRadius: 14, background: 'var(--bg-elevated)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+          <Sparkles size={24} color="var(--gold-primary)" />
+        </div>
+        <div style={{ flex: 1 }}>
+          <h4 style={{ margin: 0, fontSize: '1rem', fontWeight: 700, color: 'var(--text-primary)' }}>Dica do Sistema de Blindagem</h4>
+          <p style={{ margin: '4px 0 0', fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+            Para máxima segurança, recomendamos utilizar um <strong>Pool de pelo menos 3 instâncias</strong> com <strong>Delay Inteligente entre 5s e 15s</strong>. 
+            Isso reduz drasticamente o risco de banimento ao simular interações naturais.
+          </p>
+        </div>
+      </div>
+      
+      <div style={{ height: 60 }} />
     </div>
+  );
+}
+
+function Sparkles({ size, color }: { size: number; color: string }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
+      <path d="M5 3v4" /><path d="M3 5h4" /><path d="M21 17v4" /><path d="M19 19h4" />
+    </svg>
   );
 }
