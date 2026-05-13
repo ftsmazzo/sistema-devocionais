@@ -204,7 +204,7 @@ export default function Layout({ children }: LayoutProps) {
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
               }}>
-                {user?.email || 'Admin'}
+                {user?.name || user?.email || 'Admin'}
               </div>
               <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginTop: 1 }}>
                 Administrador

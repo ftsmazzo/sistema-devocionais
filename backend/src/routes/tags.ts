@@ -214,7 +214,7 @@ router.delete('/:id', async (req: AuthRequest, res) => {
     }
 
     const category = tagResult.rows[0].category;
-    const defaultCategories = ['devocional', 'bloqueado', 'teste'];
+    const defaultCategories = ['devocional', 'bloqueado'];
     
     if (defaultCategories.includes(category)) {
       return res.status(400).json({ error: 'Não é possível deletar tags padrão' });

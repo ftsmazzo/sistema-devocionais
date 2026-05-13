@@ -500,12 +500,15 @@ async function sendMessageWithMedia(
     payload.mediatype = 'image';
     payload.media = mediaUrl;
     payload.caption = caption;
-  } else if (mediaType === 'pdf' || mediaType === 'document') {
+    payload.fileName = mediaUrl.split('/').pop() || 'documento.pdf';
+  } else if (mediaType === 'video') {
     endpoint = `/message/sendMedia/${instance.instance_name}`;
-    payload.mediatype = 'document';
+    payload.mediatype = 'video';
     payload.media = mediaUrl;
     payload.caption = caption;
-    payload.fileName = mediaUrl.split('/').pop() || 'documento.pdf';
+  } else if (mediaType === 'audio') {
+    endpoint = `/message/sendWhatsAppAudio/${instance.instance_name}`;
+    payload.audio = mediaUrl;
   } else {
     throw new Error(`Tipo de mídia não suportado: ${mediaType}`);
   }

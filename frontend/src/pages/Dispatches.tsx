@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
 import api from '@/lib/api';
-import Button from '@/components/ui/Button';
 import {
   Send,
   Plus,
@@ -19,8 +18,12 @@ import {
   ChevronLeft,
   ChevronRight,
   Users,
+  Video,
+  Mic,
+  FileText,
+  Image as ImageIcon,
+  ExternalLink,
 } from 'lucide-react';
-
 
 interface Dispatch {
   id: number;
@@ -44,7 +47,7 @@ interface FormData {
   message_template: string;
   instance_ids: number[];
   media_url?: string;
-  media_type?: 'image' | 'pdf' | 'document';
+  media_type?: 'image' | 'video' | 'audio' | 'pdf' | 'document';
 }
 
 export default function Dispatches() {
@@ -72,12 +75,9 @@ export default function Dispatches() {
   const [detailContacts, setDetailContacts] = useState<any[]>([]);
   const [loadingDetail, setLoadingDetail] = useState(false);
 
-  // Auto-hide toast após 5 segundos
   useEffect(() => {
     if (toast) {
-      const timer = setTimeout(() => {
-        setToast(null);
-      }, 5000);
+      const timer = setTimeout(() => setToast(null), 5000);
       return () => clearTimeout(timer);
     }
   }, [toast]);
@@ -100,45 +100,16 @@ export default function Dispatches() {
       setDispatches(response.data.dispatches || []);
       setTotalDispatches(response.data.total ?? 0);
     } catch (error: any) {
-      console.error('Erro ao carregar disparos:', error);
-      setToast({
-        message: error.response?.data?.error || 'Erro ao carregar disparos',
-        type: 'error'
-      });
+      setToast({ message: error.response?.data?.error || 'Erro ao carregar disparos', type: 'error' });
     } finally {
       setLoading(false);
     }
   };
 
-  const openDetail = async (dispatch: Dispatch) => {
-    setDetailDispatch(dispatch);
-    setDetailContacts([]);
-    setLoadingDetail(true);
-    try {
-      const response = await api.get(`/dispatches/${dispatch.id}/contacts`);
-      setDetailContacts(response.data.contacts || []);
-    } catch (error: any) {
-      setToast({
-        message: error.response?.data?.error || 'Erro ao carregar detalhes',
-        type: 'error'
-      });
-    } finally {
-      setLoadingDetail(false);
-    }
-  };
-
-  const totalPages = Math.max(1, Math.ceil(totalDispatches / limit));
-
   const loadLists = async () => {
     try {
       const response = await api.get('/lists');
-      const raw = response.data.lists || [];
-      const sorted = [...raw].sort((a: any, b: any) => {
-        const da = a.created_at ? new Date(a.created_at).getTime() : 0;
-        const db = b.created_at ? new Date(b.created_at).getTime() : 0;
-        return db - da;
-      });
-      setLists(sorted);
+      setLists(response.data.lists || []);
     } catch (error) {
       console.error('Erro ao carregar listas:', error);
     }
@@ -154,35 +125,18 @@ export default function Dispatches() {
   };
 
   const handleCreate = async () => {
-    // Prevenir duplo clique
-    if (creatingDispatch) {
-      return;
-    }
-
+    if (creatingDispatch) return;
     try {
       if (!formData.name) {
         setToast({ message: 'Nome é obrigatório', type: 'error' });
         return;
       }
-
-      if (dispatchType === 'devocional' && !formData.list_id) {
-        setToast({ message: 'Lista é obrigatória para devocional', type: 'error' });
-        return;
-      }
-
-      if (dispatchType === 'marketing' && !formData.message_template) {
-        setToast({ message: 'Mensagem é obrigatória para marketing', type: 'error' });
-        return;
-      }
-
       setCreatingDispatch(true);
-
       const payload: any = {
         name: formData.name,
         list_id: parseInt(formData.list_id),
         instance_ids: formData.instance_ids,
       };
-
       if (dispatchType === 'marketing') {
         payload.message_template = formData.message_template;
         if (formData.media_url) {
@@ -190,40 +144,27 @@ export default function Dispatches() {
           payload.media_type = formData.media_type || 'image';
         }
       }
-
       await api.post(`/dispatches/${dispatchType}`, payload);
-
       setToast({ message: 'Disparo criado com sucesso!', type: 'success' });
       setShowCreateModal(false);
       setFormData({ name: '', list_id: '', message_template: '', instance_ids: [], media_url: '', media_type: undefined });
       await loadDispatches();
     } catch (error: any) {
-      console.error('Erro ao criar disparo:', error);
-      setToast({
-        message: error.response?.data?.error || 'Erro ao criar disparo',
-        type: 'error'
-      });
+      setToast({ message: error.response?.data?.error || 'Erro ao criar disparo', type: 'error' });
     } finally {
       setCreatingDispatch(false);
     }
   };
 
   const handleStart = async (id: number) => {
-    // Prevenir duplo clique
-    if (startingDispatch === id) {
-      return;
-    }
-
+    if (startingDispatch === id) return;
     try {
       setStartingDispatch(id);
       await api.post(`/dispatches/${id}/start`);
       setToast({ message: 'Disparo iniciado!', type: 'success' });
       await loadDispatches();
     } catch (error: any) {
-      setToast({
-        message: error.response?.data?.error || 'Erro ao iniciar disparo',
-        type: 'error'
-      });
+      setToast({ message: error.response?.data?.error || 'Erro ao iniciar disparo', type: 'error' });
     } finally {
       setStartingDispatch(null);
     }
@@ -235,659 +176,412 @@ export default function Dispatches() {
       setToast({ message: 'Disparo parado!', type: 'success' });
       await loadDispatches();
     } catch (error: any) {
-      setToast({
-        message: error.response?.data?.error || 'Erro ao parar disparo',
-        type: 'error'
-      });
+      setToast({ message: error.response?.data?.error || 'Erro ao parar disparo', type: 'error' });
     }
   };
 
   const handleDelete = async (id: number) => {
     if (!confirm('Tem certeza que deseja deletar este disparo?')) return;
-
     try {
       await api.delete(`/dispatches/${id}`);
       setToast({ message: 'Disparo deletado!', type: 'success' });
       await loadDispatches();
     } catch (error: any) {
-      setToast({
-        message: error.response?.data?.error || 'Erro ao deletar disparo',
-        type: 'error'
-      });
+      setToast({ message: error.response?.data?.error || 'Erro ao deletar disparo', type: 'error' });
     }
   };
 
-  const getStatusIcon = (status: string) => {
+  const openDetail = async (dispatch: Dispatch) => {
+    setDetailDispatch(dispatch);
+    setLoadingDetail(true);
+    try {
+      const response = await api.get(`/dispatches/${dispatch.id}/contacts`);
+      setDetailContacts(response.data.contacts || []);
+    } catch (error) {
+      setToast({ message: 'Erro ao carregar detalhes', type: 'error' });
+    } finally {
+      setLoadingDetail(false);
+    }
+  };
+
+  const getStatusBadge = (status: string) => {
     switch (status) {
-      case 'running':
-        return <RefreshCw className="h-4 w-4 text-blue-500 animate-spin" />;
-      case 'completed':
-        return <CheckCircle2 className="h-4 w-4 text-green-500" />;
-      case 'stopped':
-        return <Square className="h-4 w-4 text-gray-500" />;
-      case 'failed':
-        return <XCircle className="h-4 w-4 text-red-500" />;
-      default:
-        return <Clock className="h-4 w-4 text-yellow-500" />;
+      case 'running': return <span className="badge badge-sky animate-pulse">Processando</span>;
+      case 'completed': return <span className="badge badge-emerald">Concluído</span>;
+      case 'stopped': return <span className="badge badge-amber">Interrompido</span>;
+      case 'failed': return <span className="badge badge-rose">Falhou</span>;
+      default: return <span className="badge badge-violet">Pendente</span>;
     }
-  };
-
-  const getStatusText = (status: string) => {
-    const statusMap: Record<string, string> = {
-      pending: 'Pendente',
-      running: 'Em execução',
-      completed: 'Concluído',
-      stopped: 'Parado',
-      failed: 'Falhou',
-    };
-    return statusMap[status] || status;
-  };
-
-  const getTypeIcon = (type: string) => {
-    return type === 'devocional' ? (
-      <BookOpen className="h-5 w-5" />
-    ) : (
-      <Megaphone className="h-5 w-5" />
-    );
-  };
-
-  const getTypeColor = (type: string) => {
-    return type === 'devocional'
-      ? 'from-green-500 to-emerald-500'
-      : 'from-blue-500 to-cyan-500';
   };
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <RefreshCw className="h-8 w-8 animate-spin mx-auto mb-4 text-primary" />
-          <p>Carregando disparos...</p>
-        </div>
+      <div style={{ minHeight: '60vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <RefreshCw size={40} className="animate-spin text-amber-500" />
       </div>
     );
   }
 
   return (
-    <div>
-      {/* Toast Notification */}
+    <div style={{ maxWidth: 1200, margin: '0 auto' }}>
+      {/* Toast */}
       {toast && (
-        <div className={`fixed top-4 right-4 z-50 p-4 rounded-lg shadow-lg flex items-center gap-2 ${
-          toast.type === 'success' ? 'bg-green-500 text-white' : 'bg-red-500 text-white'
-        }`}>
-          {toast.type === 'success' ? (
-            <CheckCircle2 className="h-5 w-5" />
-          ) : (
-            <XCircle className="h-5 w-5" />
-          )}
-          <span>{toast.message}</span>
-          <button
-            onClick={() => setToast(null)}
-            className="ml-2 hover:opacity-70"
-          >
-            <X className="h-4 w-4" />
-          </button>
+        <div style={{
+          position: 'fixed', bottom: 24, right: 24, zIndex: 1000,
+          background: toast.type === 'success' ? 'rgba(16,185,129,0.15)' : 'rgba(244,63,94,0.15)',
+          border: `1px solid ${toast.type === 'success' ? 'rgba(16,185,129,0.4)' : 'rgba(244,63,94,0.4)'}`,
+          padding: '14px 20px', borderRadius: 12, backdropFilter: 'blur(10px)',
+          display: 'flex', alignItems: 'center', gap: 10, color: toast.type === 'success' ? '#34d399' : '#fb7185'
+        }}>
+          {toast.type === 'success' ? <CheckCircle2 size={18} /> : <AlertCircle size={18} />}
+          <span style={{ fontSize: '0.9rem', fontWeight: 500 }}>{toast.message}</span>
         </div>
       )}
-      
+
       {/* Header */}
-      <div className="mb-8">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div>
-            <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-3 mb-2">
-              <div className="w-10 h-10 bg-gradient-to-br from-indigo-500 to-purple-500 rounded-xl flex items-center justify-center shadow-lg">
-                <Send className="h-6 w-6 text-white" />
-              </div>
-              Disparos
-            </h1>
-            <p className="text-gray-600 text-sm ml-13">
-              Gerencie seus disparos e mensagens personalizadas
-            </p>
-            <div className="bg-blue-50 border-l-4 border-blue-400 p-4 mt-4 rounded-r-lg">
-              <div className="flex items-start gap-3">
-                <AlertCircle className="h-5 w-5 text-blue-600 mt-0.5 flex-shrink-0" />
-                <div className="text-sm text-blue-900">
-                  <p className="font-semibold mb-1">ℹ️ Sobre Disparos de Devocional:</p>
-                  <p className="text-blue-800">
-                    O disparo de devocional é <strong>automático</strong> e configurado na página <strong>"Config. Devocional"</strong>.
-                    Ele dispara automaticamente todos os dias no horário configurado. Você não precisa criar disparos manuais de devocional aqui.
-                    Esta página é apenas para <strong>mensagens personalizadas</strong> ou <strong>testes manuais</strong> de devocional.
-                  </p>
-                </div>
-              </div>
+      <div style={{ marginBottom: 40 }}>
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-5">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+            <div style={{
+              width: 56, height: 56, borderRadius: 16, background: 'linear-gradient(135deg, #f59e0b, #d97706)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 8px 20px rgba(245, 158, 11, 0.3)'
+            }}>
+              <Send size={28} color="#0d0c14" strokeWidth={2} />
+            </div>
+            <div>
+              <h1 style={{ fontSize: '2rem', fontWeight: 800, color: 'var(--text-primary)', margin: 0, fontFamily: 'Outfit' }}>Histórico de Disparos</h1>
+              <p style={{ margin: '4px 0 0', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Gerencie e acompanhe o status de suas campanhas e devocionais.</p>
             </div>
           </div>
 
-          <Button
+          <button
             onClick={() => {
-              setShowCreateModal(true);
               setFormData({ name: '', list_id: '', message_template: '', instance_ids: [], media_url: '', media_type: undefined });
+              setShowCreateModal(true);
             }}
-            className="bg-gradient-to-r from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600"
+            className="btn-gold"
+            style={{ padding: '12px 28px', fontSize: '1rem', display: 'flex', alignItems: 'center', gap: 10, border: 'none', cursor: 'pointer' }}
           >
-            <Plus className="h-4 w-4 mr-2" />
-            Novo Disparo
-          </Button>
+            <Plus size={20} strokeWidth={3} />
+            <span>Novo Disparo</span>
+          </button>
         </div>
       </div>
 
-      {/* Lista de Disparos */}
+      {/* Info Alert */}
+      <div style={{
+        padding: '16px 24px', borderRadius: 16, background: 'rgba(56, 189, 248, 0.05)',
+        border: '1px solid rgba(56, 189, 248, 0.15)', marginBottom: 32, display: 'flex', gap: 16
+      }}>
+        <Info size={20} color="#38bdf8" style={{ marginTop: 2, flexShrink: 0 }} />
+        <p style={{ margin: 0, fontSize: '0.85rem', color: '#7dd3fc', lineHeight: 1.5 }}>
+          <strong>Nota sobre Devocionais:</strong> O envio diário é <strong>automático</strong> e configurado em <em>"Config. Devocional"</em>.
+          Esta tela serve para disparos manuais de teste ou interações de marketing personalizadas.
+        </p>
+      </div>
+
+      {/* Dispatches Grid */}
       {dispatches.length === 0 ? (
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center">
-          <Send className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-          <h3 className="text-lg font-semibold text-gray-900 mb-2">
-            Nenhum disparo criado
-          </h3>
-          <p className="text-gray-600 mb-6">
-            Crie seu primeiro disparo para começar
-          </p>
-          <Button
-            onClick={() => setShowCreateModal(true)}
-            className="bg-gradient-to-r from-indigo-500 to-purple-500"
-          >
-            <Plus className="h-4 w-4 mr-2" />
-            Criar Disparo
-          </Button>
+        <div className="glass-card" style={{ padding: '80px 24px', textAlign: 'center' }}>
+          <Megaphone size={64} color="var(--border)" style={{ marginBottom: 20 }} />
+          <h3 style={{ color: 'var(--text-primary)', margin: 0 }}>Nenhum disparo realizado</h3>
+          <p style={{ color: 'var(--text-muted)', marginTop: 8 }}>Clique em "Novo Disparo" para começar sua primeira campanha.</p>
         </div>
       ) : (
-        <>
-        <div className="grid gap-4">
-          {dispatches.map((dispatch) => (
-            <div
-              key={dispatch.id}
-              className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow"
-            >
-              <div className="flex items-start justify-between">
-                <div className="flex-1 cursor-pointer" onClick={() => openDetail(dispatch)}>
-                  <div className="flex items-center gap-3 mb-3">
-                    <div
-                      className={`w-10 h-10 bg-gradient-to-br ${getTypeColor(
-                        dispatch.dispatch_type
-                      )} rounded-xl flex items-center justify-center text-white shadow-md`}
-                    >
-                      {getTypeIcon(dispatch.dispatch_type)}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 16 }}>
+          {dispatches.map(dispatch => (
+            <div key={dispatch.id} className="glass-card hover-glow" style={{ padding: '24px 32px' }}>
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+                <div style={{ flex: 1 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
+                    <div style={{
+                      width: 40, height: 40, borderRadius: 10, background: dispatch.dispatch_type === 'devocional' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(56, 189, 248, 0.1)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', color: dispatch.dispatch_type === 'devocional' ? '#10b981' : '#0ea5e9'
+                    }}>
+                      {dispatch.dispatch_type === 'devocional' ? <BookOpen size={20} /> : <MessageCircle size={20} />}
                     </div>
                     <div>
-                      <h3 className="text-lg font-semibold text-gray-900">
-                        {dispatch.name}
-                      </h3>
-                      <div className="flex items-center gap-4 text-sm text-gray-600">
-                        <span className="capitalize">
-                          {dispatch.dispatch_type === 'marketing' ? 'Mensagem Personalizada' : dispatch.dispatch_type}
+                      <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 700, color: 'var(--text-primary)' }}>{dispatch.name}</h3>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 2 }}>
+                        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                          {dispatch.dispatch_type === 'marketing' ? 'Campanha' : 'Devocional'}
                         </span>
-                        {dispatch.list_name && (
-                          <>
-                            <span>•</span>
-                            <span>{dispatch.list_name}</span>
-                          </>
-                        )}
-                        {dispatch.created_at && (
-                          <>
-                            <span>•</span>
-                            <span>
-                              {new Date(dispatch.created_at).toLocaleString('pt-BR', {
-                                day: '2-digit',
-                                month: '2-digit',
-                                year: 'numeric',
-                                hour: '2-digit',
-                                minute: '2-digit'
-                              })}
-                            </span>
-                          </>
-                        )}
+                        <span style={{ color: 'var(--border)' }}>•</span>
+                        <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{dispatch.list_name || 'Individual'}</span>
                       </div>
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-6 mt-4">
-                    {dispatch.dispatch_type === 'devocional' && dispatch.status === 'pending' && (
-                      <div className="bg-yellow-50 border border-yellow-200 rounded-lg px-3 py-2 text-xs text-yellow-800">
-                        ⚠️ Este é um disparo manual. O disparo automático está em "Config. Devocional"
-                      </div>
-                    )}
-                    <div className="flex items-center gap-2">
-                      {getStatusIcon(dispatch.status)}
-                      <span className="text-sm font-medium text-gray-700">
-                        {getStatusText(dispatch.status)}
-                      </span>
-                    </div>
-                    <div className="text-sm text-gray-600">
-                      <span className="font-medium">{dispatch.contacts_processed || 0}</span> /{' '}
-                      <span>{dispatch.total_contacts || 0}</span> contatos
+                  <div className="flex flex-wrap items-center gap-x-6 gap-y-3 mt-4">
+                    {getStatusBadge(dispatch.status)}
+                    <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <Users size={14} /> <strong>{dispatch.contacts_processed || 0}</strong> / {dispatch.total_contacts || 0}
                     </div>
                     {dispatch.contacts_success > 0 && (
-                      <div className="text-sm text-green-600">
-                        ✓ {dispatch.contacts_success} enviados
-                      </div>
+                      <div style={{ fontSize: '0.85rem', color: '#34d399', fontWeight: 600 }}>✓ {dispatch.contacts_success}</div>
                     )}
                     {dispatch.contacts_failed > 0 && (
-                      <div className="text-sm text-red-600">
-                        ✗ {dispatch.contacts_failed} falhas
-                      </div>
+                      <div style={{ fontSize: '0.85rem', color: '#fb7185', fontWeight: 600 }}>✗ {dispatch.contacts_failed}</div>
                     )}
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div style={{ display: 'flex', items: 'center', gap: 12 }}>
                   {dispatch.status === 'pending' && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={(e) => { e.stopPropagation(); handleStart(dispatch.id); }}
-                      disabled={startingDispatch === dispatch.id}
-                      className="text-green-600 hover:text-green-700 disabled:opacity-50"
+                    <button
+                      onClick={() => handleStart(dispatch.id)}
+                      className="btn-outline"
+                      style={{ color: '#34d399', borderColor: 'rgba(52, 211, 153, 0.2)', padding: '8px 16px', borderRadius: 10, display: 'flex', alignItems: 'center', gap: 8 }}
                     >
-                      <Play className="h-4 w-4 mr-1" />
+                      {startingDispatch === dispatch.id ? <RefreshCw size={16} className="animate-spin" /> : <Play size={16} fill="currentColor" />}
                       {startingDispatch === dispatch.id ? 'Iniciando...' : 'Iniciar'}
-                    </Button>
+                    </button>
                   )}
                   {dispatch.status === 'running' && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={(e) => { e.stopPropagation(); handleStop(dispatch.id); }}
-                      className="text-red-600 hover:text-red-700"
+                    <button
+                      onClick={() => handleStop(dispatch.id)}
+                      className="btn-outline"
+                      style={{ color: '#fb7185', borderColor: 'rgba(251, 113, 133, 0.2)', padding: '8px 16px', borderRadius: 10, display: 'flex', alignItems: 'center', gap: 8 }}
                     >
-                      <Square className="h-4 w-4 mr-1" />
-                      Parar
-                    </Button>
+                      <Square size={16} fill="currentColor" /> Parar
+                    </button>
                   )}
+                  <button onClick={() => openDetail(dispatch)} className="btn-outline" style={{ padding: '10px', borderRadius: 10 }} title="Ver Detalhes">
+                    <ExternalLink size={18} />
+                  </button>
                   {dispatch.status !== 'running' && (
-                    <>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={(e) => { e.stopPropagation(); openDetail(dispatch); }}
-                        className="text-indigo-600 hover:text-indigo-700 hover:border-indigo-300"
-                        title="Ver quem recebeu / não recebeu"
-                      >
-                        <Users className="h-4 w-4 mr-1" />
-                        Detalhes
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={(e) => { e.stopPropagation(); handleDelete(dispatch.id); }}
-                        className="text-red-600 hover:text-red-700"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </>
+                    <button onClick={() => handleDelete(dispatch.id)} style={{ padding: '10px', borderRadius: 10, background: 'rgba(244, 63, 94, 0.05)', color: '#fb7185', border: '1px solid rgba(244, 63, 94, 0.1)', cursor: 'pointer' }}>
+                      <Trash2 size={18} />
+                    </button>
                   )}
                 </div>
               </div>
             </div>
           ))}
         </div>
-
-        {/* Paginação */}
-        {totalDispatches > limit && (
-          <div className="mt-6 flex items-center justify-center gap-4">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setPage((p) => Math.max(0, p - 1))}
-              disabled={page === 0}
-              className="rounded-xl border-2 border-gray-200 hover:border-indigo-300 disabled:opacity-50"
-            >
-              <ChevronLeft className="h-4 w-4 mr-1" />
-              Anterior
-            </Button>
-            <span className="text-sm text-gray-600">
-              Página {page + 1} de {totalPages} • {totalDispatches} disparo(s)
-            </span>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
-              disabled={page >= totalPages - 1}
-              className="rounded-xl border-2 border-gray-200 hover:border-indigo-300 disabled:opacity-50"
-            >
-              Próxima
-              <ChevronRight className="h-4 w-4 ml-1" />
-            </Button>
-          </div>
-        )}
-        </>
       )}
 
-      {/* Modal Detalhe do Disparo - Quem recebeu / não recebeu */}
-      {detailDispatch && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" onClick={() => setDetailDispatch(null)}>
-          <div className="bg-white rounded-2xl shadow-xl max-w-3xl w-full max-h-[85vh] overflow-hidden flex flex-col border-2 border-gray-200" onClick={(e) => e.stopPropagation()}>
-            <div className="p-6 border-b border-gray-200 bg-gradient-to-br from-indigo-50 to-purple-50">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="text-xl font-bold text-gray-900">{detailDispatch.name}</h2>
-                  <p className="text-sm text-gray-600 mt-1">
-                    {detailDispatch.list_name && <span>{detailDispatch.list_name} • </span>}
-                    {new Date(detailDispatch.created_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                  </p>
-                  <p className="text-sm text-gray-700 mt-2">
-                    ✓ {detailDispatch.contacts_success ?? 0} enviados &nbsp; • &nbsp; ✗ {detailDispatch.contacts_failed ?? 0} falhas
-                  </p>
-                </div>
-                <button onClick={() => setDetailDispatch(null)} className="text-gray-400 hover:text-gray-600 p-1">
-                  <X className="h-6 w-6" />
-                </button>
-              </div>
-            </div>
-            <div className="p-4 overflow-y-auto flex-1">
-              {loadingDetail ? (
-                <div className="flex justify-center py-12">
-                  <RefreshCw className="h-8 w-8 animate-spin text-indigo-500" />
-                </div>
-              ) : detailContacts.length === 0 ? (
-                <p className="text-gray-500 text-center py-8">Nenhum contato registrado neste disparo.</p>
-              ) : (
-                <>
-                {(detailDispatch.contacts_failed ?? 0) > 0 && !detailContacts.some((c: any) => c.status === 'failed') && (
-                  <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
-                    <strong>ℹ️ Sobre as {(detailDispatch as any).contacts_failed} falhas:</strong> este disparo é anterior à atualização que passou a registrar por contato quem falhou. Por isso as falhas não aparecem na lista abaixo. Nos <strong>próximos disparos</strong>, as falhas serão listadas aqui com número e motivo.
-                  </div>
-                )}
-                <div className="rounded-xl border-2 border-gray-200 overflow-hidden">
-                  <table className="w-full text-sm">
-                    <thead className="bg-gray-50 border-b border-gray-200">
-                      <tr>
-                        <th className="text-left py-3 px-4 font-semibold text-gray-700">Número</th>
-                        <th className="text-left py-3 px-4 font-semibold text-gray-700">Nome</th>
-                        <th className="text-left py-3 px-4 font-semibold text-gray-700">Status</th>
-                        <th className="text-left py-3 px-4 font-semibold text-gray-700">Enviado em</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {detailContacts.map((c: any) => (
-                        <tr key={c.id} className="border-b border-gray-100 hover:bg-gray-50">
-                          <td className="py-2 px-4 font-mono text-gray-900">{c.contact_number}</td>
-                          <td className="py-2 px-4 text-gray-700">{c.contact_name || '—'}</td>
-                          <td className="py-2 px-4">
-                            {c.status === 'sent' || c.status === 'delivered' || c.status === 'read' ? (
-                              <span className="text-green-600 font-medium">✓ Enviado</span>
-                            ) : c.status === 'failed' ? (
-                              <span className="text-red-600 font-medium">✗ Falha</span>
-                            ) : (
-                              <span className="text-gray-500">{c.status || '—'}</span>
-                            )}
-                            {c.failed_reason && <span className="block text-xs text-red-600 mt-0.5">{c.failed_reason}</span>}
-                          </td>
-                          <td className="py-2 px-4 text-gray-600">
-                            {c.sent_at ? new Date(c.sent_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—'}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                </>
-              )}
-            </div>
-          </div>
+      {/* Pagination */}
+      {totalDispatches > limit && (
+        <div style={{ marginTop: 40, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 16 }}>
+          <button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0} className="btn-outline" style={{ padding: '10px 20px', borderRadius: 12, opacity: page === 0 ? 0.5 : 1 }}>Anterior</button>
+          <span style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Página {page + 1} de {Math.ceil(totalDispatches / limit)}</span>
+          <button onClick={() => setPage(p => p + 1)} disabled={(page + 1) * limit >= totalDispatches} className="btn-outline" style={{ padding: '10px 20px', borderRadius: 12, opacity: (page + 1) * limit >= totalDispatches ? 0.5 : 1 }}>Próxima</button>
         </div>
       )}
 
-      {/* Modal de Criar Disparo */}
+      {/* Modal Criar Disparo */}
       {showCreateModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="p-6 border-b border-gray-200">
-              <div className="flex items-center justify-between">
-                <h2 className="text-xl font-bold text-gray-900">Criar Novo Disparo</h2>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100, padding: 20 }}>
+          <div className="glass-card" style={{ width: '100%', maxWidth: 700, maxHeight: '90vh', overflowY: 'auto', padding: 0 }}>
+            <div style={{ padding: '24px 32px', borderBottom: '1px solid var(--border)', display: 'flex', items: 'center', justifyContent: 'space-between' }}>
+              <h2 style={{ margin: 0, fontSize: '1.5rem', fontWeight: 800, color: 'var(--text-primary)', fontFamily: 'Outfit' }}>Configurar Novo Disparo</h2>
+              <button onClick={() => setShowCreateModal(false)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}><X size={28} /></button>
+            </div>
+            
+            <div style={{ padding: 32 }}>
+              {/* Type Switcher */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 32 }}>
                 <button
-                  onClick={() => setShowCreateModal(false)}
-                  className="text-gray-400 hover:text-gray-600"
+                  onClick={() => setDispatchType('marketing')}
+                  style={{
+                    padding: '20px', borderRadius: 16, border: '2px solid', textAlign: 'center', transition: '0.2s',
+                    background: dispatchType === 'marketing' ? 'rgba(56, 189, 248, 0.1)' : 'var(--bg-elevated)',
+                    borderColor: dispatchType === 'marketing' ? '#0ea5e9' : 'var(--border)',
+                    cursor: 'pointer'
+                  }}
                 >
-                  <X className="h-6 w-6" />
+                  <MessageCircle size={28} color={dispatchType === 'marketing' ? '#0ea5e9' : 'var(--text-muted)'} style={{ margin: '0 auto 12px' }} />
+                  <div style={{ fontWeight: 700, color: dispatchType === 'marketing' ? 'var(--text-primary)' : 'var(--text-muted)' }}>Campanha de Marketing</div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 4 }}>Disparo personalizado para listas</div>
+                </button>
+                <button
+                  onClick={() => setDispatchType('devocional')}
+                  style={{
+                    padding: '20px', borderRadius: 16, border: '2px solid', textAlign: 'center', transition: '0.2s',
+                    background: dispatchType === 'devocional' ? 'rgba(16, 185, 129, 0.1)' : 'var(--bg-elevated)',
+                    borderColor: dispatchType === 'devocional' ? '#10b981' : 'var(--border)',
+                    cursor: 'pointer'
+                  }}
+                >
+                  <BookOpen size={28} color={dispatchType === 'devocional' ? '#10b981' : 'var(--text-muted)'} style={{ margin: '0 auto 12px' }} />
+                  <div style={{ fontWeight: 700, color: dispatchType === 'devocional' ? 'var(--text-primary)' : 'var(--text-muted)' }}>Teste de Devocional</div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 4 }}>Envio manual do conteúdo do dia</div>
                 </button>
               </div>
-            </div>
 
-            <div className="p-6 space-y-6">
-              {/* Tipo de Disparo */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Tipo de Disparo
-                </label>
-                <div className="grid grid-cols-2 gap-4">
-                  <button
-                    onClick={() => setDispatchType('devocional')}
-                    className={`p-4 rounded-xl border-2 transition-all relative ${
-                      dispatchType === 'devocional'
-                        ? 'border-green-500 bg-green-50'
-                        : 'border-gray-200 hover:border-gray-300'
-                    }`}
-                  >
-                    <div className="absolute top-2 right-2">
-                      <span className="bg-yellow-500 text-white text-xs px-2 py-0.5 rounded-full font-semibold">
-                        TESTE
-                      </span>
-                    </div>
-                    <BookOpen className="h-6 w-6 mx-auto mb-2 text-green-600" />
-                    <div className="font-medium">Devocional (Teste)</div>
-                    <div className="text-xs text-gray-600 mt-1">
-                      Apenas para testes manuais
-                    </div>
-                    <div className="text-xs text-yellow-700 mt-2 font-medium">
-                      ⚠️ Disparo automático configurado em "Config. Devocional"
-                    </div>
-                  </button>
-                  <button
-                    onClick={() => setDispatchType('marketing')}
-                    className={`p-4 rounded-xl border-2 transition-all ${
-                      dispatchType === 'marketing'
-                        ? 'border-blue-500 bg-blue-50'
-                        : 'border-gray-200 hover:border-gray-300'
-                    }`}
-                  >
-                    <MessageCircle className="h-6 w-6 mx-auto mb-2 text-blue-600" />
-                    <div className="font-medium">Mensagem Personalizada</div>
-                    <div className="text-xs text-gray-600 mt-1">
-                      Mensagens customizadas para contatos
-                    </div>
-                  </button>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+                <div>
+                  <label className="label-premium">Nome Identificador *</label>
+                  <input
+                    type="text" value={formData.name}
+                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                    placeholder="Ex: Oferta Especial de Segunda" className="input-dark"
+                  />
                 </div>
-              </div>
 
-              {/* Nome */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Nome do Disparo *
-                </label>
-                <input
-                  type="text"
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                  placeholder="Ex: Devocional Diário - Janeiro 2026"
-                />
-              </div>
+                <div>
+                  <label className="label-premium">Lista de Destinatários *</label>
+                  <select
+                    value={formData.list_id}
+                    onChange={(e) => setFormData({ ...formData, list_id: e.target.value })}
+                    className="input-dark"
+                  >
+                    <option value="">Selecione a base de contatos...</option>
+                    {lists.map(list => (
+                      <option key={list.id} value={list.id}>{list.name} ({list.total_contacts} contatos)</option>
+                    ))}
+                  </select>
+                </div>
 
-              {/* Lista */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Lista de Contatos *
-                </label>
-                <select
-                  value={formData.list_id}
-                  onChange={(e) => setFormData({ ...formData, list_id: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                >
-                  <option value="">Selecione uma lista</option>
-                  {lists.map((list) => (
-                    <option key={list.id} value={list.id}>
-                      {list.name} ({list.total_contacts || 0} contatos)
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Mensagem (apenas marketing) */}
-              {dispatchType === 'marketing' && (
-                <>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Mensagem *
-                    </label>
-                    <textarea
-                      value={formData.message_template}
-                      onChange={(e) =>
-                        setFormData({ ...formData, message_template: e.target.value })
-                      }
-                      rows={6}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                      placeholder="Digite a mensagem que será enviada..."
-                    />
-                  </div>
-                  
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Tipo de Mídia (Opcional)
-                    </label>
-                    <select
-                      value={formData.media_type || ''}
-                      onChange={(e) => setFormData({ ...formData, media_type: e.target.value as 'image' | 'pdf' | 'document' | undefined })}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                    >
-                      <option value="">Apenas texto</option>
-                      <option value="image">Imagem</option>
-                      <option value="pdf">PDF</option>
-                      <option value="document">Documento</option>
-                    </select>
-                  </div>
-
-                  {formData.media_type && (
+                {dispatchType === 'marketing' && (
+                  <>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        {formData.media_url ? 'URL da Mídia' : 'Upload de Arquivo'}
-                      </label>
-                      <div className="space-y-2">
-                        <input
-                          type="file"
-                          accept={formData.media_type === 'image' ? 'image/*' : formData.media_type === 'pdf' ? '.pdf' : '.pdf,.doc,.docx'}
-                          onChange={async (e) => {
-                            const file = e.target.files?.[0];
-                            if (file) {
-                              try {
-                                const formDataUpload = new FormData();
-                                formDataUpload.append('media', file);
-                                
-                                const response = await api.post('/dispatches/upload-media', formDataUpload, {
-                                  headers: {
-                                    'Content-Type': 'multipart/form-data',
-                                  },
-                                });
-                                
-                                setFormData({
-                                  ...formData,
-                                  media_url: response.data.media_url,
-                                  media_type: response.data.media_type,
-                                });
-                                setToast({ message: 'Arquivo enviado com sucesso!', type: 'success' });
-                              } catch (error: any) {
-                                setToast({
-                                  message: error.response?.data?.error || 'Erro ao fazer upload',
-                                  type: 'error'
-                                });
-                              }
-                            }
-                          }}
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                        />
-                        {formData.media_url && (
-                          <div className="flex items-center gap-2">
-                            <input
-                              type="url"
-                              value={formData.media_url}
-                              onChange={(e) => setFormData({ ...formData, media_url: e.target.value })}
-                              className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                              placeholder="Ou cole a URL manualmente..."
-                            />
-                            <button
-                              type="button"
-                              onClick={() => setFormData({ ...formData, media_url: '', media_type: undefined })}
-                              className="px-3 py-2 text-red-600 hover:text-red-700"
-                            >
-                              ✕
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                      <p className="text-xs text-gray-500 mt-1">
-                        {formData.media_url 
-                          ? `Arquivo: ${formData.media_url.split('/').pop()}`
-                          : `Faça upload de um arquivo ${formData.media_type === 'image' ? 'de imagem' : formData.media_type === 'pdf' ? 'PDF' : 'documento'} ou cole a URL manualmente`
-                        }
-                      </p>
-                    </div>
-                  )}
-                </>
-              )}
-
-              {/* Instâncias */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Instâncias (opcional - deixe vazio para usar todas)
-                </label>
-                <div className="space-y-2">
-                  {instances.map((instance) => (
-                    <label key={instance.id} className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={formData.instance_ids.includes(instance.id)}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setFormData({
-                              ...formData,
-                              instance_ids: [...formData.instance_ids, instance.id],
-                            });
-                          } else {
-                            setFormData({
-                              ...formData,
-                              instance_ids: formData.instance_ids.filter(
-                                (id) => id !== instance.id
-                              ),
-                            });
-                          }
-                        }}
-                        className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                      <label className="label-premium">Mensagem da Campanha *</label>
+                      <textarea
+                        value={formData.message_template}
+                        onChange={(e) => setFormData({ ...formData, message_template: e.target.value })}
+                        placeholder="Olá {{name}}, como vai você?..."
+                        style={{ minHeight: 120, resize: 'none' }} className="input-dark"
                       />
-                      <span className="text-sm text-gray-700">{instance.name}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-            </div>
+                      <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 6 }}>Use <code>{"{{name}}"}</code> para personalizar com o nome do contato.</p>
+                    </div>
 
-            <div className="p-6 border-t border-gray-200 flex justify-end gap-3">
-              <Button
-                variant="outline"
-                onClick={() => setShowCreateModal(false)}
-                disabled={creatingDispatch}
-              >
-                Cancelar
-              </Button>
-              <Button
-                onClick={handleCreate}
-                disabled={creatingDispatch}
-                className="bg-gradient-to-r from-indigo-500 to-purple-500 disabled:opacity-50"
-              >
-                {creatingDispatch ? 'Criando...' : 'Criar Disparo'}
-              </Button>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="label-premium">Tipo de Anexo</label>
+                        <select
+                          value={formData.media_type || ''}
+                          onChange={(e) => setFormData({ ...formData, media_type: e.target.value as any })}
+                          className="input-dark"
+                        >
+                          <option value="">Apenas Texto</option>
+                          <option value="image">Imagem</option>
+                          <option value="video">Vídeo</option>
+                          <option value="audio">Áudio (PTT)</option>
+                          <option value="pdf">Documento PDF</option>
+                        </select>
+                      </div>
+                      {formData.media_type && (
+                        <div>
+                          <label className="label-premium">URL do Arquivo</label>
+                          <input
+                            type="url" value={formData.media_url}
+                            onChange={(e) => setFormData({ ...formData, media_url: e.target.value })}
+                            placeholder="https://exemplo.com/arquivo.mp4" className="input-dark"
+                          />
+                        </div>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+
+              <div style={{ marginTop: 40, display: 'flex', gap: 16 }}>
+                <button onClick={() => setShowCreateModal(false)} className="btn-outline" style={{ flex: 1, padding: '14px 0', borderRadius: 12 }}>Cancelar</button>
+                <button
+                  onClick={handleCreate} disabled={creatingDispatch}
+                  className="btn-gold" style={{ flex: 1, padding: '14px 0', borderRadius: 12, border: 'none' }}
+                >
+                  {creatingDispatch ? 'Criando...' : 'Criar Disparo AGORA'}
+                </button>
+              </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* Toast */}
-      {toast && (
-        <div
-          className={`fixed bottom-4 right-4 p-4 rounded-lg shadow-lg ${
-            toast.type === 'success' ? 'bg-green-500' : 'bg-red-500'
-          } text-white z-50`}
-        >
-          {toast.message}
+      {/* Detail Modal */}
+      {detailDispatch && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100, padding: 20 }}>
+          <div className="glass-card" style={{ width: '100%', maxWidth: 800, maxHeight: '85vh', overflow: 'hidden', padding: 0, display: 'flex', flexDirection: 'column' }}>
+            <div style={{ padding: '24px 32px', borderBottom: '1px solid var(--border)', background: 'rgba(255,255,255,0.02)', display: 'flex', items: 'center', justifyContent: 'space-between' }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-primary)' }}>{detailDispatch.name}</h3>
+                <p style={{ margin: '4px 0 0', fontSize: '0.8rem', color: 'var(--text-muted)' }}>Detalhes de entrega e logs</p>
+              </div>
+              <button onClick={() => setDetailDispatch(null)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}><X size={24} /></button>
+            </div>
+            
+            <div style={{ flex: 1, overflowY: 'auto', padding: '0 32px 32px' }}>
+              {loadingDetail ? (
+                <div style={{ padding: 100, textAlign: 'center' }}><RefreshCw size={32} className="animate-spin text-amber-500 mx-auto" /></div>
+              ) : (
+                <div style={{ marginTop: 24 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 32 }}>
+                    <div style={{ padding: 16, borderRadius: 12, background: 'var(--bg-elevated)', border: '1px solid var(--border)', textAlign: 'center' }}>
+                      <div style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-primary)' }}>{detailDispatch.total_contacts}</div>
+                      <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Total</div>
+                    </div>
+                    <div style={{ padding: 16, borderRadius: 12, background: 'rgba(52, 211, 153, 0.05)', border: '1px solid rgba(52, 211, 153, 0.1)', textAlign: 'center' }}>
+                      <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#34d399' }}>{detailDispatch.contacts_success}</div>
+                      <div style={{ fontSize: '0.65rem', color: '#34d399', textTransform: 'uppercase' }}>Sucesso</div>
+                    </div>
+                    <div style={{ padding: 16, borderRadius: 12, background: 'rgba(251, 113, 133, 0.05)', border: '1px solid rgba(251, 113, 133, 0.1)', textAlign: 'center' }}>
+                      <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#fb7185' }}>{detailDispatch.contacts_failed}</div>
+                      <div style={{ fontSize: '0.65rem', color: '#fb7185', textTransform: 'uppercase' }}>Falhas</div>
+                    </div>
+                    <div style={{ padding: 16, borderRadius: 12, background: 'var(--bg-elevated)', border: '1px solid var(--border)', textAlign: 'center' }}>
+                      <div style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-primary)' }}>{Math.round((detailDispatch.contacts_success / (detailDispatch.total_contacts || 1)) * 100)}%</div>
+                      <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Taxa</div>
+                    </div>
+                  </div>
+
+                  <div style={{ border: '1px solid var(--border)', borderRadius: 16, overflow: 'hidden' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+                      <thead style={{ background: 'rgba(255,255,255,0.03)' }}>
+                        <tr>
+                          <th style={{ textAlign: 'left', padding: '12px 20px', color: 'var(--text-secondary)' }}>Destinatário</th>
+                          <th style={{ textAlign: 'left', padding: '12px 20px', color: 'var(--text-secondary)' }}>Status</th>
+                          <th style={{ textAlign: 'left', padding: '12px 20px', color: 'var(--text-secondary)' }}>Horário</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {detailContacts.map(c => (
+                          <tr key={c.id} style={{ borderTop: '1px solid var(--border)' }}>
+                            <td style={{ padding: '12px 20px' }}>
+                              <div style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{c.contact_name || '—'}</div>
+                              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{c.contact_number}</div>
+                            </td>
+                            <td style={{ padding: '12px 20px' }}>
+                              {c.status === 'sent' || c.status === 'delivered' ? <span style={{ color: '#34d399' }}>✓ Enviado</span> : <span style={{ color: '#fb7185' }}>✗ Falhou</span>}
+                              {c.failed_reason && <div style={{ fontSize: '0.7rem', color: '#fb7185' }}>{c.failed_reason}</div>}
+                            </td>
+                            <td style={{ padding: '12px 20px', color: 'var(--text-muted)' }}>
+                              {c.sent_at ? new Date(c.sent_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '—'}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       )}
+
+      <div style={{ height: 60 }} />
+      <style>{`
+        .label-premium {
+          display: block;
+          font-size: 0.8rem;
+          font-weight: 600;
+          color: var(--text-secondary);
+          margin-bottom: 8px;
+          text-transform: uppercase;
+          letter-spacing: 0.05em;
+        }
+      `}</style>
     </div>
+  );
+}
+
+function Info({ size, color, style }: { size: number, color?: string, style?: any }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color || "currentColor"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
+      <circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>
+    </svg>
   );
 }
