@@ -1,14 +1,15 @@
 import { useEffect, useState } from 'react';
 import api from '@/lib/api';
-import Button from '@/components/ui/Button';
-import Input from '@/components/ui/Input';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
-import Toast from '@/components/ui/Toast';
 import {
   Tag as TagIcon,
   Plus,
   Edit,
   Trash2,
+  RefreshCw,
+  AlertCircle,
+  CheckCircle2,
+  Users,
+  ChevronRight,
 } from 'lucide-react';
 
 interface Tag {
@@ -22,8 +23,8 @@ interface Tag {
 }
 
 const DEFAULT_COLORS = [
-  '#6366f1', '#10b981', '#3b82f6', '#f59e0b', '#ef4444',
-  '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16', '#f97316'
+  '#f59e0b', '#38bdf8', '#10b981', '#a78bfa', '#f43f5e',
+  '#0ea5e9', '#8b5cf6', '#ec4899', '#f97316', '#2dd4bf'
 ];
 
 export default function Tags() {
@@ -34,7 +35,7 @@ export default function Tags() {
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' | 'warning' } | null>(null);
   const [formData, setFormData] = useState({
     name: '',
-    color: '#6366f1',
+    color: '#f59e0b',
     description: '',
     category: 'custom',
   });
@@ -43,6 +44,13 @@ export default function Tags() {
     loadTags();
   }, []);
 
+  useEffect(() => {
+    if (toast) {
+      const t = setTimeout(() => setToast(null), 4000);
+      return () => clearTimeout(t);
+    }
+  }, [toast]);
+
   const loadTags = async () => {
     try {
       setLoading(true);
@@ -50,10 +58,7 @@ export default function Tags() {
       setTags(response.data.tags);
     } catch (error: any) {
       console.error('Erro ao carregar tags:', error);
-      setToast({
-        message: 'Erro ao carregar tags',
-        type: 'error'
-      });
+      setToast({ message: 'Erro ao carregar tags', type: 'error' });
     } finally {
       setLoading(false);
     }
@@ -71,13 +76,10 @@ export default function Tags() {
       }
       setShowModal(false);
       setEditingTag(null);
-      setFormData({ name: '', color: '#6366f1', description: '', category: 'custom' });
+      setFormData({ name: '', color: '#f59e0b', description: '', category: 'custom' });
       loadTags();
     } catch (error: any) {
-      setToast({
-        message: error.response?.data?.error || 'Erro ao salvar tag',
-        type: 'error'
-      });
+      setToast({ message: error.response?.data?.error || 'Erro ao salvar tag', type: 'error' });
     }
   };
 
@@ -88,10 +90,7 @@ export default function Tags() {
       setToast({ message: 'Tag deletada com sucesso!', type: 'success' });
       loadTags();
     } catch (error: any) {
-      setToast({
-        message: error.response?.data?.error || 'Erro ao deletar tag',
-        type: 'error'
-      });
+      setToast({ message: error.response?.data?.error || 'Erro ao deletar tag', type: 'error' });
     }
   };
 
@@ -106,239 +105,209 @@ export default function Tags() {
     setShowModal(true);
   };
 
+  if (loading) {
+    return (
+      <div style={{ minHeight: '60vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{
+            width: 44, height: 44, borderRadius: '50%',
+            border: '3px solid var(--gold-primary)', borderTopColor: 'transparent',
+            animation: 'spin 0.8s linear infinite', margin: '0 auto 12px',
+          }} />
+          <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Sincronizando etiquetas...</p>
+          <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div>
-      {/* Header */}
-      <div className="mb-8">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div>
-            <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-3 mb-2">
-              <div className="w-10 h-10 bg-gradient-to-br from-purple-500 to-pink-500 rounded-xl flex items-center justify-center shadow-lg">
-                <TagIcon className="h-6 w-6 text-white" />
-              </div>
-              Tags
-            </h1>
-            <p className="text-gray-600 text-sm ml-13">
-              Organize contatos com tags e categorias
-            </p>
+    <div style={{ maxWidth: 1200, margin: '0 auto' }}>
+      {/* Toast Notification */}
+      {toast && (
+        <div style={{
+          position: 'fixed', bottom: 24, right: 24, zIndex: 1000,
+          display: 'flex', alignItems: 'center', gap: 10,
+          padding: '14px 18px', borderRadius: 12, boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+          background: toast.type === 'success' ? 'rgba(16,185,129,0.15)' : 'rgba(244,63,94,0.15)',
+          border: `1px solid ${toast.type === 'success' ? 'rgba(16,185,129,0.4)' : 'rgba(244,63,94,0.4)'}`,
+          color: toast.type === 'success' ? '#34d399' : '#fb7185',
+          backdropFilter: 'blur(12px)',
+        }}>
+          {toast.type === 'success' ? <CheckCircle2 size={18} /> : <AlertCircle size={18} />}
+          <span style={{ fontFamily: 'Inter, sans-serif', fontSize: '0.875rem', fontWeight: 500 }}>{toast.message}</span>
+        </div>
+      )}
+
+      {/* Header Section */}
+      <div style={{ marginBottom: 40 }}>
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-5">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+            <div style={{
+              width: 56, height: 56, borderRadius: 16,
+              background: 'linear-gradient(135deg, #f59e0b, #d97706)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              boxShadow: '0 8px 20px rgba(245, 158, 11, 0.3)',
+              flexShrink: 0,
+            }}>
+              <TagIcon size={28} color="#0d0c14" strokeWidth={2} />
+            </div>
+            <div>
+              <h1 style={{ fontSize: '2rem', fontWeight: 800, color: 'var(--text-primary)', margin: 0, letterSpacing: '-0.02em', fontFamily: 'Outfit, sans-serif' }}>
+                Gestão de Tags
+              </h1>
+              <p style={{ margin: '4px 0 0', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                Organize e segmente sua base de contatos com inteligência.
+              </p>
+            </div>
           </div>
-          
-          <Button
+
+          <button
             onClick={() => {
               setEditingTag(null);
-              setFormData({ name: '', color: '#6366f1', description: '', category: 'custom' });
+              setFormData({ name: '', color: '#f59e0b', description: '', category: 'custom' });
               setShowModal(true);
             }}
-            className="flex items-center gap-2 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white shadow-lg"
+            className="btn-gold"
+            style={{ padding: '12px 24px', borderRadius: 12, display: 'flex', alignItems: 'center', gap: 8, border: 'none', cursor: 'pointer' }}
           >
-            <Plus className="h-5 w-5" />
-            Nova Tag
-          </Button>
+            <Plus size={20} strokeWidth={3} />
+            <span>Nova Tag</span>
+          </button>
         </div>
       </div>
 
-      {/* Lista de Tags */}
-      {loading ? (
-        <div className="flex items-center justify-center py-12">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600 mx-auto mb-4"></div>
-            <p className="text-gray-600">Carregando tags...</p>
-          </div>
+      {/* Tags Grid */}
+      {tags.length === 0 ? (
+        <div className="glass-card" style={{ padding: '80px 24px', textAlign: 'center' }}>
+          <TagIcon size={64} color="var(--border)" strokeWidth={1} style={{ margin: '0 auto 24px' }} />
+          <h3 style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>Nenhuma tag encontrada</h3>
+          <p style={{ color: 'var(--text-muted)', marginTop: 8 }}>Crie etiquetas para começar a organizar seus contatos.</p>
         </div>
-      ) : tags.length === 0 ? (
-        <Card className="border-2 border-gray-200 rounded-2xl shadow-md">
-          <CardContent className="p-12 text-center">
-            <TagIcon className="h-16 w-16 text-gray-300 mx-auto mb-4" />
-            <h3 className="text-lg font-semibold text-gray-900 mb-2">Nenhuma tag encontrada</h3>
-            <p className="text-gray-600 mb-6">Crie tags para organizar seus contatos</p>
-            <Button
-              onClick={() => {
-                setEditingTag(null);
-                setFormData({ name: '', color: '#6366f1', description: '', category: 'custom' });
-                setShowModal(true);
-              }}
-              className="bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white"
-            >
-              <Plus className="h-4 w-4 mr-2" />
-              Criar Tag
-            </Button>
-          </CardContent>
-        </Card>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 24 }}>
           {tags.map(tag => (
-            <Card key={tag.id} className="border-2 border-gray-200 hover:border-purple-300 hover:shadow-lg transition-all duration-300 rounded-2xl overflow-hidden bg-white shadow-md">
-              <CardHeader className="px-6 py-4" style={{ backgroundColor: `${tag.color}15`, borderBottom: `2px solid ${tag.color}40` }}>
-                <div className="flex items-start justify-between">
-                  <div className="flex items-center gap-3 flex-1">
-                    <div
-                      className="w-10 h-10 rounded-xl flex items-center justify-center shadow-md"
-                      style={{ backgroundColor: tag.color }}
-                    >
-                      <TagIcon className="h-5 w-5 text-white" />
-                    </div>
-                    <div className="flex-1">
-                      <CardTitle className="text-lg font-bold text-gray-900 mb-1">
-                        {tag.name}
-                      </CardTitle>
-                      {tag.description && (
-                        <p className="text-sm text-gray-600">{tag.description}</p>
-                      )}
-                    </div>
+            <div key={tag.id} className="glass-card hover-glow" style={{ padding: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+              <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--border)', background: `${tag.color}08`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <div style={{ width: 40, height: 40, borderRadius: 10, background: `${tag.color}20`, display: 'flex', alignItems: 'center', justifyContent: 'center', border: `1px solid ${tag.color}40` }}>
+                    <TagIcon size={20} color={tag.color} />
+                  </div>
+                  <div>
+                    <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-primary)' }}>{tag.name}</h3>
+                    <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{tag.category}</span>
                   </div>
                 </div>
-              </CardHeader>
-              <CardContent className="p-6">
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-gray-600">Categoria:</span>
-                    <span className="font-medium text-gray-900 capitalize">{tag.category}</span>
-                  </div>
-                  
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-gray-600">Contatos:</span>
-                    <span className="font-bold text-gray-900">{tag.total_contacts}</span>
-                  </div>
+                <div style={{ padding: '4px 10px', borderRadius: 100, background: 'rgba(255,255,255,0.05)', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Users size={12} /> {tag.total_contacts}
+                </div>
+              </div>
+              
+              <div style={{ padding: 24, flex: 1 }}>
+                <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                  {tag.description || 'Nenhuma descrição fornecida para esta etiqueta.'}
+                </p>
+              </div>
 
-                  <div className="flex items-center gap-2 pt-4 border-t border-gray-100">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => handleEdit(tag)}
-                      className="flex-1"
-                    >
-                      <Edit className="h-4 w-4 mr-1" />
-                      Editar
-                    </Button>
-                    {!['devocional', 'marketing', 'vip', 'teste', 'bloqueado'].includes(tag.category) && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => handleDelete(tag.id)}
-                        className="text-red-600 hover:text-red-700 hover:border-red-300 flex-1"
-                        title="Excluir tag"
-                      >
-                        <Trash2 className="h-4 w-4 mr-1" />
-                        Excluir
-                      </Button>
-                    )}
-                    {['devocional', 'marketing', 'vip', 'teste', 'bloqueado'].includes(tag.category) && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled
-                        className="text-gray-400 cursor-not-allowed flex-1"
-                        title="Tags padrão não podem ser excluídas"
-                      >
-                        <Trash2 className="h-4 w-4 mr-1" />
-                        Padrão
-                      </Button>
-                    )}
+              <div style={{ padding: '12px 20px', borderTop: '1px solid var(--border)', display: 'flex', gap: 10, background: 'rgba(0,0,0,0.1)' }}>
+                <button
+                  onClick={() => handleEdit(tag)}
+                  className="btn-outline"
+                  style={{ flex: 1, padding: '8px 0', fontSize: '0.8rem', borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+                >
+                  <Edit size={14} /> Editar
+                </button>
+                {/* Apenas permite excluir se não for categoria protegida */}
+                {!['devocional', 'bloqueado', 'teste'].includes(tag.category) ? (
+                  <button
+                    onClick={() => handleDelete(tag.id)}
+                    style={{ padding: '8px 12px', borderRadius: 10, background: 'rgba(244, 63, 94, 0.1)', color: 'var(--rose)', border: '1px solid rgba(244, 63, 94, 0.2)', cursor: 'pointer' }}
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                ) : (
+                  <div style={{ padding: '8px 12px', borderRadius: 10, background: 'rgba(255, 255, 255, 0.05)', color: 'var(--text-muted)', border: '1px solid var(--border)', cursor: 'not-allowed', display: 'flex', alignItems: 'center', gap: 5, fontSize: '0.75rem' }} title="Tags de sistema não podem ser excluídas">
+                    <Trash2 size={14} />
+                    <span>Fixa</span>
                   </div>
-                </div>
-              </CardContent>
-            </Card>
+                )}
+              </div>
+            </div>
           ))}
         </div>
       )}
 
-      {/* Modal Criar/Editar */}
+      {/* Modal - Criar/Editar */}
       {showModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <Card className="w-full max-w-md border-2 border-gray-200 rounded-2xl shadow-xl">
-            <CardHeader className="bg-gradient-to-br from-purple-50 to-pink-50 border-b-2 border-gray-100 px-6 py-4">
-              <CardTitle className="text-xl font-bold text-gray-900">
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100, padding: 20 }}>
+          <div className="glass-card" style={{ width: '100%', maxWidth: 440, padding: 0, overflow: 'hidden', boxShadow: '0 24px 64px rgba(0,0,0,0.6)' }}>
+            <div style={{ padding: '24px 32px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <h3 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-primary)', fontFamily: 'Outfit' }}>
                 {editingTag ? 'Editar Tag' : 'Nova Tag'}
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="p-6">
-              <form onSubmit={handleSubmit} className="space-y-4">
+              </h3>
+              <button onClick={() => setShowModal(false)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}><X size={24} /></button>
+            </div>
+            <form onSubmit={handleSubmit} style={{ padding: 32 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Nome *
-                  </label>
-                  <Input
-                    type="text"
-                    value={formData.name}
+                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Nome da Tag *</label>
+                  <input
+                    type="text" required value={formData.name}
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                    placeholder="Nome da tag"
-                    required
-                    className="h-12 border-2 border-gray-300 rounded-xl focus:border-purple-500"
+                    placeholder="Ex: Cliente VIP, Interessado..."
+                    style={{ width: '100%', padding: '12px 16px', background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 12, color: 'var(--text-primary)', outline: 'none' }}
                   />
                 </div>
-                
+
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Cor
-                  </label>
-                  <div className="flex items-center gap-3">
+                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Identidade Visual (Cor)</label>
+                  <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
                     <input
-                      type="color"
-                      value={formData.color}
+                      type="color" value={formData.color}
                       onChange={(e) => setFormData({ ...formData, color: e.target.value })}
-                      className="h-12 w-20 rounded-xl border-2 border-gray-300 cursor-pointer"
+                      style={{ width: 56, height: 56, padding: 0, border: 'none', borderRadius: 12, background: 'none', cursor: 'pointer' }}
                     />
-                    <div className="flex-1 flex flex-wrap gap-2">
+                    <div style={{ flex: 1, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                       {DEFAULT_COLORS.map(color => (
                         <button
-                          key={color}
-                          type="button"
+                          key={color} type="button"
                           onClick={() => setFormData({ ...formData, color })}
-                          className={`w-8 h-8 rounded-lg border-2 transition-all ${
-                            formData.color === color ? 'border-gray-900 scale-110' : 'border-gray-300'
-                          }`}
-                          style={{ backgroundColor: color }}
+                          style={{ width: 24, height: 24, borderRadius: 6, background: color, border: formData.color === color ? '2px solid #fff' : 'none', cursor: 'pointer' }}
                         />
                       ))}
                     </div>
                   </div>
                 </div>
-                
+
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Descrição
-                  </label>
-                  <Input
-                    type="text"
+                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Descrição (Opcional)</label>
+                  <textarea
                     value={formData.description}
                     onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                    placeholder="Descrição opcional"
-                    className="h-12 border-2 border-gray-300 rounded-xl focus:border-purple-500"
+                    placeholder="Para que serve esta etiqueta?"
+                    style={{ width: '100%', padding: '12px 16px', background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 12, color: 'var(--text-primary)', outline: 'none', minHeight: 80, resize: 'none' }}
                   />
                 </div>
+              </div>
 
-                <div className="flex items-center gap-3 pt-4 border-t border-gray-100">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => {
-                      setShowModal(false);
-                      setEditingTag(null);
-                    }}
-                    className="flex-1"
-                  >
-                    Cancelar
-                  </Button>
-                  <Button
-                    type="submit"
-                    className="flex-1 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white"
-                  >
-                    {editingTag ? 'Atualizar' : 'Criar'}
-                  </Button>
-                </div>
-              </form>
-            </CardContent>
-          </Card>
+              <div style={{ marginTop: 32, display: 'flex', gap: 12 }}>
+                <button type="button" onClick={() => setShowModal(false)} className="btn-outline" style={{ flex: 1, padding: '14px 0', borderRadius: 12 }}>Cancelar</button>
+                <button type="submit" className="btn-gold" style={{ flex: 1, padding: '14px 0', borderRadius: 12 }}>{editingTag ? 'Salvar Alterações' : 'Criar Tag'}</button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
 
-      {toast && (
-        <Toast
-          message={toast.message}
-          type={toast.type}
-          onClose={() => setToast(null)}
-        />
-      )}
+      <div style={{ height: 60 }} />
     </div>
+  );
+}
+
+function X({ size }: { size: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M18 6 6 18M6 6l12 12" />
+    </svg>
   );
 }
