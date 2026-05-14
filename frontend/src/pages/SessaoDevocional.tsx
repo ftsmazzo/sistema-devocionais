@@ -129,7 +129,11 @@ export default function SessaoDevocional() {
     e.preventDefault();
     setSaving(true);
     try {
-      await api.put('/devocional/ai-config', config);
+      const payload: Record<string, unknown> = { ...config };
+      if (payload.gemini_api_key === '********') {
+        delete payload.gemini_api_key;
+      }
+      await api.put('/devocional/ai-config', payload);
       setToast({ message: 'Configurações globais salvas!', type: 'success' });
     } catch (error) {
       setToast({ message: 'Erro ao salvar configurações.', type: 'error' });

@@ -26,7 +26,8 @@ export class GeminiService {
   async generateStructuredContent<T>(prompt: string, schema?: any): Promise<T> {
     try {
       const modelName = this.model.startsWith('models/') ? this.model : `models/${this.model}`;
-      const url = `https://generativelanguage.googleapis.com/v1beta/${modelName}:generateContent?key=${this.apiKey}`;
+      const keyQ = encodeURIComponent(this.apiKey.trim());
+      const url = `https://generativelanguage.googleapis.com/v1beta/${modelName}:generateContent?key=${keyQ}`;
       
       const response = await axios.post<GeminiResponse>(
         url,
@@ -66,6 +67,11 @@ export class GeminiService {
     } catch (error: any) {
       const errorMessage = error.response?.data?.error?.message || error.message;
       addLog('error', `[Gemini] Erro na geração: ${errorMessage}`);
+      if (typeof errorMessage === 'string' && /API key/i.test(errorMessage)) {
+        throw new Error(
+          `${errorMessage} Confira a chave em https://aistudio.google.com/apikey — salve de novo em Sessão Devocional (campo de credencial) ou defina GEMINI_API_KEY no ambiente do servidor.`
+        );
+      }
       throw new Error(`Erro no Gemini: ${errorMessage}`);
     }
   }
@@ -76,7 +82,8 @@ export class GeminiService {
   async generateText(prompt: string): Promise<string> {
     try {
       const modelName = this.model.startsWith('models/') ? this.model : `models/${this.model}`;
-      const url = `https://generativelanguage.googleapis.com/v1beta/${modelName}:generateContent?key=${this.apiKey}`;
+      const keyQ = encodeURIComponent(this.apiKey.trim());
+      const url = `https://generativelanguage.googleapis.com/v1beta/${modelName}:generateContent?key=${keyQ}`;
       
       const response = await axios.post<GeminiResponse>(
         url,
@@ -93,6 +100,11 @@ export class GeminiService {
     } catch (error: any) {
       const errorMessage = error.response?.data?.error?.message || error.message;
       addLog('error', `[Gemini] Erro na geração de texto: ${errorMessage}`);
+      if (typeof errorMessage === 'string' && /API key/i.test(errorMessage)) {
+        throw new Error(
+          `${errorMessage} Confira a chave em https://aistudio.google.com/apikey — salve de novo em Sessão Devocional ou defina GEMINI_API_KEY no servidor.`
+        );
+      }
       throw new Error(`Erro no Gemini: ${errorMessage}`);
     }
   }

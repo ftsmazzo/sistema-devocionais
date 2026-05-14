@@ -51,6 +51,15 @@ function rowDateToYmd(v: unknown): string | null {
   return null;
 }
 
+/** Chave real do Gemini: ignora placeholder do front e espaços; senão usa env. */
+function resolveGeminiApiKey(dbRaw: unknown, envRaw: string | undefined): string | null {
+  const env = typeof envRaw === 'string' ? envRaw.trim() : '';
+  const db = typeof dbRaw === 'string' ? dbRaw.trim() : '';
+  if (db && db !== '********') return db;
+  if (env) return env;
+  return null;
+}
+
 export class DevocionalGenerator {
   /**
    * Gera um devocional para uma data específica
@@ -126,13 +135,15 @@ export class DevocionalGenerator {
         effective.is_first_devocional_of_journey = prior.rows[0].c === 0;
       }
 
-      const apiKey = effective.gemini_api_key || process.env.GEMINI_API_KEY;
+      const apiKey = resolveGeminiApiKey(row.gemini_api_key, process.env.GEMINI_API_KEY);
 
       if (!apiKey) {
-        throw new Error('Chave de API do Gemini não configurada.');
+        throw new Error(
+          'Chave do Gemini não configurada. Informe a API key em Sessão Devocional (credenciais) ou defina GEMINI_API_KEY no servidor.'
+        );
       }
 
-      const gemini = new GeminiService(apiKey, effective.model_name);
+      const gemini = new GeminiService(apiKey.trim(), effective.model_name);
 
       const [year, month, day] = date.split('-').map(Number);
       const dateObj = new Date(year, month - 1, day);

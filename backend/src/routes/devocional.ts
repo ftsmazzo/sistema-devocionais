@@ -518,7 +518,7 @@ router.put('/ai-config', authenticateToken, async (req: AuthRequest, res) => {
 
     const updateKey = typeof gemini_api_key === 'string'
       && gemini_api_key.trim().length > 0
-      && gemini_api_key !== '********';
+      && gemini_api_key.trim() !== '********';
 
     let result;
     if (existing.rows.length === 0) {
