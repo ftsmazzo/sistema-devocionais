@@ -55,6 +55,13 @@ router.post('/login', async (req, res) => {
   }
 });
 
+/** Nome exibido no painel (rodapé). Sem autenticação — apenas texto público. */
+router.get('/branding', (_req, res) => {
+  const raw = process.env.ADMIN_NOME ?? process.env.ADMIN_NAME ?? '';
+  const admin_nome = typeof raw === 'string' && raw.trim() ? raw.trim() : null;
+  res.json({ admin_nome });
+});
+
 // Verificar token
 router.get('/me', authenticateToken, async (req: AuthRequest, res) => {
   try {

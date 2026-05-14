@@ -139,7 +139,7 @@ export class DevocionalGenerator {
 
       if (!apiKey) {
         throw new Error(
-          'Chave do Gemini não configurada. Informe a API key em Sessão Devocional (credenciais) ou defina GEMINI_API_KEY no servidor.'
+          'Chave do Gemini não configurada. Informe a API key em Jornada Bíblica (motor global) ou defina GEMINI_API_KEY no servidor.'
         );
       }
 

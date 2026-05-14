@@ -69,7 +69,7 @@ export class GeminiService {
       addLog('error', `[Gemini] Erro na geração: ${errorMessage}`);
       if (typeof errorMessage === 'string' && /API key/i.test(errorMessage)) {
         throw new Error(
-          `${errorMessage} Confira a chave em https://aistudio.google.com/apikey — salve de novo em Sessão Devocional (campo de credencial) ou defina GEMINI_API_KEY no ambiente do servidor.`
+          `${errorMessage} Confira a chave em https://aistudio.google.com/apikey — salve de novo em Jornada Bíblica (motor global) ou defina GEMINI_API_KEY no ambiente do servidor.`
         );
       }
       throw new Error(`Erro no Gemini: ${errorMessage}`);
@@ -102,7 +102,7 @@ export class GeminiService {
       addLog('error', `[Gemini] Erro na geração de texto: ${errorMessage}`);
       if (typeof errorMessage === 'string' && /API key/i.test(errorMessage)) {
         throw new Error(
-          `${errorMessage} Confira a chave em https://aistudio.google.com/apikey — salve de novo em Sessão Devocional ou defina GEMINI_API_KEY no servidor.`
+          `${errorMessage} Confira a chave em https://aistudio.google.com/apikey — salve de novo em Jornada Bíblica ou defina GEMINI_API_KEY no servidor.`
         );
       }
       throw new Error(`Erro no Gemini: ${errorMessage}`);

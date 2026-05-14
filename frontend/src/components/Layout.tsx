@@ -1,4 +1,4 @@
-import { ReactNode, useState } from 'react';
+import { ReactNode, useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuthStore } from '@/store/authStore';
 import {
@@ -43,7 +43,7 @@ const navSections = [
     label: 'Disparos',
     items: [
       { name: 'Disparos', href: '/dispatches', icon: Send },
-      { name: 'Sessão Devocional', href: '/devocional/criativo', icon: Brain },
+      { name: 'Jornada Bíblica', href: '/devocional/criativo', icon: Brain },
       { name: 'Config. Devocional', href: '/devocional/config', icon: Settings },
       { name: 'Mensagens Personalizadas', href: '/mensagens/config', icon: MessageCircle },
     ],
@@ -60,6 +60,20 @@ export default function Layout({ children }: LayoutProps) {
   const location = useLocation();
   const { user, logout } = useAuthStore();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [brandingAdminNome, setBrandingAdminNome] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/auth/branding')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!cancelled && data?.admin_nome) setBrandingAdminNome(String(data.admin_nome));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const isActive = (path: string) => {
     if (path === '/') return location.pathname === '/';
@@ -206,7 +220,12 @@ export default function Layout({ children }: LayoutProps) {
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
               }}>
-                {import.meta.env.VITE_ADMIN_NAME || import.meta.env.VITE_ADMIN_NOME || user?.name || user?.email || 'Administrador'}
+                {brandingAdminNome
+                  || import.meta.env.VITE_ADMIN_NAME
+                  || import.meta.env.VITE_ADMIN_NOME
+                  || user?.name
+                  || user?.email
+                  || 'Administrador'}
               </div>
               <div style={{ 
                 fontSize: '0.65rem', 
@@ -216,7 +235,7 @@ export default function Layout({ children }: LayoutProps) {
                 letterSpacing: '0.05em',
                 marginTop: 2 
               }}>
-                Painel Admin
+                Panel Admin
               </div>
             </div>
           </div>
