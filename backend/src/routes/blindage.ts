@@ -1,12 +1,66 @@
 import express from 'express';
 import { pool } from '../database';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
-import { createDefaultRules, reconcileBlindageRuleConfigs } from '../services/blindage';
+import { createDefaultRules, reconcileBlindageRuleConfigs, applyBlindageGlobalProfile, BLINDAGE_PROFILES_META, getBlindageProfilePackage } from '../services/blindage';
 
 const router = express.Router();
 
 // Todas as rotas requerem autenticação
 router.use(authenticateToken);
+
+/**
+ * Listar perfis de blindagem (Fase A — presets globais estilo MassFlow).
+ * GET /api/blindage/profiles
+ */
+router.get('/profiles', (_req: AuthRequest, res) => {
+  res.json({
+    profiles: BLINDAGE_PROFILES_META,
+    profileIds: ['conservative', 'moderate', 'aggressive'],
+    apply: { method: 'POST', path: '/api/blindage/profiles/apply', body: { profileId: 'moderate', dryRun: false } },
+  });
+});
+
+/**
+ * Ver pacote JSON de um perfil (sem gravar no banco).
+ * GET /api/blindage/profiles/:profileId
+ */
+router.get('/profiles/:profileId', (req: AuthRequest, res) => {
+  const pkg = getBlindageProfilePackage(req.params.profileId);
+  if (!pkg) {
+    return res.status(404).json({ error: 'Perfil não encontrado. Use: conservative | moderate | aggressive' });
+  }
+  res.json({ profileId: req.params.profileId, package: pkg });
+});
+
+/**
+ * Aplicar perfil às regras globais (substitui `config` de cada `rule_type` do pacote).
+ * POST /api/blindage/profiles/apply
+ * Body: { "profileId": "moderate", "dryRun": false }
+ */
+router.post('/profiles/apply', async (req: AuthRequest, res) => {
+  try {
+    const profileId = req.body?.profileId;
+    if (!profileId || typeof profileId !== 'string') {
+      return res.status(400).json({
+        error: 'Campo profileId obrigatório',
+        hint: 'conservative | moderate | aggressive',
+      });
+    }
+    const dryRun = req.body?.dryRun === true;
+    const result = await applyBlindageGlobalProfile(profileId, { dryRun });
+    res.json({
+      message: dryRun ? 'Simulação: nenhuma alteração gravada' : 'Perfil aplicado às regras globais',
+      ...result,
+    });
+  } catch (error: any) {
+    const msg = error?.message || String(error);
+    if (msg.includes('inválido') || msg.includes('Perfil')) {
+      return res.status(400).json({ error: msg });
+    }
+    console.error('Erro ao aplicar perfil de blindagem:', error);
+    res.status(500).json({ error: 'Erro ao aplicar perfil de blindagem' });
+  }
+});
 
 /**
  * Listar regras de blindagem

@@ -1,6 +1,13 @@
 import { pool } from '../database';
 import axios from 'axios';
 import { addLog } from '../routes/logs';
+import {
+  getBlindageProfilePackage,
+  BLINDAGE_PROFILES_META,
+  isBlindageProfileId,
+} from './blindageProfiles';
+
+export { BLINDAGE_PROFILES_META, isBlindageProfileId, getBlindageProfilePackage } from './blindageProfiles';
 
 const DEFAULT_BLINDAGE_TIMEZONE = 'America/Sao_Paulo';
 
@@ -1250,6 +1257,64 @@ async function logBlindageAction(
   } catch (error) {
     console.error('Erro ao registrar ação de blindagem:', error);
   }
+}
+
+export interface ApplyBlindageProfileResult {
+  profileId: string;
+  dryRun: boolean;
+  updated: Array<{ rule_type: string; id: number }>;
+  missing: string[];
+}
+
+/**
+ * Aplica um perfil global (MassFlow-style) às regras com `instance_id IS NULL`.
+ * Garante linhas com `createGlobalDefaultRules()` antes; substitui o JSON `config` inteiro por tipo.
+ */
+export async function applyBlindageGlobalProfile(
+  profileId: string,
+  options: { dryRun?: boolean } = {}
+): Promise<ApplyBlindageProfileResult> {
+  const dryRun = options.dryRun === true;
+  const pkg = getBlindageProfilePackage(profileId);
+  if (!pkg) {
+    throw new Error(`Perfil inválido: use conservative, moderate ou aggressive`);
+  }
+
+  await createGlobalDefaultRules();
+
+  const updated: Array<{ rule_type: string; id: number }> = [];
+  const missing: string[] = [];
+
+  for (const ruleType of Object.keys(pkg)) {
+    const config = pkg[ruleType];
+    const row = await pool.query(
+      `SELECT id FROM blindage_rules WHERE instance_id IS NULL AND rule_type = $1`,
+      [ruleType]
+    );
+    if (row.rows.length === 0) {
+      missing.push(ruleType);
+      continue;
+    }
+    const id = row.rows[0].id as number;
+    if (!dryRun) {
+      await pool.query(
+        `UPDATE blindage_rules SET config = $1::jsonb, updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
+        [JSON.stringify(config), id]
+      );
+    }
+    updated.push({ rule_type: ruleType, id });
+  }
+
+  const label = BLINDAGE_PROFILES_META.find((m) => m.id === profileId)?.label || profileId;
+  const msg = `[Blindage] Perfil "${label}" (${profileId}) ${dryRun ? 'simulado' : 'aplicado'} em ${updated.length} regra(s) global(is)`;
+  console.log(`✅ ${msg}`);
+  if (missing.length > 0) {
+    console.warn(`   ⚠️ Regras globais ausentes (não atualizadas): ${missing.join(', ')}`);
+    addLog('warning', `[Blindage] Perfil ${profileId}: regras ausentes: ${missing.join(', ')}`);
+  }
+  addLog('info', msg);
+
+  return { profileId, dryRun, updated, missing };
 }
 
 /**
