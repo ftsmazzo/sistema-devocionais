@@ -206,7 +206,7 @@ export default function Layout({ children }: LayoutProps) {
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
               }}>
-                {import.meta.env.VITE_ADMIN_NAME || user?.name || user?.email || 'Administrador'}
+                {import.meta.env.VITE_ADMIN_NAME || import.meta.env.VITE_ADMIN_NOME || user?.name || user?.email || 'Administrador'}
               </div>
               <div style={{ 
                 fontSize: '0.65rem', 
