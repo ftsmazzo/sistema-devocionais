@@ -1,7 +1,7 @@
 import { pool } from '../database';
 import { addLog } from '../routes/logs';
 
-/** Pacing entre envios no mesmo disparo + rotação por volume (Fase B). */
+/** Pacing entre envios no mesmo disparo + rotação por volume (Fase B). UI e painel em Blindagem (Fase C). */
 export interface DispatchPacingRuntime {
   pacingEnabled: boolean;
   messagesPerBatch: number;

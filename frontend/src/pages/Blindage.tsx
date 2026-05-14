@@ -17,6 +17,8 @@ import {
   Sparkles,
   Gauge,
   Zap,
+  Activity,
+  PauseCircle,
 } from 'lucide-react';
 
 interface BlindageRule {
@@ -40,6 +42,39 @@ interface ProfileMeta {
   description: string;
 }
 
+interface BlindageStatRow {
+  action_type: string;
+  count: string | number;
+  last_24h: string | number;
+  last_hour: string | number;
+}
+
+function actionTypeLabel(type: string): string {
+  const map: Record<string, string> = {
+    blindage_applied: 'Envio autorizado',
+    content_blocked: 'Conteúdo bloqueado',
+    limit_reached: 'Limite atingido',
+    health_blocked: 'Pausa (saúde)',
+    time_blocked: 'Fora do horário',
+    number_blocked: 'Número bloqueado',
+    number_check_failed: 'Falha verificação número',
+  };
+  return map[type] || type;
+}
+
+function summarizeActionData(data: unknown): string {
+  if (data == null) return '—';
+  if (typeof data === 'string') {
+    return data.length > 140 ? `${data.slice(0, 137)}…` : data;
+  }
+  try {
+    const s = JSON.stringify(data);
+    return s.length > 140 ? `${s.slice(0, 137)}…` : s;
+  } catch {
+    return '—';
+  }
+}
+
 export default function Blindage() {
   const { instanceId } = useParams<{ instanceId: string }>();
   const [instance, setInstance] = useState<Instance | null>(null);
@@ -51,6 +86,10 @@ export default function Blindage() {
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' | 'warning' } | null>(null);
   const [hasChanges, setHasChanges] = useState(false);
   const [allInstances, setAllInstances] = useState<any[]>([]);
+  const [obsStats, setObsStats] = useState<BlindageStatRow[]>([]);
+  const [obsActions, setObsActions] = useState<any[]>([]);
+  const [obsTotal, setObsTotal] = useState(0);
+  const [obsRefreshing, setObsRefreshing] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -70,6 +109,8 @@ export default function Blindage() {
       if (instanceId) {
         const instanceRes = await api.get(`/instances/${instanceId}`);
         setInstance(instanceRes.data.instance);
+      } else {
+        setInstance(null);
       }
 
       const instancesRes = await api.get('/instances');
@@ -118,11 +159,30 @@ export default function Blindage() {
       }
       
       setRules(loadedRules);
+
+      await loadObservability();
     } catch (error) {
       console.error('Erro ao carregar dados:', error);
       setToast({ message: 'Erro ao carregar configurações de blindagem', type: 'error' });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadObservability = async () => {
+    try {
+      const statsUrl = instanceId ? `/blindage/stats?instanceId=${instanceId}` : '/blindage/stats';
+      const actionsUrl = instanceId
+        ? `/blindage/actions?limit=40&instanceId=${instanceId}`
+        : '/blindage/actions?limit=40';
+      const [st, ac] = await Promise.all([api.get(statsUrl), api.get(actionsUrl)]);
+      setObsStats(Array.isArray(st.data?.stats) ? st.data.stats : []);
+      setObsActions(Array.isArray(ac.data?.actions) ? ac.data.actions : []);
+      setObsTotal(typeof ac.data?.total === 'number' ? ac.data.total : 0);
+    } catch {
+      setObsStats([]);
+      setObsActions([]);
+      setObsTotal(0);
     }
   };
 
@@ -242,13 +302,17 @@ export default function Blindage() {
   const groupedRules = {
     delay: rules.find(r => r.rule_type === 'message_delay'),
     limit: rules.find(r => r.rule_type === 'message_limit'),
-    rotation: rules.find(r => r.rule_type === 'instance_rotation'),
+    rotation:
+      rules.find((r) => r.rule_type === 'instance_rotation' && r.instance_id == null) ||
+      rules.find((r) => r.rule_type === 'instance_rotation'),
     hours: rules.find(r => r.rule_type === 'allowed_hours'),
     health: rules.find(r => r.rule_type === 'health_check'),
     content: rules.find(r => r.rule_type === 'content_validation'),
     number: rules.find(r => r.rule_type === 'number_validation'),
     selection: rules.find(r => r.rule_type === 'instance_selection'),
-    pacing: rules.find(r => r.rule_type === 'dispatch_pacing'),
+    pacing:
+      rules.find((r) => r.rule_type === 'dispatch_pacing' && r.instance_id == null) ||
+      rules.find((r) => r.rule_type === 'dispatch_pacing'),
   };
 
   const allowedHours = Array.isArray(groupedRules.hours?.config.allowed_hours) 
@@ -659,9 +723,129 @@ export default function Blindage() {
                   style={{ width: '100%', accentColor: 'var(--violet)' }}
                 />
               </div>
-              <div style={{ padding: '12px 16px', borderRadius: 12, background: 'rgba(167,139,250,0.05)', border: '1px solid rgba(167,139,250,0.2)', display: 'flex', gap: 10 }}>
+              <div style={{ padding: '12px 16px', borderRadius: 12, background: 'rgba(167,139,250,0.05)', border: '1px solid rgba(167,139,250,0.2)', display: 'flex', gap: 10, marginBottom: 20 }}>
                 <Info size={16} color="var(--violet)" style={{ flexShrink: 0, marginTop: 2 }} />
                 <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-secondary)' }}>O rodízio ajuda a simular comportamento humano e distribui o risco entre as contas.</p>
+              </div>
+              <div style={{ marginBottom: 8 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
+                  <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Trocar instância a cada N envios (sucesso)</span>
+                  <span style={{ fontWeight: 700, color: 'var(--violet)' }}>
+                    {(Number(groupedRules.rotation.config.rotate_every_n_messages) || 0) === 0 ? 'Off' : `${Number(groupedRules.rotation.config.rotate_every_n_messages) || 0} msgs`}
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min={0}
+                  max={200}
+                  step={1}
+                  value={Math.min(200, Math.max(0, Number(groupedRules.rotation.config.rotate_every_n_messages) || 0))}
+                  onChange={(e) =>
+                    updateRuleConfig(groupedRules.rotation!.id, 'rotate_every_n_messages', parseInt(e.target.value, 10))
+                  }
+                  style={{ width: '100%', accentColor: 'var(--violet)' }}
+                />
+                <p style={{ margin: '8px 0 0', fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                  0 = sem troca por volume no mesmo disparo. Valores maiores alternam a instância preferida após N envios com sucesso (Fase B).
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Pacing de disparos (lotes) — Fase B na UI / Fase C */}
+        {groupedRules.pacing && (
+          <div className="glass-card" style={{ padding: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--border)', background: 'rgba(14, 165, 233, 0.06)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div style={{ width: 40, height: 40, borderRadius: 10, background: 'rgba(14, 165, 233, 0.18)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <PauseCircle size={20} color="#0ea5e9" />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 700, color: 'var(--text-primary)' }}>Pacing entre lotes</h3>
+                  <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-muted)' }}>Pausas longas no mesmo disparo (fora da fila global)</p>
+                </div>
+              </div>
+              <label className="toggle">
+                <input
+                  type="checkbox"
+                  checked={groupedRules.pacing.enabled}
+                  onChange={(e) => updateRule(groupedRules.pacing!.id, { enabled: e.target.checked })}
+                />
+                <span className="toggle-slider" />
+              </label>
+            </div>
+            <div style={{ padding: 24, flex: 1 }} className="flex flex-col gap-5">
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
+                  <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Mensagens por lote</span>
+                  <span style={{ fontWeight: 700, color: '#0ea5e9' }}>{groupedRules.pacing.config.messages_per_batch ?? 20}</span>
+                </div>
+                <input
+                  type="range"
+                  min={1}
+                  max={120}
+                  value={Math.min(120, Math.max(1, Number(groupedRules.pacing.config.messages_per_batch) || 20))}
+                  onChange={(e) => updateRuleConfig(groupedRules.pacing!.id, 'messages_per_batch', parseInt(e.target.value, 10))}
+                  style={{ width: '100%', accentColor: '#0ea5e9' }}
+                />
+              </div>
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
+                  <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Pausa entre lotes (min)</span>
+                  <span style={{ fontWeight: 700, color: '#0ea5e9' }}>{groupedRules.pacing.config.pause_between_batches_minutes ?? 15} min</span>
+                </div>
+                <input
+                  type="range"
+                  min={1}
+                  max={180}
+                  value={Math.min(180, Math.max(1, Number(groupedRules.pacing.config.pause_between_batches_minutes) || 15))}
+                  onChange={(e) =>
+                    updateRuleConfig(groupedRules.pacing!.id, 'pause_between_batches_minutes', parseInt(e.target.value, 10))
+                  }
+                  style={{ width: '100%', accentColor: '#0ea5e9' }}
+                />
+              </div>
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
+                  <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Pausa longa a cada N envios (0 = off)</span>
+                  <span style={{ fontWeight: 700, color: '#0ea5e9' }}>
+                    {(Number(groupedRules.pacing.config.long_pause_every_n_messages) || 0) === 0
+                      ? 'Off'
+                      : `${Number(groupedRules.pacing.config.long_pause_every_n_messages)} msgs`}
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min={0}
+                  max={200}
+                  step={1}
+                  value={Math.min(200, Math.max(0, Number(groupedRules.pacing.config.long_pause_every_n_messages) || 0))}
+                  onChange={(e) =>
+                    updateRuleConfig(groupedRules.pacing!.id, 'long_pause_every_n_messages', parseInt(e.target.value, 10))
+                  }
+                  style={{ width: '100%', accentColor: '#0ea5e9' }}
+                />
+              </div>
+              <div style={{ marginBottom: 8 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
+                  <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Duração da pausa longa (min)</span>
+                  <span style={{ fontWeight: 700, color: '#0ea5e9' }}>{groupedRules.pacing.config.long_pause_minutes ?? 60} min</span>
+                </div>
+                <input
+                  type="range"
+                  min={1}
+                  max={240}
+                  value={Math.min(240, Math.max(1, Number(groupedRules.pacing.config.long_pause_minutes) || 60))}
+                  onChange={(e) => updateRuleConfig(groupedRules.pacing!.id, 'long_pause_minutes', parseInt(e.target.value, 10))}
+                  style={{ width: '100%', accentColor: '#0ea5e9' }}
+                />
+              </div>
+              <div style={{ padding: '12px 16px', borderRadius: 12, background: 'rgba(14,165,233,0.06)', border: '1px solid rgba(14,165,233,0.2)', display: 'flex', gap: 10 }}>
+                <Info size={16} color="#0ea5e9" style={{ flexShrink: 0, marginTop: 2 }} />
+                <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                  Essas pausas rodam após cada envio bem-sucedido no disparo e não travam a fila global de outras campanhas.
+                </p>
               </div>
             </div>
           </div>
@@ -732,6 +916,113 @@ export default function Blindage() {
           </div>
         )}
 
+      </div>
+
+      {/* Atividade e estatísticas (Fase C) */}
+      <div className="glass-card" style={{ padding: '22px 24px', marginTop: 32 }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 16, marginBottom: 20 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+            <div style={{
+              width: 48, height: 48, borderRadius: 14,
+              background: 'linear-gradient(135deg, rgba(52,211,153,0.2), rgba(14,165,233,0.12))',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+            }}>
+              <Activity size={24} color="#34d399" />
+            </div>
+            <div>
+              <h2 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 800, color: 'var(--text-primary)', fontFamily: 'Outfit, sans-serif' }}>
+                Atividade da blindagem
+              </h2>
+              <p style={{ margin: '6px 0 0', fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.45 }}>
+                Resumo por tipo de evento e últimas ações registradas no disparo
+                {instanceId ? ' (filtrado por esta instância).' : ' (todas as instâncias).'}
+                {obsTotal > obsActions.length ? ` Total no filtro: ${obsTotal}.` : ''}
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={async () => {
+              setObsRefreshing(true);
+              try {
+                await loadObservability();
+              } finally {
+                setObsRefreshing(false);
+              }
+            }}
+            disabled={obsRefreshing}
+            className="btn-gold"
+            style={{
+              padding: '10px 20px', fontSize: '0.875rem', display: 'flex', alignItems: 'center', gap: 8,
+              opacity: obsRefreshing ? 0.65 : 1, cursor: obsRefreshing ? 'wait' : 'pointer', border: 'none',
+            }}
+          >
+            <RefreshCw size={16} className={obsRefreshing ? 'animate-spin' : ''} />
+            Atualizar painel
+          </button>
+        </div>
+
+        {obsStats.length > 0 && (
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))',
+            gap: 12,
+            marginBottom: 24,
+          }}>
+            {obsStats.map((row) => (
+              <div
+                key={row.action_type}
+                style={{
+                  padding: '14px 16px', borderRadius: 12, border: '1px solid var(--border)',
+                  background: 'var(--bg-elevated)',
+                }}
+              >
+                <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600, marginBottom: 6 }}>
+                  {actionTypeLabel(row.action_type)}
+                </div>
+                <div style={{ fontSize: '1.35rem', fontWeight: 800, color: 'var(--text-primary)' }}>{Number(row.count) || 0}</div>
+                <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', marginTop: 6 }}>
+                  24h: {Number(row.last_24h) || 0} · 1h: {Number(row.last_hour) || 0}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {obsStats.length === 0 && obsActions.length === 0 && (
+          <p style={{ margin: '0 0 16px', fontSize: '0.875rem', color: 'var(--text-muted)' }}>
+            Ainda não há registros de blindagem no período consultado. Eles aparecem quando há bloqueios, limites ou envios autorizados pela camada.
+          </p>
+        )}
+
+        {obsActions.length > 0 && (
+          <div style={{ overflowX: 'auto', borderRadius: 12, border: '1px solid var(--border)' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
+              <thead>
+                <tr style={{ background: 'var(--bg-elevated)', textAlign: 'left', color: 'var(--text-muted)' }}>
+                  <th style={{ padding: '10px 14px', fontWeight: 600 }}>Quando</th>
+                  <th style={{ padding: '10px 14px', fontWeight: 600 }}>Tipo</th>
+                  <th style={{ padding: '10px 14px', fontWeight: 600 }}>Instância</th>
+                  <th style={{ padding: '10px 14px', fontWeight: 600 }}>Detalhe</th>
+                </tr>
+              </thead>
+              <tbody>
+                {obsActions.map((a) => (
+                  <tr key={a.id} style={{ borderTop: '1px solid var(--border)', color: 'var(--text-secondary)' }}>
+                    <td style={{ padding: '10px 14px', whiteSpace: 'nowrap', color: 'var(--text-primary)' }}>
+                      {a.created_at ? new Date(a.created_at).toLocaleString('pt-BR') : '—'}
+                    </td>
+                    <td style={{ padding: '10px 14px' }}>{actionTypeLabel(a.action_type)}</td>
+                    <td style={{ padding: '10px 14px' }}>{a.instance_name || (a.instance_id != null ? `#${a.instance_id}` : '—')}</td>
+                    <td style={{ padding: '10px 14px', maxWidth: 360 }} title={summarizeActionData(a.action_data)}>
+                      {summarizeActionData(a.action_data)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {/* Info Banner */}

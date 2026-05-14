@@ -55,6 +55,8 @@ export const BLINDAGE_CANONICAL_CONFIGS: Record<string, Record<string, any>> = {
     enabled: true,
     min_delay_between_instances: 3,
     round_robin: true,
+    /** A cada N envios com sucesso no mesmo disparo, prefere a próxima instância (0 = desligado). */
+    rotate_every_n_messages: 50,
   },
   allowed_hours: {
     allowed_hours: [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20],

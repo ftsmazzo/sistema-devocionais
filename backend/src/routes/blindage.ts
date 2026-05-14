@@ -350,8 +350,8 @@ router.post('/rules/default/:instanceId', async (req: AuthRequest, res) => {
 });
 
 /**
- * Listar ações de blindagem
- * GET /api/blindage/actions?instanceId=123&limit=50
+ * Listar ações de blindagem (Fase C — observabilidade; `total` = total de linhas no filtro, não só da página).
+ * GET /api/blindage/actions?instanceId=123&limit=50&offset=0
  */
 router.get('/actions', async (req: AuthRequest, res) => {
   try {
@@ -362,7 +362,8 @@ router.get('/actions', async (req: AuthRequest, res) => {
         ba.*,
         br.rule_name,
         br.rule_type,
-        i.name as instance_name
+        i.name as instance_name,
+        COUNT(*) OVER()::int AS _filter_total
       FROM blindage_actions ba
       LEFT JOIN blindage_rules br ON ba.rule_id = br.id
       LEFT JOIN instances i ON ba.instance_id = i.id
@@ -378,13 +379,20 @@ router.get('/actions', async (req: AuthRequest, res) => {
     }
 
     query += ` ORDER BY ba.created_at DESC LIMIT $${paramCount} OFFSET $${paramCount + 1}`;
-    params.push(parseInt(limit as string), parseInt(offset as string));
+    params.push(parseInt(limit as string, 10) || 50, parseInt(offset as string, 10) || 0);
 
     const result = await pool.query(query, params);
 
+    const total =
+      result.rows.length > 0 ? Number((result.rows[0] as { _filter_total?: number })._filter_total) || 0 : 0;
+    const actions = result.rows.map((row: Record<string, unknown>) => {
+      const { _filter_total: _t, ...rest } = row;
+      return rest;
+    });
+
     res.json({
-      actions: result.rows,
-      total: result.rows.length,
+      actions,
+      total,
     });
   } catch (error) {
     console.error('Erro ao listar ações de blindagem:', error);
