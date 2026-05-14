@@ -629,14 +629,9 @@ router.put('/ai-config', authenticateToken, async (req: AuthRequest, res) => {
       `SELECT id FROM devocional_ai_config ORDER BY id DESC LIMIT 1`
     );
 
+    const updateKey = gemini_api_key && gemini_api_key !== '********';
+    
     let result;
-    const queryParams = [
-      central_theme, journey_description, preaching_tone,
-      bible_version, signature, 
-      gemini_api_key === '********' ? undefined : gemini_api_key,
-      model_name, character_limit, enabled
-    ];
-
     if (existing.rows.length === 0) {
       result = await pool.query(
         `INSERT INTO devocional_ai_config (
@@ -645,28 +640,45 @@ router.put('/ai-config', authenticateToken, async (req: AuthRequest, res) => {
           model_name, character_limit, enabled
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
         RETURNING *`,
-        queryParams
+        [
+          central_theme, journey_description, preaching_tone,
+          bible_version, signature, gemini_api_key,
+          model_name, character_limit, enabled !== false
+        ]
       );
     } else {
-      // Só atualiza a API key se ela foi enviada e não é o placeholder
-      const updateKey = gemini_api_key && gemini_api_key !== '********';
+      const id = existing.rows[0].id;
+      const sets = [
+        'central_theme = COALESCE($1, central_theme)',
+        'journey_description = COALESCE($2, journey_description)',
+        'preaching_tone = COALESCE($3, preaching_tone)',
+        'bible_version = COALESCE($4, bible_version)',
+        'signature = COALESCE($5, signature)',
+        'model_name = COALESCE($6, model_name)',
+        'character_limit = COALESCE($7, character_limit)',
+        'enabled = COALESCE($8, enabled)',
+        'updated_at = CURRENT_TIMESTAMP'
+      ];
+      const params = [
+        central_theme, journey_description, preaching_tone,
+        bible_version, signature, model_name, character_limit, enabled
+      ];
+
+      if (updateKey) {
+        sets.push(`gemini_api_key = $${params.length + 1}`);
+        params.push(gemini_api_key);
+      }
+
+      params.push(id);
       
-      result = await pool.query(
-        `UPDATE devocional_ai_config 
-         SET central_theme = COALESCE($1, central_theme),
-             journey_description = COALESCE($2, journey_description),
-             preaching_tone = COALESCE($3, preaching_tone),
-             bible_version = COALESCE($4, bible_version),
-             signature = COALESCE($5, signature),
-             ${updateKey ? 'gemini_api_key = $6,' : ''}
-             model_name = COALESCE($7, model_name),
-             character_limit = COALESCE($8, character_limit),
-             enabled = COALESCE($9, enabled),
-             updated_at = CURRENT_TIMESTAMP
-         WHERE id = $10
-         RETURNING *`,
-        [...queryParams, existing.rows[0].id]
-      );
+      const query = `
+        UPDATE devocional_ai_config 
+        SET ${sets.join(', ')}
+        WHERE id = $${params.length}
+        RETURNING *
+      `;
+      
+      result = await pool.query(query, params);
     }
 
     res.json({ 
