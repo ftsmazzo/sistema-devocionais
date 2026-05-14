@@ -189,6 +189,12 @@ export async function initializeDatabase() {
       CREATE INDEX IF NOT EXISTS idx_messages_contact ON messages(contact_id);
       CREATE INDEX IF NOT EXISTS idx_messages_devocional ON messages(devocional_id);
       CREATE INDEX IF NOT EXISTS idx_messages_category ON messages(message_category);
+      CREATE INDEX IF NOT EXISTS idx_messages_outbound_type_ts ON messages (
+        instance_id,
+        (COALESCE(NULLIF(TRIM(dispatch_type), ''), NULLIF(TRIM(message_type), ''), 'avulsa')),
+        "timestamp" DESC
+      )
+      WHERE from_me = true;
     `);
 
     // Criar tabela de métricas
@@ -393,6 +399,30 @@ export async function initializeDatabase() {
       CREATE INDEX IF NOT EXISTS idx_blindage_actions_rule ON blindage_actions(rule_id);
       CREATE INDEX IF NOT EXISTS idx_blindage_actions_type ON blindage_actions(action_type);
       CREATE INDEX IF NOT EXISTS idx_blindage_actions_created_at ON blindage_actions(created_at);
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS blindage_recipient_send_log (
+        recipient_key VARCHAR(32) PRIMARY KEY,
+        last_sent_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_blindage_recipient_sent_at ON blindage_recipient_send_log(last_sent_at DESC)
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS blindage_sent_content_recent (
+        id BIGSERIAL PRIMARY KEY,
+        scope VARCHAR(48) NOT NULL,
+        body_hash CHAR(64) NOT NULL,
+        normalized_preview VARCHAR(2000) NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_blindage_sent_recent_scope_created
+      ON blindage_sent_content_recent(scope, created_at DESC)
     `);
 
     // Criar tabela de cache de validação de números

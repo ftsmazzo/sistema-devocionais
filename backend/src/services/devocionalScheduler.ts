@@ -1,6 +1,6 @@
 import { pool } from '../database';
 import axios from 'axios';
-import { applyBlindage } from './blindage';
+import { applyBlindage, recordBlindageSuccessfulSend } from './blindage';
 import { withGlobalOutboundGate } from './globalOutboundGate';
 import {
   loadDispatchPacingRuntime,
@@ -522,6 +522,11 @@ export async function executeDevocionalDispatch(): Promise<void> {
              WHERE id = $1`,
             [instance.id]
           );
+          await recordBlindageSuccessfulSend({
+            to: contact.phone_number,
+            message: personalizedMessage,
+            messageType: 'devocional',
+          });
         });
 
         if (aborted) {

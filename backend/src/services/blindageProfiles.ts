@@ -61,6 +61,8 @@ const PACKAGES: Record<BlindageProfileId, BlindageProfilePackage> = {
       max_per_day: 80,
       reset_hour: 0,
       reset_day: 1,
+      min_minutes_between_same_recipient: 120,
+      limits_by_message_type: {},
     },
     allowed_hours: {
       allowed_hours: hoursRange(9, 18),
@@ -85,7 +87,9 @@ const PACKAGES: Record<BlindageProfileId, BlindageProfilePackage> = {
     content_validation: {
       max_length: 4096,
       blocked_words: [...OPT_OUT_WORDS],
-      repetition_alert_percent: 70,
+      repetition_enabled: false,
+      repetition_window: 20,
+      repetition_alert_percent: 85,
     },
     health_check: {
       pause_if_degraded: true,
@@ -121,6 +125,11 @@ const PACKAGES: Record<BlindageProfileId, BlindageProfilePackage> = {
       max_per_day: 200,
       reset_hour: 0,
       reset_day: 1,
+      min_minutes_between_same_recipient: 45,
+      limits_by_message_type: {
+        marketing: { max_per_hour: 20, max_per_day: 180 },
+        devocional: { max_per_hour: 12, max_per_day: 120 },
+      },
     },
     allowed_hours: {
       allowed_hours: hoursRange(8, 20),
@@ -145,7 +154,9 @@ const PACKAGES: Record<BlindageProfileId, BlindageProfilePackage> = {
     content_validation: {
       max_length: 4096,
       blocked_words: [...OPT_OUT_WORDS],
-      repetition_alert_percent: 70,
+      repetition_enabled: false,
+      repetition_window: 20,
+      repetition_alert_percent: 85,
     },
     health_check: {
       pause_if_degraded: true,
@@ -181,6 +192,8 @@ const PACKAGES: Record<BlindageProfileId, BlindageProfilePackage> = {
       max_per_day: 400,
       reset_hour: 0,
       reset_day: 1,
+      min_minutes_between_same_recipient: 15,
+      limits_by_message_type: {},
     },
     allowed_hours: {
       allowed_hours: hoursRange(0, 23),
@@ -205,7 +218,9 @@ const PACKAGES: Record<BlindageProfileId, BlindageProfilePackage> = {
     content_validation: {
       max_length: 4096,
       blocked_words: [...OPT_OUT_WORDS],
-      repetition_alert_percent: 70,
+      repetition_enabled: false,
+      repetition_window: 20,
+      repetition_alert_percent: 85,
     },
     health_check: {
       pause_if_degraded: true,

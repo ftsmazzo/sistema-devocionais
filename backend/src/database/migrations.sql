@@ -189,6 +189,22 @@ CREATE INDEX IF NOT EXISTS idx_blindage_actions_rule ON blindage_actions(rule_id
 CREATE INDEX IF NOT EXISTS idx_blindage_actions_type ON blindage_actions(action_type);
 CREATE INDEX IF NOT EXISTS idx_blindage_actions_created_at ON blindage_actions(created_at);
 
+-- Blindagem: cooldown por destinatário + histórico anti-repetição (texto)
+CREATE TABLE IF NOT EXISTS blindage_recipient_send_log (
+  recipient_key VARCHAR(32) PRIMARY KEY,
+  last_sent_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_blindage_recipient_sent_at ON blindage_recipient_send_log(last_sent_at DESC);
+
+CREATE TABLE IF NOT EXISTS blindage_sent_content_recent (
+  id BIGSERIAL PRIMARY KEY,
+  scope VARCHAR(48) NOT NULL,
+  body_hash CHAR(64) NOT NULL,
+  normalized_preview VARCHAR(2000) NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_blindage_sent_recent_scope_created ON blindage_sent_content_recent(scope, created_at DESC);
+
 -- ============================================
 -- 9. MELHORAR TABELA WEBHOOK_EVENTS
 -- ============================================

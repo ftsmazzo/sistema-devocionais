@@ -20,6 +20,7 @@ import {
   Activity,
   PauseCircle,
   FileDown,
+  MessageSquare,
 } from 'lucide-react';
 
 interface BlindageRule {
@@ -59,6 +60,8 @@ function actionTypeLabel(type: string): string {
     time_blocked: 'Fora do horário',
     number_blocked: 'Número bloqueado',
     number_check_failed: 'Falha verificação número',
+    recipient_cooldown_blocked: 'Cooldown por número',
+    repetition_blocked: 'Texto repetitivo',
   };
   return map[type] || type;
 }
@@ -74,6 +77,8 @@ const BLINDAGE_ACTION_FILTER_IDS = [
   'time_blocked',
   'number_blocked',
   'number_check_failed',
+  'recipient_cooldown_blocked',
+  'repetition_blocked',
 ] as const;
 
 function summarizeActionData(data: unknown): string {
@@ -399,7 +404,9 @@ export default function Blindage() {
       rules.find((r) => r.rule_type === 'instance_rotation'),
     hours: rules.find(r => r.rule_type === 'allowed_hours'),
     health: rules.find(r => r.rule_type === 'health_check'),
-    content: rules.find(r => r.rule_type === 'content_validation'),
+    content:
+      rules.find((r) => r.rule_type === 'content_validation' && r.instance_id == null) ||
+      rules.find((r) => r.rule_type === 'content_validation'),
     number: rules.find(r => r.rule_type === 'number_validation'),
     selection: rules.find(r => r.rule_type === 'instance_selection'),
     pacing:
@@ -665,6 +672,160 @@ export default function Blindage() {
                   onChange={(e) => updateRuleConfig(groupedRules.limit!.id, 'max_per_day', parseInt(e.target.value))}
                   style={{ width: '100%', accentColor: 'var(--emerald)' }}
                 />
+              </div>
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
+                  <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Intervalo mínimo ao mesmo número</span>
+                  <span style={{ fontWeight: 700, color: 'var(--emerald)' }}>
+                    {(Number(groupedRules.limit.config.min_minutes_between_same_recipient) || 0) === 0
+                      ? 'Off'
+                      : `${Number(groupedRules.limit.config.min_minutes_between_same_recipient)} min`}
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min={0}
+                  max={360}
+                  step={5}
+                  value={Math.min(360, Math.max(0, Number(groupedRules.limit.config.min_minutes_between_same_recipient) || 0))}
+                  onChange={(e) =>
+                    updateRuleConfig(groupedRules.limit!.id, 'min_minutes_between_same_recipient', parseInt(e.target.value, 10))
+                  }
+                  style={{ width: '100%', accentColor: 'var(--emerald)' }}
+                />
+                <p style={{ margin: '8px 0 0', fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                  Evita reenviar ao mesmo destinatário antes do intervalo (todas as instâncias).
+                </p>
+              </div>
+              <div style={{ paddingTop: 12, borderTop: '1px solid var(--border)' }}>
+                <p style={{ margin: '0 0 10px', fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                  Overrides por tipo (0 = usar limite global da hora/dia)
+                </p>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                  <label style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', display: 'block' }}>
+                    Máx/hora marketing
+                    <input
+                      type="number"
+                      min={0}
+                      max={500}
+                      value={Number((groupedRules.limit.config.limits_by_message_type as Record<string, { max_per_hour?: number }> | undefined)?.marketing?.max_per_hour) || ''}
+                      placeholder="0"
+                      onChange={(e) => {
+                        const v = parseInt(e.target.value, 10);
+                        const raw = (groupedRules.limit!.config.limits_by_message_type || {}) as Record<string, { max_per_hour?: number; max_per_day?: number }>;
+                        const next: Record<string, { max_per_hour?: number; max_per_day?: number }> = { ...raw };
+                        if (!e.target.value || !Number.isFinite(v) || v <= 0) {
+                          if (next.marketing) {
+                            const { max_per_hour: _mh, ...rest } = next.marketing;
+                            next.marketing = Object.keys(rest).length ? { ...rest } : {};
+                            if (Object.keys(next.marketing).length === 0) delete next.marketing;
+                          }
+                        } else {
+                          next.marketing = { ...next.marketing, max_per_hour: v };
+                        }
+                        updateRuleConfig(groupedRules.limit!.id, 'limits_by_message_type', next);
+                      }}
+                      style={{ width: '100%', marginTop: 6, padding: '8px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-primary)' }}
+                    />
+                  </label>
+                  <label style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', display: 'block' }}>
+                    Máx/hora devocional
+                    <input
+                      type="number"
+                      min={0}
+                      max={500}
+                      value={Number((groupedRules.limit.config.limits_by_message_type as Record<string, { max_per_hour?: number }> | undefined)?.devocional?.max_per_hour) || ''}
+                      placeholder="0"
+                      onChange={(e) => {
+                        const v = parseInt(e.target.value, 10);
+                        const raw = (groupedRules.limit!.config.limits_by_message_type || {}) as Record<string, { max_per_hour?: number; max_per_day?: number }>;
+                        const next: Record<string, { max_per_hour?: number; max_per_day?: number }> = { ...raw };
+                        if (!e.target.value || !Number.isFinite(v) || v <= 0) {
+                          if (next.devocional) {
+                            const { max_per_hour: _mh, ...rest } = next.devocional;
+                            next.devocional = Object.keys(rest).length ? { ...rest } : {};
+                            if (Object.keys(next.devocional).length === 0) delete next.devocional;
+                          }
+                        } else {
+                          next.devocional = { ...next.devocional, max_per_hour: v };
+                        }
+                        updateRuleConfig(groupedRules.limit!.id, 'limits_by_message_type', next);
+                      }}
+                      style={{ width: '100%', marginTop: 6, padding: '8px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-primary)' }}
+                    />
+                  </label>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Conteúdo & anti-repetição */}
+        {groupedRules.content && (
+          <div className="glass-card" style={{ padding: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--border)', background: 'rgba(52, 211, 153, 0.05)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div style={{ width: 40, height: 40, borderRadius: 10, background: 'rgba(52, 211, 153, 0.18)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <MessageSquare size={20} color="#34d399" />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 700, color: 'var(--text-primary)' }}>Conteúdo</h3>
+                  <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-muted)' }}>Anti-repetição por tipo de envio</p>
+                </div>
+              </div>
+              <label className="toggle">
+                <input
+                  type="checkbox"
+                  checked={groupedRules.content.enabled}
+                  onChange={(e) => updateRule(groupedRules.content!.id, { enabled: e.target.checked })}
+                />
+                <span className="toggle-slider" />
+              </label>
+            </div>
+            <div style={{ padding: 24, flex: 1 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', borderRadius: 12, background: 'var(--bg-elevated)', marginBottom: 16 }}>
+                <span style={{ fontSize: '0.85rem', color: 'var(--text-primary)' }}>Bloquear texto repetido / muito parecido</span>
+                <label className="toggle">
+                  <input
+                    type="checkbox"
+                    checked={groupedRules.content.config.repetition_enabled === true}
+                    onChange={(e) => updateRuleConfig(groupedRules.content!.id, 'repetition_enabled', e.target.checked)}
+                  />
+                  <span className="toggle-slider" />
+                </label>
+              </div>
+              <div style={{ marginBottom: 16, opacity: groupedRules.content.config.repetition_enabled === true ? 1 : 0.45 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
+                  <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Janela (últimas N mensagens / tipo)</span>
+                  <span style={{ fontWeight: 700, color: '#34d399' }}>{groupedRules.content.config.repetition_window || 20}</span>
+                </div>
+                <input
+                  type="range"
+                  min={5}
+                  max={50}
+                  value={Math.min(50, Math.max(5, Number(groupedRules.content.config.repetition_window) || 20))}
+                  onChange={(e) => updateRuleConfig(groupedRules.content!.id, 'repetition_window', parseInt(e.target.value, 10))}
+                  disabled={groupedRules.content.config.repetition_enabled !== true}
+                  style={{ width: '100%', accentColor: '#34d399' }}
+                />
+              </div>
+              <div style={{ marginBottom: 8, opacity: groupedRules.content.config.repetition_enabled === true ? 1 : 0.45 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
+                  <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Similaridade mínima para bloquear (%)</span>
+                  <span style={{ fontWeight: 700, color: '#34d399' }}>{groupedRules.content.config.repetition_alert_percent ?? 85}%</span>
+                </div>
+                <input
+                  type="range"
+                  min={50}
+                  max={100}
+                  value={Math.min(100, Math.max(50, Number(groupedRules.content.config.repetition_alert_percent) || 85))}
+                  onChange={(e) => updateRuleConfig(groupedRules.content!.id, 'repetition_alert_percent', parseInt(e.target.value, 10))}
+                  disabled={groupedRules.content.config.repetition_enabled !== true}
+                  style={{ width: '100%', accentColor: '#34d399' }}
+                />
+                <p style={{ margin: '8px 0 0', fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                  100% = só bloqueia cópia exata. Valores menores também bloqueiam textos muito parecidos (marketing).
+                </p>
               </div>
             </div>
           </div>

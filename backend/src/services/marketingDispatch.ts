@@ -1,6 +1,6 @@
 import { pool } from '../database';
 import axios from 'axios';
-import { applyBlindage } from './blindage';
+import { applyBlindage, recordBlindageSuccessfulSend } from './blindage';
 import { withGlobalOutboundGate } from './globalOutboundGate';
 import {
   loadDispatchPacingRuntime,
@@ -354,6 +354,11 @@ export async function processMarketingDispatch(params: MarketingDispatchParams):
              WHERE id = $1`,
             [instance.id]
           );
+          await recordBlindageSuccessfulSend({
+            to: contact.phone_number,
+            message: dispatch.message_template,
+            messageType: 'marketing',
+          });
         });
 
         if (abortContact) {

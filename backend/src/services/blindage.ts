@@ -1,5 +1,6 @@
 import { pool } from '../database';
 import axios from 'axios';
+import { createHash } from 'crypto';
 import { addLog } from '../routes/logs';
 import {
   getBlindageProfilePackage,
@@ -50,6 +51,10 @@ export const BLINDAGE_CANONICAL_CONFIGS: Record<string, Record<string, any>> = {
     max_per_day: 400,
     reset_hour: 0,
     reset_day: 1,
+    /** Intervalo mínimo entre envios ao mesmo destinatário (minutos). 0 = desligado. */
+    min_minutes_between_same_recipient: 0,
+    /** Limites opcionais por tipo lógico de envio (chaves: devocional, marketing, avulsa, …). */
+    limits_by_message_type: {} as Record<string, { max_per_hour?: number; max_per_day?: number }>,
   },
   instance_rotation: {
     enabled: true,
@@ -71,6 +76,11 @@ export const BLINDAGE_CANONICAL_CONFIGS: Record<string, Record<string, any>> = {
   content_validation: {
     max_length: 4096,
     blocked_words: [],
+    /** Anti-repetição de texto (usa histórico recente por tipo de envio). Desligado por padrão. */
+    repetition_enabled: false,
+    repetition_window: 20,
+    /** 100 = apenas duplicata exata (hash); menor que 100 também compara similaridade de vocabulário (Jaccard). */
+    repetition_alert_percent: 85,
   },
   number_validation: {
     validate_format: true,
@@ -365,6 +375,7 @@ export async function applyBlindage(messageData: {
   messageType?: string;
 }): Promise<BlindageResult> {
   try {
+    const messageCategory = (messageData.messageType?.trim() || 'avulsa').slice(0, 48) || 'avulsa';
     const rulesPass1 = await getActiveRules(messageData.instanceId ?? undefined);
 
     const numberValidation = await validatePhoneNumber(
@@ -376,10 +387,20 @@ export async function applyBlindage(messageData: {
       return numberValidation;
     }
 
+    const cooldownCheck = await checkRecipientCooldown(
+      messageData.to,
+      rulesPass1,
+      messageData.instanceId ?? null
+    );
+    if (!cooldownCheck.canSend) {
+      return cooldownCheck;
+    }
+
     const contentValidation = await validateContent(
       messageData.message,
       rulesPass1,
-      messageData.instanceId ?? null
+      messageData.instanceId ?? null,
+      messageCategory
     );
     if (!contentValidation.canSend) {
       return contentValidation;
@@ -398,7 +419,7 @@ export async function applyBlindage(messageData: {
       return healthCheck;
     }
 
-    const limitCheck = await checkLimits(selectedId, rules);
+    const limitCheck = await checkLimits(selectedId, rules, messageCategory);
     if (!limitCheck.canSend) {
       return limitCheck;
     }
@@ -710,13 +731,99 @@ async function validatePhoneNumber(
   return { canSend: true };
 }
 
+function normalizeBodyForFingerprint(body: string): string {
+  return String(body || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
+}
+
+function sha256HexUtf8(text: string): string {
+  return createHash('sha256').update(text, 'utf8').digest('hex');
+}
+
+function wordTokenSet(text: string): Set<string> {
+  const parts = text
+    .toLowerCase()
+    .split(/[^a-z0-9áàâãéêíóôõúç]+/iu)
+    .filter(Boolean);
+  return new Set(parts);
+}
+
+function jaccardSimilarityWords(a: Set<string>, b: Set<string>): number {
+  if (a.size === 0 && b.size === 0) return 1;
+  let inter = 0;
+  for (const w of a) {
+    if (b.has(w)) inter++;
+  }
+  const u = a.size + b.size - inter;
+  return u === 0 ? 0 : inter / u;
+}
+
+/** Chave estável para cooldown por destinatário (apenas dígitos, até 15 finais). */
+export function recipientCooldownKey(raw: string): string {
+  const d = String(raw || '').replace(/\D/g, '');
+  if (!d) return '';
+  return d.length > 15 ? d.slice(-15) : d;
+}
+
+async function checkRecipientCooldown(
+  rawTo: string,
+  rules: BlindageRule[],
+  logInstanceId?: number | null
+): Promise<BlindageResult> {
+  const limitRule = rules.find((r) => r.rule_type === 'message_limit');
+  if (!limitRule || !limitRule.enabled) {
+    return { canSend: true };
+  }
+  const cfg = parseRuleConfig(limitRule.config);
+  const minM = Number(cfg.min_minutes_between_same_recipient);
+  if (!Number.isFinite(minM) || minM <= 0) {
+    return { canSend: true };
+  }
+
+  const key = recipientCooldownKey(rawTo);
+  if (!key || key.length < 8) {
+    return { canSend: true };
+  }
+
+  const row = await pool.query(
+    `SELECT last_sent_at FROM blindage_recipient_send_log WHERE recipient_key = $1`,
+    [key]
+  );
+  if (!row.rows[0]?.last_sent_at) {
+    return { canSend: true };
+  }
+  const last = new Date(row.rows[0].last_sent_at).getTime();
+  const elapsedMin = (Date.now() - last) / 60000;
+  if (elapsedMin >= minM) {
+    return { canSend: true };
+  }
+
+  const waitMin = Math.max(0, minM - elapsedMin);
+  await logBlindageAction(logInstanceId ?? null, {
+    action_type: 'recipient_cooldown_blocked',
+    recipient_key: key,
+    min_minutes: minM,
+    elapsed_minutes: Math.round(elapsedMin * 100) / 100,
+    wait_minutes: Math.round(waitMin * 100) / 100,
+  }, limitRule.id);
+
+  return {
+    canSend: false,
+    reason: `Aguarde ~${Math.ceil(waitMin)} min para reenviar ao mesmo número (cooldown de ${minM} min).`,
+    blockedBy: 'message_limit',
+  };
+}
+
 /**
  * Valida conteúdo da mensagem
  */
 async function validateContent(
   message: string,
   rules: BlindageRule[],
-  logContextInstanceId?: number | null
+  logContextInstanceId?: number | null,
+  messageCategory: string = 'avulsa'
 ): Promise<BlindageResult> {
   const contentRule = rules.find((r) => r.rule_type === 'content_validation');
   if (!contentRule || !contentRule.enabled) {
@@ -758,6 +865,60 @@ async function validateContent(
           reason: `Mensagem contém palavra bloqueada: ${word}`,
           blockedBy: 'content_validation',
         };
+      }
+    }
+  }
+
+  if (config.repetition_enabled === true) {
+    const scope = String(messageCategory || 'avulsa').trim().slice(0, 48) || 'avulsa';
+    const window = Math.min(80, Math.max(5, Number(config.repetition_window) || 20));
+    let pct = Number(config.repetition_alert_percent);
+    if (!Number.isFinite(pct)) pct = 85;
+    pct = Math.min(100, Math.max(50, pct));
+
+    const normalized = normalizeBodyForFingerprint(message);
+    if (normalized.length >= 8) {
+      const newHash = sha256HexUtf8(normalized);
+      const recent = await pool.query(
+        `SELECT body_hash, normalized_preview
+         FROM blindage_sent_content_recent
+         WHERE scope = $1
+         ORDER BY created_at DESC
+         LIMIT $2`,
+        [scope, window]
+      );
+
+      const newTokens = wordTokenSet(normalized);
+      for (const row of recent.rows) {
+        if (row.body_hash === newHash) {
+          await logBlindageAction(logInstanceId, {
+            action_type: 'repetition_blocked',
+            reason: 'exact_duplicate',
+            scope,
+          }, contentRule.id);
+          return {
+            canSend: false,
+            reason: 'Mensagem idêntica a um envio recente deste tipo (anti-repetição).',
+            blockedBy: 'content_validation',
+          };
+        }
+        if (pct < 100 && row.normalized_preview) {
+          const sim = jaccardSimilarityWords(newTokens, wordTokenSet(String(row.normalized_preview)));
+          if (sim >= pct / 100) {
+            await logBlindageAction(logInstanceId, {
+              action_type: 'repetition_blocked',
+              reason: 'similar_content',
+              scope,
+              similarity: Math.round(sim * 1000) / 1000,
+              threshold: pct / 100,
+            }, contentRule.id);
+            return {
+              canSend: false,
+              reason: `Conteúdo muito parecido com envio recente (similaridade ${Math.round(sim * 100)}%, mínimo exigido ${pct}%).`,
+              blockedBy: 'content_validation',
+            };
+          }
+        }
       }
     }
   }
@@ -981,9 +1142,34 @@ async function checkInstanceHealth(
 }
 
 /**
- * Verifica limites de envio
+ * Verifica limites de envio (por instância e tipo lógico: devocional, marketing, avulsa, …).
+ * Conta em `messages` para alinhar com `dispatch_type` / `message_type`.
  */
-async function checkLimits(instanceId: number, rules: BlindageRule[]): Promise<BlindageResult> {
+function resolveLimitsForMessageType(
+  config: Record<string, any>,
+  messageCategory: string
+): { maxHour: number | null; maxDay: number | null } {
+  let maxHour = Number(config.max_per_hour);
+  let maxDay = Number(config.max_per_day);
+  const by = config.limits_by_message_type;
+  if (by && typeof by === 'object' && by[messageCategory] && typeof by[messageCategory] === 'object') {
+    const sub = by[messageCategory] as Record<string, unknown>;
+    const sh = Number(sub.max_per_hour);
+    const sd = Number(sub.max_per_day);
+    if (Number.isFinite(sh) && sh > 0) maxHour = sh;
+    if (Number.isFinite(sd) && sd > 0) maxDay = sd;
+  }
+  return {
+    maxHour: Number.isFinite(maxHour) && maxHour > 0 ? maxHour : null,
+    maxDay: Number.isFinite(maxDay) && maxDay > 0 ? maxDay : null,
+  };
+}
+
+async function checkLimits(
+  instanceId: number,
+  rules: BlindageRule[],
+  messageCategory: string = 'avulsa'
+): Promise<BlindageResult> {
   const limitRule = rules.find((r) => r.rule_type === 'message_limit');
   if (!limitRule || !limitRule.enabled) {
     return { canSend: true };
@@ -994,57 +1180,63 @@ async function checkLimits(instanceId: number, rules: BlindageRule[]): Promise<B
   const now = new Date();
   const currentHour = getCalendarHourInTimezone(now, tz);
   const currentDate = formatCalendarDateInTimezone(now, tz);
+  const cat = String(messageCategory || 'avulsa').trim().slice(0, 48) || 'avulsa';
+  const { maxHour, maxDay } = resolveLimitsForMessageType(config, cat);
 
-  // Verificar limite por hora
-  if (config.max_per_hour) {
-    const hourMetrics = await pool.query(
-      `SELECT messages_sent 
-       FROM message_metrics 
-       WHERE instance_id = $1 
-         AND metric_date = $2 
-         AND hour = $3`,
-      [instanceId, currentDate, currentHour]
+  if (maxHour != null) {
+    const hourCount = await pool.query(
+      `SELECT COUNT(*)::int AS c
+       FROM messages m
+       WHERE m.instance_id = $1
+         AND m.from_me = true
+         AND (m.timestamp AT TIME ZONE $2)::date = $3::date
+         AND EXTRACT(HOUR FROM m.timestamp AT TIME ZONE $2)::int = $4
+         AND COALESCE(NULLIF(TRIM(m.dispatch_type), ''), NULLIF(TRIM(m.message_type), ''), 'avulsa') = $5`,
+      [instanceId, tz, currentDate, currentHour, cat]
     );
 
-    const sentThisHour = hourMetrics.rows[0]?.messages_sent || 0;
-    if (sentThisHour >= config.max_per_hour) {
+    const sentThisHour = hourCount.rows[0]?.c ?? 0;
+    if (sentThisHour >= maxHour) {
       await logBlindageAction(instanceId, {
         action_type: 'limit_reached',
         limit_type: 'hourly',
+        message_category: cat,
         current: sentThisHour,
-        max: config.max_per_hour,
+        max: maxHour,
       }, limitRule.id);
 
       return {
         canSend: false,
-        reason: `Limite horário atingido: ${sentThisHour}/${config.max_per_hour} mensagens`,
+        reason: `Limite horário atingido (${cat}): ${sentThisHour}/${maxHour} mensagens`,
         blockedBy: 'message_limit',
       };
     }
   }
 
-  // Verificar limite por dia
-  if (config.max_per_day) {
-    const dayMetrics = await pool.query(
-      `SELECT SUM(messages_sent) as total 
-       FROM message_metrics 
-       WHERE instance_id = $1 
-         AND metric_date = $2`,
-      [instanceId, currentDate]
+  if (maxDay != null) {
+    const dayCount = await pool.query(
+      `SELECT COUNT(*)::int AS c
+       FROM messages m
+       WHERE m.instance_id = $1
+         AND m.from_me = true
+         AND (m.timestamp AT TIME ZONE $2)::date = $3::date
+         AND COALESCE(NULLIF(TRIM(m.dispatch_type), ''), NULLIF(TRIM(m.message_type), ''), 'avulsa') = $4`,
+      [instanceId, tz, currentDate, cat]
     );
 
-    const sentToday = parseInt(dayMetrics.rows[0]?.total || '0');
-    if (sentToday >= config.max_per_day) {
+    const sentToday = dayCount.rows[0]?.c ?? 0;
+    if (sentToday >= maxDay) {
       await logBlindageAction(instanceId, {
         action_type: 'limit_reached',
         limit_type: 'daily',
+        message_category: cat,
         current: sentToday,
-        max: config.max_per_day,
+        max: maxDay,
       }, limitRule.id);
 
       return {
         canSend: false,
-        reason: `Limite diário atingido: ${sentToday}/${config.max_per_day} mensagens`,
+        reason: `Limite diário atingido (${cat}): ${sentToday}/${maxDay} mensagens`,
         blockedBy: 'message_limit',
       };
     }
@@ -1247,6 +1439,62 @@ async function calculateDelay(instanceId: number, rules: BlindageRule[]): Promis
     `   ⏳ Intervalo mínimo já respeitado — jitter ${jitterMs}ms (faixa ${jitterMin}–${jitterMax}ms)`
   );
   return jitterMs;
+}
+
+/**
+ * Após envio bem-sucedido: atualiza cooldown por destinatário e, se configurado, o histórico anti-repetição.
+ */
+export async function recordBlindageSuccessfulSend(input: {
+  to: string;
+  message: string;
+  messageType?: string;
+}): Promise<void> {
+  try {
+    const key = recipientCooldownKey(input.to);
+    if (key.length >= 8) {
+      await pool.query(
+        `INSERT INTO blindage_recipient_send_log (recipient_key, last_sent_at)
+         VALUES ($1, CURRENT_TIMESTAMP)
+         ON CONFLICT (recipient_key) DO UPDATE SET last_sent_at = EXCLUDED.last_sent_at`,
+        [key]
+      );
+    }
+
+    const rules = await getActiveRules(null);
+    const contentRule = rules.find((r) => r.rule_type === 'content_validation');
+    const cfg =
+      contentRule && contentRule.enabled ? parseRuleConfig(contentRule.config) : {};
+    if (cfg.repetition_enabled !== true) {
+      return;
+    }
+
+    const scope = (input.messageType?.trim() || 'avulsa').slice(0, 48) || 'avulsa';
+    const normalized = normalizeBodyForFingerprint(input.message);
+    if (normalized.length < 8) {
+      return;
+    }
+
+    const hash = sha256HexUtf8(normalized);
+    const preview = normalized.slice(0, 2000);
+    await pool.query(
+      `INSERT INTO blindage_sent_content_recent (scope, body_hash, normalized_preview)
+       VALUES ($1, $2, $3)`,
+      [scope, hash, preview]
+    );
+
+    const window = Math.min(80, Math.max(5, Number(cfg.repetition_window) || 20));
+    await pool.query(
+      `WITH ranked AS (
+         SELECT id, ROW_NUMBER() OVER (PARTITION BY scope ORDER BY created_at DESC) AS rn
+         FROM blindage_sent_content_recent
+         WHERE scope = $1
+       )
+       DELETE FROM blindage_sent_content_recent WHERE id IN (SELECT id FROM ranked WHERE rn > $2)`,
+      [scope, window]
+    );
+  } catch (e) {
+    console.error('[Blindage] recordBlindageSuccessfulSend:', e);
+  }
 }
 
 /**

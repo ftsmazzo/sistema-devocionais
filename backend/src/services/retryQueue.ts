@@ -1,6 +1,6 @@
 import { pool } from '../database';
 import axios from 'axios';
-import { applyBlindage } from './blindage';
+import { applyBlindage, recordBlindageSuccessfulSend } from './blindage';
 import { withGlobalOutboundGate } from './globalOutboundGate';
 import { personalizeDevocionalMessage, formatDevocionalMessage } from './devocionalPersonalization';
 import { addLog } from '../routes/logs';
@@ -232,6 +232,12 @@ export async function processRetryQueue(): Promise<void> {
             `UPDATE instances SET last_message_sent_at = CURRENT_TIMESTAMP, last_activity_at = CURRENT_TIMESTAMP WHERE id = $1`,
             [selectedInstance.id]
           );
+
+          await recordBlindageSuccessfulSend({
+            to: item.contact_number,
+            message,
+            messageType: item.dispatch_type || 'avulsa',
+          });
 
           await pool.query(
             `UPDATE dispatches 

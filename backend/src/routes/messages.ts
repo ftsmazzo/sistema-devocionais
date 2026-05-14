@@ -2,7 +2,7 @@ import express from 'express';
 import axios from 'axios';
 import { pool } from '../database';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
-import { applyBlindage } from '../services/blindage';
+import { applyBlindage, recordBlindageSuccessfulSend } from '../services/blindage';
 import { withGlobalOutboundGate } from '../services/globalOutboundGate';
 
 const router = express.Router();
@@ -125,6 +125,12 @@ router.post('/send', async (req: AuthRequest, res) => {
          WHERE id = $1`,
         [instance.id]
       );
+
+      await recordBlindageSuccessfulSend({
+        to,
+        message,
+        messageType: messageType || 'avulsa',
+      });
 
       return {
         kind: 'ok',

@@ -5,7 +5,7 @@ import path from 'path';
 import fs from 'fs';
 import { pool } from '../database';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
-import { applyBlindage } from '../services/blindage';
+import { applyBlindage, recordBlindageSuccessfulSend } from '../services/blindage';
 import { withGlobalOutboundGate } from '../services/globalOutboundGate';
 import { processMarketingDispatch } from '../services/marketingDispatch';
 import { executeDevocionalDispatch } from '../services/devocionalScheduler';
@@ -960,6 +960,11 @@ async function processDevocionalDispatchManually(dispatchId: number): Promise<vo
              WHERE id = $1`,
             [instance.id]
           );
+          await recordBlindageSuccessfulSend({
+            to: contact.phone_number,
+            message: personalizedMessage,
+            messageType: 'devocional',
+          });
         });
 
         if (abortContact) {
