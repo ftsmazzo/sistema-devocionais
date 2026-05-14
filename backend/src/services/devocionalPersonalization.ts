@@ -47,6 +47,14 @@ export function personalizeDevocionalMessage(
 }
 
 /**
+ * Geração atual coloca data + título (ex. 🌟 *Título*) dentro de `text`;
+ * não repetir *título* no topo para não ficar: título → data → título de novo.
+ */
+function shouldSkipLeadingTitle(text: string): boolean {
+  return Boolean(text && /🌟/.test(text));
+}
+
+/**
  * Formatar devocional completo com versículos
  * O texto costuma vir já montado no banco (geração com Gemini ou ingestão via API);
  * evita duplicar blocos de versículo se o corpo já os incluir.
@@ -63,7 +71,8 @@ export function formatDevocionalMessage(devocional: {
     referencia: string;
   };
 }): string {
-  let message = `*${devocional.title}*\n\n`;
+  const skipTitle = shouldSkipLeadingTitle(devocional.text);
+  let message = skipTitle ? '' : `*${devocional.title}*\n\n`;
 
   // Verificar se o texto já contém a assinatura (indica que o texto já está completo)
   const textoCompleto = devocional.text.includes('Alex e Daniela') || 
