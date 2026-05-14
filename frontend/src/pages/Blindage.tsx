@@ -14,11 +14,14 @@ import {
   Info,
   AlertTriangle,
   RefreshCw,
+  Sparkles,
+  Gauge,
+  Zap,
 } from 'lucide-react';
 
 interface BlindageRule {
   id: number;
-  instance_id: number;
+  instance_id: number | null;
   rule_name: string;
   rule_type: string;
   enabled: boolean;
@@ -31,12 +34,20 @@ interface Instance {
   instance_name: string;
 }
 
+interface ProfileMeta {
+  id: string;
+  label: string;
+  description: string;
+}
+
 export default function Blindage() {
   const { instanceId } = useParams<{ instanceId: string }>();
   const [instance, setInstance] = useState<Instance | null>(null);
   const [rules, setRules] = useState<BlindageRule[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [applyingProfile, setApplyingProfile] = useState<string | null>(null);
+  const [profilesFromApi, setProfilesFromApi] = useState<ProfileMeta[]>([]);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' | 'warning' } | null>(null);
   const [hasChanges, setHasChanges] = useState(false);
   const [allInstances, setAllInstances] = useState<any[]>([]);
@@ -63,6 +74,16 @@ export default function Blindage() {
 
       const instancesRes = await api.get('/instances');
       setAllInstances(instancesRes.data.instances || []);
+
+      try {
+        const profRes = await api.get('/blindage/profiles');
+        const list = profRes.data?.profiles;
+        if (Array.isArray(list) && list.length > 0) {
+          setProfilesFromApi(list);
+        }
+      } catch {
+        setProfilesFromApi([]);
+      }
 
       const rulesRes = await api.get(`/blindage/rules${instanceId ? `?instanceId=${instanceId}` : ''}`);
       let loadedRules = (rulesRes.data.rules || []).map((rule: any) => ({
@@ -164,6 +185,36 @@ export default function Blindage() {
     }
   };
 
+  const fallbackProfiles: ProfileMeta[] = [
+    { id: 'conservative', label: 'Conservador', description: 'Máxima proteção, menor volume.' },
+    { id: 'moderate', label: 'Moderado', description: 'Recomendado para a maioria.' },
+    { id: 'aggressive', label: 'Agressivo', description: 'Maior volume, mais risco.' },
+  ];
+
+  const displayProfiles = profilesFromApi.length > 0 ? profilesFromApi : fallbackProfiles;
+
+  const handleApplyProfile = async (profileId: string) => {
+    const label = displayProfiles.find((p) => p.id === profileId)?.label || profileId;
+    if (!window.confirm(`Aplicar o perfil "${label}" às regras globais de blindagem? Os valores atuais dessas regras serão substituídos pelo pacote do perfil.`)) {
+      return;
+    }
+    try {
+      setApplyingProfile(profileId);
+      await api.post('/blindage/profiles/apply', { profileId });
+      setHasChanges(false);
+      setToast({ message: `Perfil "${label}" aplicado às regras globais.`, type: 'success' });
+      await loadData();
+    } catch (error: any) {
+      console.error(error);
+      setToast({
+        message: error.response?.data?.error || `Erro ao aplicar perfil: ${error.message}`,
+        type: 'error',
+      });
+    } finally {
+      setApplyingProfile(null);
+    }
+  };
+
   const handleTimeRangeChange = (ruleId: number, startHour: number, endHour: number) => {
     const hours = [];
     for (let h = startHour; h <= endHour; h++) {
@@ -197,6 +248,7 @@ export default function Blindage() {
     content: rules.find(r => r.rule_type === 'content_validation'),
     number: rules.find(r => r.rule_type === 'number_validation'),
     selection: rules.find(r => r.rule_type === 'instance_selection'),
+    pacing: rules.find(r => r.rule_type === 'dispatch_pacing'),
   };
 
   const allowedHours = Array.isArray(groupedRules.hours?.config.allowed_hours) 
@@ -266,6 +318,81 @@ export default function Blindage() {
             {saving ? <RefreshCw size={18} className="animate-spin" /> : <Save size={18} />}
             {saving ? 'Salvando Alterações...' : hasChanges ? 'Salvar Configurações' : 'Tudo Atualizado'}
           </button>
+        </div>
+      </div>
+
+      {/* Perfis pré-configurados (regras globais) */}
+      <div className="glass-card" style={{ padding: '22px 24px', marginBottom: 28 }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-start', gap: 16, marginBottom: 18 }}>
+          <div style={{ display: 'flex', gap: 14, alignItems: 'center', flex: '1 1 280px' }}>
+            <div style={{
+              width: 48, height: 48, borderRadius: 14,
+              background: 'linear-gradient(135deg, rgba(245,158,11,0.25), rgba(217,119,6,0.12))',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+            }}>
+              <Sparkles size={24} color="#fbbf24" />
+            </div>
+            <div>
+              <h2 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 800, color: 'var(--text-primary)', fontFamily: 'Outfit, sans-serif' }}>
+                Perfis de envio
+              </h2>
+              <p style={{ margin: '8px 0 0', fontSize: '0.875rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                Um clique aplica um pacote às <strong>regras globais</strong> (todas as instâncias): limites, horários, delay, pacing de lotes, rotação e conteúdo.
+                {instanceId ? ' Você está vendo também regras desta instância; o perfil altera só as regras globais.' : ''}
+              </p>
+            </div>
+          </div>
+        </div>
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+          gap: 14,
+        }}>
+          {displayProfiles.map((p) => {
+            const Icon = p.id === 'conservative' ? Shield : p.id === 'aggressive' ? Zap : Gauge;
+            const busy = applyingProfile === p.id;
+            return (
+              <button
+                key={p.id}
+                type="button"
+                disabled={!!applyingProfile}
+                onClick={() => handleApplyProfile(p.id)}
+                style={{
+                  textAlign: 'left',
+                  padding: '16px 18px',
+                  borderRadius: 14,
+                  border: '1px solid var(--border)',
+                  background: 'var(--bg-elevated)',
+                  cursor: applyingProfile ? 'wait' : 'pointer',
+                  opacity: applyingProfile && !busy ? 0.55 : 1,
+                  transition: 'transform 0.15s, border-color 0.15s',
+                }}
+                onMouseEnter={(e) => {
+                  if (!applyingProfile) {
+                    e.currentTarget.style.borderColor = 'rgba(245, 158, 11, 0.45)';
+                    e.currentTarget.style.transform = 'translateY(-2px)';
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.borderColor = 'var(--border)';
+                  e.currentTarget.style.transform = 'none';
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                  {busy ? (
+                    <RefreshCw size={20} className="animate-spin" color="#f59e0b" />
+                  ) : (
+                    <Icon size={20} color={p.id === 'aggressive' ? '#f97316' : p.id === 'conservative' ? '#94a3b8' : '#38bdf8'} />
+                  )}
+                  <span style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--text-primary)' }}>{p.label}</span>
+                </div>
+                <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--text-muted)', lineHeight: 1.45 }}>{p.description}</p>
+                <span style={{ display: 'inline-block', marginTop: 10, fontSize: '0.75rem', fontWeight: 600, color: '#f59e0b' }}>
+                  {busy ? 'Aplicando…' : 'Aplicar perfil →'}
+                </span>
+              </button>
+            );
+          })}
         </div>
       </div>
 
