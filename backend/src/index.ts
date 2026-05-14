@@ -15,6 +15,7 @@ import listRoutes from './routes/lists';
 import marketingRoutes from './routes/marketing';
 import dispatchRoutes from './routes/dispatches';
 import logsRoutes from './routes/logs';
+import publicLandingRoutes from './routes/publicLanding';
 import { errorHandler } from './middleware/errorHandler';
 import { executeDevocionalDispatch } from './services/devocionalScheduler';
 import { createGlobalDefaultRules, reconcileBlindageRuleConfigs } from './services/blindage';
@@ -81,6 +82,8 @@ app.use((req, res, next) => {
 app.get('/api/test', (req, res) => {
   res.json({ message: 'Backend está funcionando!', timestamp: new Date().toISOString() });
 });
+
+app.use('/api/public', publicLandingRoutes);
 
 // Routes
 app.use('/api/auth', authRoutes);

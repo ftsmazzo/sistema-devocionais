@@ -13,6 +13,7 @@ import MensagensPersonalizadas from './pages/MensagensPersonalizadas';
 import Logs from './pages/Logs';
 import SessaoDevocional from './pages/SessaoDevocional';
 import Layout from './components/Layout';
+import LandingDevocional from './pages/LandingDevocional';
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const { user, init } = useAuthStore();
@@ -58,6 +59,7 @@ function App() {
   return (
     <BrowserRouter>
       <Routes>
+        <Route path="/receber-devocional" element={<LandingDevocional />} />
         <Route path="/login" element={<Login />} />
         <Route path="/" element={<PrivateRoute><Instances /></PrivateRoute>} />
         <Route path="/blindage/:instanceId?" element={<PrivateRoute><Blindage /></PrivateRoute>} />
