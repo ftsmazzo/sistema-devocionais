@@ -26,7 +26,7 @@ export class GeminiService {
   async generateStructuredContent<T>(prompt: string, schema?: any): Promise<T> {
     try {
       const modelName = this.model.startsWith('models/') ? this.model : `models/${this.model}`;
-      const url = `https://generativelanguage.googleapis.com/v1/${modelName}:generateContent?key=${this.apiKey}`;
+      const url = `https://generativelanguage.googleapis.com/v1beta/${modelName}:generateContent?key=${this.apiKey}`;
       
       const response = await axios.post<GeminiResponse>(
         url,
@@ -76,7 +76,7 @@ export class GeminiService {
   async generateText(prompt: string): Promise<string> {
     try {
       const modelName = this.model.startsWith('models/') ? this.model : `models/${this.model}`;
-      const url = `https://generativelanguage.googleapis.com/v1/${modelName}:generateContent?key=${this.apiKey}`;
+      const url = `https://generativelanguage.googleapis.com/v1beta/${modelName}:generateContent?key=${this.apiKey}`;
       
       const response = await axios.post<GeminiResponse>(
         url,
