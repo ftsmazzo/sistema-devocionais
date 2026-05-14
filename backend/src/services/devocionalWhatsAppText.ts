@@ -16,3 +16,21 @@ export function sanitizeDevocionalWhatsappText(raw: string): string {
 
   return s.trim();
 }
+
+/** Limites na ingestão HTTP (webhook legado / integração externa). */
+export const MAX_INGEST_TEXT_LENGTH = 100_000;
+export const MAX_INGEST_TITLE_LENGTH = 400;
+
+export function sanitizeIngestedDevocionalText(raw: unknown): string {
+  const s = sanitizeDevocionalWhatsappText(typeof raw === 'string' ? raw : '');
+  return s.slice(0, MAX_INGEST_TEXT_LENGTH);
+}
+
+export function sanitizeIngestedTitle(raw: unknown): string {
+  const s = typeof raw === 'string' ? raw.trim() : '';
+  return s.slice(0, MAX_INGEST_TITLE_LENGTH);
+}
+
+export function isValidDevocionalDateYmd(v: unknown): boolean {
+  return typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v.trim());
+}

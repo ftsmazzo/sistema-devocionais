@@ -17,7 +17,7 @@ Sistema completo de disparos com dois tipos principais:
   - Tag: `devocional`
   - `whatsapp_validated = TRUE`
   - `opt_in = TRUE`
-- **Template**: Formatado do banco (já gravado pelo N8N)
+- **Template**: Texto formatado já gravado na tabela `devocionais` (IA interna ou ingestão)
 - **Personalização**: 
   - Saudação baseada em horário (Bom dia/Tarde/Noite)
   - Primeiro nome do contato
@@ -46,8 +46,8 @@ ALTER TABLE contacts ADD COLUMN consecutive_devocional_failures INTEGER DEFAULT 
 
 ### Agendamento
 
-- **N8N**: Cria devocional às 3:30 (America/São_Paulo)
-- **Backend Cron**: Dispara às 6:00 (America/São_Paulo)
+- **Geração do texto**: Tela **Jornada Bíblica** (Gemini + jornadas) ou `POST /api/devocional/webhook` (opcional, com secret)
+- **Backend Cron**: Dispara no horário configurado em **Config. Devocional** (ex.: 06:00, `America/Sao_Paulo`)
 - **Fuso horário**: Sempre usar `America/São_Paulo` (UTC-3)
 
 ### Formato da Mensagem

@@ -534,7 +534,7 @@ export default function Instances() {
                 style={{ width: '100%' }}
               />
               <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 10 }}>
-                Opcional: defina <code style={{ fontSize: '0.65rem' }}>N8N_WEBHOOK_PROFILE_PICTURE_URL</code> no backend para notificar seu fluxo n8n após o envio.
+                Opcional: defina <code style={{ fontSize: '0.65rem' }}>EXTERNAL_WEBHOOK_PROFILE_PICTURE_URL</code> no backend (ou o legado <code style={{ fontSize: '0.65rem' }}>N8N_WEBHOOK_PROFILE_PICTURE_URL</code>) para notificar um webhook após o envio.
               </p>
               <div style={{ marginTop: 28, display: 'flex', gap: 14 }}>
                 <button type="button" onClick={() => { setProfileModal(null); setProfileUrlInput(''); }} className="btn-outline" style={{ flex: 1, padding: '14px 0', borderRadius: 12 }}>Cancelar</button>

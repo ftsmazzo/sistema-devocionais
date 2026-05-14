@@ -48,8 +48,8 @@ export function personalizeDevocionalMessage(
 
 /**
  * Formatar devocional completo com versículos
- * O texto do devocional já vem completo do N8N (incluindo assinatura e versículos),
- * então verificamos se o texto já contém versículos antes de adicionar
+ * O texto costuma vir já montado no banco (geração com Gemini ou ingestão via API);
+ * evita duplicar blocos de versículo se o corpo já os incluir.
  */
 export function formatDevocionalMessage(devocional: {
   title: string;

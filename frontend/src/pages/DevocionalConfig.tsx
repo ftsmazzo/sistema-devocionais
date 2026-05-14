@@ -346,7 +346,7 @@ export default function DevocionalConfig() {
               <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
                 <p style={{ margin: 0, fontWeight: 700, color: 'var(--text-primary)' }}>Nenhum devocional encontrado para hoje</p>
                 <p style={{ margin: '8px 0 0' }}>
-                  O N8N costuma gerar o devocional pela manhã. Confira o workflow e os logs se esta mensagem persistir.
+                  Gere o devocional em <strong>Jornada Bíblica</strong> (teste por data) ou aguarde o agendamento interno. Verifique também a jornada ativa e o horário em Config. Devocional.
                 </p>
               </div>
             </div>
@@ -383,7 +383,7 @@ export default function DevocionalConfig() {
             <div style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', lineHeight: 1.55 }}>
               <p style={{ margin: '0 0 8px', fontWeight: 700, color: 'var(--text-primary)' }}>Como funciona</p>
               <ul style={{ margin: 0, paddingLeft: 18 }}>
-                <li>O conteúdo do dia é preparado pelo fluxo N8N.</li>
+                <li>O conteúdo do dia fica na tabela de devocionais (geração na <strong>Jornada Bíblica</strong> ou ingestão HTTP opcional).</li>
                 <li>O backend agenda o disparo no horário configurado.</li>
                 <li>Mensagens usam saudação e primeiro nome quando disponível.</li>
                 <li>Respeitam validação de WhatsApp, opt-in e opt-out.</li>

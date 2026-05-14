@@ -725,11 +725,13 @@ router.post('/:id/profile-picture', async (req, res) => {
       return res.status(502).json({ error: 'Falha ao atualizar foto na Evolution API', details: msg });
     }
 
-    const n8nHook = process.env.N8N_WEBHOOK_PROFILE_PICTURE_URL?.trim();
-    if (n8nHook) {
+    const profileHook =
+      process.env.EXTERNAL_WEBHOOK_PROFILE_PICTURE_URL?.trim()
+      || process.env.N8N_WEBHOOK_PROFILE_PICTURE_URL?.trim();
+    if (profileHook) {
       try {
         await axios.post(
-          n8nHook,
+          profileHook,
           {
             instanceId: Number(id),
             instance_name: instance.instance_name,
@@ -738,7 +740,7 @@ router.post('/:id/profile-picture', async (req, res) => {
           { validateStatus: () => true, timeout: 15000 }
         );
       } catch (e) {
-        console.warn('⚠️ Webhook N8N (foto de perfil) ignorado:', (e as Error).message);
+        console.warn('⚠️ Webhook externo (foto de perfil) ignorado:', (e as Error).message);
       }
     }
 

@@ -282,8 +282,14 @@ export async function triggerAIInteraction(
       timestamp: new Date().toISOString(),
     };
 
-    // Chamar webhook da IA
-    const webhookCallLog = `📤 CHAMANDO WEBHOOK DO N8N - URL: ${aiWebhookUrl}`;
+    let webhookHost = 'externo';
+    try {
+      webhookHost = new URL(aiWebhookUrl).hostname;
+    } catch {
+      /* ignore */
+    }
+
+    const webhookCallLog = `📤 Chamando webhook de IA externa (${webhookHost})`;
     console.log(`\n   ========================================`);
     console.log(`   ${webhookCallLog}`);
     console.log(`   ========================================`);
@@ -309,9 +315,9 @@ export async function triggerAIInteraction(
       console.log(`   Resposta:`, JSON.stringify(response.data, null, 2));
       console.log(`\n`);
       addLog('success', successLog);
-      addLog('info', `Resposta do N8N: ${JSON.stringify(response.data)}`);
+      addLog('info', `Resposta webhook IA: ${JSON.stringify(response.data)}`);
     } catch (error: any) {
-      const errorLog = `❌ ERRO AO CHAMAR WEBHOOK DO N8N! URL: ${aiWebhookUrl} | Erro: ${error.message}`;
+      const errorLog = `❌ Erro ao chamar webhook de IA externa (${webhookHost}): ${error.message}`;
       console.error(`\n   ${errorLog}`);
       if (error.response) {
         console.error(`   Status: ${error.response.status}`);

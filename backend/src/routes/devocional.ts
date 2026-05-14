@@ -4,27 +4,23 @@ import { authenticateToken, AuthRequest } from '../middleware/auth';
 
 const router = express.Router();
 
-// Secret para validar webhook do N8N
+// Secret do header x-webhook-secret (defina DEVOCIONAL_WEBHOOK_SECRET em produção)
 const WEBHOOK_SECRET = process.env.DEVOCIONAL_WEBHOOK_SECRET || 'Fs142779';
 
 /**
- * Receber devocional do N8N
+ * Ingestão opcional de devocional via HTTP (integração externa ou legado).
  * POST /api/devocional/webhook
- * 
- * Body (do N8N):
+ *
+ * Header: x-webhook-secret — deve coincidir com DEVOCIONAL_WEBHOOK_SECRET
+ *
+ * Body (JSON):
  * {
  *   text: string (texto completo do devocional)
  *   title: string (título)
  *   date: string (YYYY-MM-DD)
  *   versiculo_principal: { texto: string, referencia: string }
  *   versiculo_apoio: { texto: string, referencia: string }
- *   metadata: {
- *     autor: string,
- *     tema: string,
- *     conceito_central: string,
- *     palavras_chave: string[],
- *     relacionado_expressar: string
- *   }
+ *   metadata: { ... }
  * }
  */
 router.post('/webhook', async (req, res) => {
@@ -51,7 +47,19 @@ router.post('/webhook', async (req, res) => {
       });
     }
 
-    console.log(`📖 Recebendo devocional: ${title} - ${date}`);
+    const { sanitizeIngestedDevocionalText, sanitizeIngestedTitle, isValidDevocionalDateYmd } = await import('../services/devocionalWhatsAppText');
+
+    if (!isValidDevocionalDateYmd(date)) {
+      return res.status(400).json({ error: 'date deve estar no formato AAAA-MM-DD' });
+    }
+
+    const safeText = sanitizeIngestedDevocionalText(text);
+    const safeTitle = sanitizeIngestedTitle(title);
+    if (!safeText || !safeTitle) {
+      return res.status(400).json({ error: 'text e title não podem ficar vazios após sanitização' });
+    }
+
+    console.log(`📖 Recebendo devocional (ingestão HTTP): ${safeTitle} - ${date}`);
 
     // Verificar se já existe devocional para esta data
     const existingCheck = await pool.query(
@@ -71,8 +79,8 @@ router.post('/webhook', async (req, res) => {
              updated_at = CURRENT_TIMESTAMP
          WHERE date = $6`,
         [
-          text,
-          title,
+          safeText,
+          safeTitle,
           JSON.stringify(versiculo_principal || {}),
           JSON.stringify(versiculo_apoio || {}),
           JSON.stringify(metadata || {}),
@@ -87,8 +95,8 @@ router.post('/webhook', async (req, res) => {
           text, title, date, versiculo_principal, versiculo_apoio, metadata
         ) VALUES ($1, $2, $3, $4, $5, $6)`,
         [
-          text,
-          title,
+          safeText,
+          safeTitle,
           date,
           JSON.stringify(versiculo_principal || {}),
           JSON.stringify(versiculo_apoio || {}),

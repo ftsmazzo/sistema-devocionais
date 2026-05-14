@@ -117,7 +117,7 @@ CREATE INDEX idx_list_items_contact ON contact_list_items(contact_id);
 ```
 
 ### 6. **Tabela: `devocionais`** (Nova - Específica para Devocionais)
-Armazena devocionais gerados pelo N8N.
+Armazena devocionais (geração interna com Gemini, teste manual ou ingestão HTTP opcional).
 
 ```sql
 CREATE TABLE devocionais (
@@ -201,7 +201,7 @@ CREATE INDEX idx_messages_category ON messages(message_category);
 - **Objetivo**: Envio diário automático de devocionais
 - **Características**:
   - Lista específica de devocionais
-  - Horário fixo (3h30 via N8N)
+  - Horário de disparo configurável em `devocional_config` (cron no backend)
   - Blindagem padrão
   - Tags: `devocional`, `diario`
   - Personalização: nome do contato
@@ -433,7 +433,7 @@ POST   /api/dispatches/marketing   - Criar disparo de marketing
 #### Devocional
 ```
 POST   /api/dispatches/devocional - Criar disparo de devocional
-POST   /api/devocional/webhook     - Webhook do N8N (recebe devocional gerado)
+POST   /api/devocional/webhook     - Ingestão opcional de devocional (HTTP + secret)
 GET    /api/devocional/context/para-ia?days=30 - Contexto histórico para IA
 GET    /api/devocional              - Listar devocionais
 GET    /api/devocional/:id          - Buscar devocional por ID
@@ -578,7 +578,7 @@ POST /api/dispatches/1/start
 ### Exemplo 2: Disparo de Devocional
 
 ```typescript
-// 1. Criar disparo (automático via N8N)
+// 1. Criar disparo (manual ou integração)
 POST /api/dispatches/devocional
 {
   "name": "Devocional 2024-01-15",

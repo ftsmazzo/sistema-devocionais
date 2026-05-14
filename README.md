@@ -1,24 +1,23 @@
-# Sistema de Gerenciamento Evolution API
+# Sistema Devocional Diário + Evolution API
 
-Sistema web moderno para gerenciar instâncias do Evolution API (WhatsApp) com disparos em rodízio e blindagens eficientes.
+Sistema web para **Evolution API** (WhatsApp), disparos, blindagens, contatos e **devocionais diários** com geração interna (Gemini) e disparo agendado no backend.
 
-## 🚀 Funcionalidades
+## Documentação de devocional / IA
 
-### Fase 1 (Atual) ✅
-- ✅ Interface moderna e fluida com Tailwind CSS
-- ✅ Login de administrador com JWT
-- ✅ Gestão completa de instâncias (CRUD)
-- ✅ Conectar/Desconectar instâncias do Evolution API
-- ✅ Monitoramento de status em tempo real
-- ✅ Visualização de QR Code para conexão
-- ✅ Interface responsiva e intuitiva
+- **[docs/DEVOCIONAL-IA.md](./docs/DEVOCIONAL-IA.md)** — Jornada Bíblica, jornadas, variáveis de ambiente, webhook opcional e segurança da ingestão.
 
-### Fase 2 (Próxima) ⏳
-- ⏳ Sistema de blindagens eficientes (configurações avançadas)
-- ⏳ Disparos em rodízio (1 mensagem por instância)
-- ⏳ Dashboard de estatísticas e métricas
-- ⏳ Histórico de mensagens enviadas
-- ⏳ Gerenciamento de listas de contatos
+## Funcionalidades principais
+
+- Interface React (Vite + TypeScript) e API Express + PostgreSQL
+- Instâncias Evolution, listas, tags, disparos (marketing e devocional)
+- **Jornada Bíblica**: motor Gemini global, múltiplas jornadas, geração por data e devocional gravado em `devocionais`
+- Configuração de horário de envio do devocional e lista alvo (**Config. Devocional**)
+- Autenticação JWT; chave Gemini no banco ou `GEMINI_API_KEY`
+
+### Segurança (devocional)
+
+- Defina **`DEVOCIONAL_WEBHOOK_SECRET`** em produção para a rota `POST /api/devocional/webhook`.
+- Texto e título ingeridos passam por **sanitização e limites de tamanho** antes de persistir.
 
 ## 🛠️ Stack Tecnológica
 
@@ -71,6 +70,7 @@ npm run dev
 Este projeto usa **GitHub como repositório principal** e **EasyPanel para deploy automático**.
 
 ### 📚 Documentação Completa:
+- **[docs/DEVOCIONAL-IA.md](./docs/DEVOCIONAL-IA.md)** — Devocional, Gemini, jornadas e webhook
 - **[METODOLOGIA.md](./METODOLOGIA.md)** - Metodologia completa de trabalho (GitHub + EasyPanel)
 - **[DEPLOY.md](./DEPLOY.md)** - Guia passo a passo de configuração inicial
 
@@ -105,7 +105,8 @@ Desenvolvimento Local → Push GitHub → Deploy Automático EasyPanel
 │   │   └── index.ts       # Entry point
 │   ├── Dockerfile
 │   └── package.json
-├── docker-compose.yml     # Configuração Docker
+├── docker-compose.yml
+├── docs/                  # Documentação (ex.: DEVOCIONAL-IA.md)
 ├── README.md
 └── DEPLOY.md              # Guia de deploy
 ```
@@ -118,6 +119,10 @@ PORT=3001
 DATABASE_URL=postgresql://user:pass@localhost:5432/dbname
 JWT_SECRET=sua-chave-secreta
 JWT_EXPIRES_IN=7d
+GEMINI_API_KEY=
+DEVOCIONAL_WEBHOOK_SECRET=altere-em-producao
+ADMIN_NOME=
+EXTERNAL_WEBHOOK_PROFILE_PICTURE_URL=
 EVOLUTION_API_URL=http://localhost:8080
 ADMIN_EMAIL=admin@example.com
 ADMIN_PASSWORD=admin123

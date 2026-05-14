@@ -1,6 +1,6 @@
 /**
  * Extrai dados estruturados do HTML da página codigo-postal.org (CEP)
- * Uso: N8N Code node recebendo o HTML do HTTP Request (body ou data).
+ * Uso: script Node ou automação externa recebendo o HTML (campo body/data).
  *
  * Entrada esperada: item com campo "data" ou "body" contendo o HTML string.
  * Saída: objeto com cep, logradouro, bairro, cidade, estado, mapa_url.
@@ -67,7 +67,7 @@ function extractCepFromHtml(html) {
   return result;
 }
 
-// --- Uso em N8N Code node ---
+// --- Exemplo de entrada (automação / script) ---
 // Quando o HTTP Request retorna { "data": "<html>..." } (como no seu caso)
 function getHtmlFromInput(input) {
   const item = input.first().json;

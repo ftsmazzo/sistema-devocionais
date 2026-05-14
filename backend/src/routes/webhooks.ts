@@ -407,7 +407,7 @@ async function processMessageReceived(instanceId: number, eventData: any) {
             console.log(`   ${positiveLog}`);
             addLog('success', positiveLog);
             
-            const webhookLog = `🚀 Chamando webhook do N8N para contato ${contactId}...`;
+            const webhookLog = `🚀 Chamando webhook de IA externa (contato ${contactId})`;
             console.log(`   ${webhookLog}`);
             addLog('info', webhookLog);
             
