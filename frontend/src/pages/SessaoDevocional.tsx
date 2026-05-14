@@ -54,9 +54,19 @@ function todaySaoPauloYmd(): string {
   return fmt.format(new Date());
 }
 
-function ymd(v: string | null | undefined): string {
-  if (!v) return '';
-  return String(v).slice(0, 10);
+function ymd(v: string | Date | null | undefined): string {
+  if (v == null || v === '') return '';
+  if (v instanceof Date && !Number.isNaN(v.getTime())) {
+    const y = v.getFullYear();
+    const m = String(v.getMonth() + 1).padStart(2, '0');
+    const d = String(v.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+  const s = String(v).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const iso = s.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (iso) return iso[1];
+  return '';
 }
 
 export default function SessaoDevocional() {

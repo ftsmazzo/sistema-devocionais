@@ -35,9 +35,20 @@ function parseJsonField<T>(v: unknown): T | null {
   return null;
 }
 
-function sliceYmd(v: unknown): string | null {
+/** Converte valor vindo do pg (Date) ou string ISO / YYYY-MM-DD para AAAA-MM-DD. */
+function rowDateToYmd(v: unknown): string | null {
   if (v == null) return null;
-  return String(v).slice(0, 10);
+  if (v instanceof Date && !Number.isNaN(v.getTime())) {
+    const y = v.getFullYear();
+    const m = String(v.getMonth() + 1).padStart(2, '0');
+    const d = String(v.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+  const s = String(v).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const iso = s.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (iso) return iso[1];
+  return null;
 }
 
 export class DevocionalGenerator {
@@ -47,6 +58,10 @@ export class DevocionalGenerator {
   async generate(date: string): Promise<any> {
     try {
       addLog('info', `[AI Generator] Iniciando geração de devocional para ${date}`);
+
+      if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(String(date).trim())) {
+        throw new Error('Data inválida: use o formato AAAA-MM-DD (ex.: 2026-05-14).');
+      }
 
       const configResult = await pool.query(
         `SELECT * FROM devocional_ai_config
@@ -85,8 +100,8 @@ export class DevocionalGenerator {
 
       if (journeyResult.rows.length > 0) {
         const j = journeyResult.rows[0];
-        const jStart = sliceYmd(j.start_date);
-        const jEnd = j.end_date ? sliceYmd(j.end_date) : null;
+        const jStart = rowDateToYmd(j.start_date);
+        const jEnd = j.end_date ? rowDateToYmd(j.end_date) : null;
         effective = {
           ...base,
           central_theme: j.central_theme ?? base.central_theme,
