@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import api from '@/lib/api';
 import {
@@ -19,6 +19,7 @@ import {
   Zap,
   Activity,
   PauseCircle,
+  FileDown,
 } from 'lucide-react';
 
 interface BlindageRule {
@@ -62,6 +63,19 @@ function actionTypeLabel(type: string): string {
   return map[type] || type;
 }
 
+const OBS_PAGE_SIZE = 40;
+
+const BLINDAGE_ACTION_FILTER_IDS = [
+  '',
+  'blindage_applied',
+  'content_blocked',
+  'limit_reached',
+  'health_blocked',
+  'time_blocked',
+  'number_blocked',
+  'number_check_failed',
+] as const;
+
 function summarizeActionData(data: unknown): string {
   if (data == null) return '—';
   if (typeof data === 'string') {
@@ -90,6 +104,15 @@ export default function Blindage() {
   const [obsActions, setObsActions] = useState<any[]>([]);
   const [obsTotal, setObsTotal] = useState(0);
   const [obsRefreshing, setObsRefreshing] = useState(false);
+  const [obsActionFilter, setObsActionFilter] = useState<string>('');
+  const [obsLoadingMore, setObsLoadingMore] = useState(false);
+  const [obsExporting, setObsExporting] = useState(false);
+  const obsActionsRef = useRef<any[]>([]);
+  const lastObsContextKey = useRef<string | null>(null);
+
+  useEffect(() => {
+    obsActionsRef.current = obsActions;
+  }, [obsActions]);
 
   useEffect(() => {
     loadData();
@@ -160,7 +183,14 @@ export default function Blindage() {
       
       setRules(loadedRules);
 
-      await loadObservability();
+      const obsKey = instanceId ?? '';
+      if (lastObsContextKey.current !== obsKey) {
+        lastObsContextKey.current = obsKey;
+        setObsActionFilter('');
+        await loadObservability({ actionFilter: '' });
+      } else {
+        await loadObservability();
+      }
     } catch (error) {
       console.error('Erro ao carregar dados:', error);
       setToast({ message: 'Erro ao carregar configurações de blindagem', type: 'error' });
@@ -169,20 +199,82 @@ export default function Blindage() {
     }
   };
 
-  const loadObservability = async () => {
+  const loadObservability = async (opts?: {
+    append?: boolean;
+    fromRefresh?: boolean;
+    actionFilter?: string;
+  }) => {
+    const filter = opts?.actionFilter !== undefined ? opts.actionFilter : obsActionFilter;
+    const append = opts?.append === true;
+    const fromRefresh = opts?.fromRefresh === true;
+
     try {
-      const statsUrl = instanceId ? `/blindage/stats?instanceId=${instanceId}` : '/blindage/stats';
-      const actionsUrl = instanceId
-        ? `/blindage/actions?limit=40&instanceId=${instanceId}`
-        : '/blindage/actions?limit=40';
+      if (fromRefresh) setObsRefreshing(true);
+      if (append) setObsLoadingMore(true);
+
+      const offset = append ? obsActionsRef.current.length : 0;
+
+      const statsQs = new URLSearchParams();
+      if (instanceId) statsQs.set('instanceId', instanceId);
+      if (filter) statsQs.set('actionType', filter);
+      const statsUrl = statsQs.toString() ? `/blindage/stats?${statsQs}` : '/blindage/stats';
+
+      const actQs = new URLSearchParams();
+      actQs.set('limit', String(OBS_PAGE_SIZE));
+      actQs.set('offset', String(offset));
+      if (instanceId) actQs.set('instanceId', instanceId);
+      if (filter) actQs.set('actionType', filter);
+      const actionsUrl = `/blindage/actions?${actQs}`;
+
       const [st, ac] = await Promise.all([api.get(statsUrl), api.get(actionsUrl)]);
       setObsStats(Array.isArray(st.data?.stats) ? st.data.stats : []);
-      setObsActions(Array.isArray(ac.data?.actions) ? ac.data.actions : []);
+      const next = Array.isArray(ac.data?.actions) ? ac.data.actions : [];
+      setObsActions((prev) => (append ? [...prev, ...next] : next));
       setObsTotal(typeof ac.data?.total === 'number' ? ac.data.total : 0);
     } catch {
-      setObsStats([]);
-      setObsActions([]);
-      setObsTotal(0);
+      if (!append) {
+        setObsStats([]);
+        setObsActions([]);
+        setObsTotal(0);
+      }
+    } finally {
+      if (fromRefresh) setObsRefreshing(false);
+      if (append) setObsLoadingMore(false);
+    }
+  };
+
+  const handleExportBlindageCsv = async () => {
+    setObsExporting(true);
+    try {
+      const p = new URLSearchParams();
+      p.set('limit', '8000');
+      if (instanceId) p.set('instanceId', instanceId);
+      if (obsActionFilter) p.set('actionType', obsActionFilter);
+      const res = await api.get(`/blindage/actions/export?${p.toString()}`, { responseType: 'blob' });
+      const url = window.URL.createObjectURL(
+        new Blob([res.data], { type: 'text/csv;charset=utf-8;' })
+      );
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `blindagem-acoes-${new Date().toISOString().slice(0, 10)}.csv`;
+      a.click();
+      window.URL.revokeObjectURL(url);
+      setToast({ message: 'Arquivo CSV gerado.', type: 'success' });
+    } catch (e: any) {
+      let msg = 'Erro ao exportar CSV';
+      const data = e?.response?.data;
+      if (data instanceof Blob) {
+        try {
+          const t = await data.text();
+          const j = JSON.parse(t);
+          if (j?.error) msg = j.error;
+        } catch {
+          /* ignore */
+        }
+      }
+      setToast({ message: msg, type: 'error' });
+    } finally {
+      setObsExporting(false);
     }
   };
 
@@ -918,7 +1010,7 @@ export default function Blindage() {
 
       </div>
 
-      {/* Atividade e estatísticas (Fase C) */}
+      {/* Atividade e estatísticas (Fases C / D) */}
       <div className="glass-card" style={{ padding: '22px 24px', marginTop: 32 }}>
         <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 16, marginBottom: 20 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
@@ -934,22 +1026,15 @@ export default function Blindage() {
                 Atividade da blindagem
               </h2>
               <p style={{ margin: '6px 0 0', fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.45 }}>
-                Resumo por tipo de evento e últimas ações registradas no disparo
-                {instanceId ? ' (filtrado por esta instância).' : ' (todas as instâncias).'}
+                Resumo por tipo, log recente, filtro por tipo, exportação CSV e paginação
+                {instanceId ? ' (instância atual).' : ' (todas as instâncias).'}
                 {obsTotal > obsActions.length ? ` Total no filtro: ${obsTotal}.` : ''}
               </p>
             </div>
           </div>
           <button
             type="button"
-            onClick={async () => {
-              setObsRefreshing(true);
-              try {
-                await loadObservability();
-              } finally {
-                setObsRefreshing(false);
-              }
-            }}
+            onClick={() => void loadObservability({ fromRefresh: true })}
             disabled={obsRefreshing}
             className="btn-gold"
             style={{
@@ -959,6 +1044,52 @@ export default function Blindage() {
           >
             <RefreshCw size={16} className={obsRefreshing ? 'animate-spin' : ''} />
             Atualizar painel
+          </button>
+        </div>
+
+        <div style={{
+          display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 12,
+          marginBottom: 20, paddingBottom: 18, borderBottom: '1px solid var(--border)',
+        }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+            <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>Tipo</span>
+            <select
+              value={obsActionFilter}
+              onChange={(e) => {
+                const v = e.target.value;
+                setObsActionFilter(v);
+                void loadObservability({ actionFilter: v });
+              }}
+              style={{
+                minWidth: 200,
+                padding: '8px 12px',
+                borderRadius: 10,
+                border: '1px solid var(--border)',
+                background: 'var(--bg-elevated)',
+                color: 'var(--text-primary)',
+                fontSize: '0.85rem',
+              }}
+            >
+              <option value="">Todos os tipos</option>
+              {BLINDAGE_ACTION_FILTER_IDS.filter(Boolean).map((id) => (
+                <option key={id} value={id}>
+                  {actionTypeLabel(id)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            type="button"
+            onClick={() => void handleExportBlindageCsv()}
+            disabled={obsExporting}
+            style={{
+              padding: '10px 18px', fontSize: '0.875rem', display: 'flex', alignItems: 'center', gap: 8,
+              borderRadius: 10, border: '1px solid var(--border)', background: 'var(--bg-elevated)',
+              color: 'var(--text-primary)', cursor: obsExporting ? 'wait' : 'pointer', opacity: obsExporting ? 0.65 : 1,
+            }}
+          >
+            <FileDown size={16} />
+            {obsExporting ? 'Exportando…' : 'Exportar CSV'}
           </button>
         </div>
 
@@ -1021,6 +1152,23 @@ export default function Blindage() {
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {obsActions.length > 0 && obsActions.length < obsTotal && (
+          <div style={{ display: 'flex', justifyContent: 'center', marginTop: 16 }}>
+            <button
+              type="button"
+              onClick={() => void loadObservability({ append: true })}
+              disabled={obsLoadingMore}
+              style={{
+                padding: '10px 22px', fontSize: '0.875rem', borderRadius: 10,
+                border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-primary)',
+                cursor: obsLoadingMore ? 'wait' : 'pointer', opacity: obsLoadingMore ? 0.65 : 1,
+              }}
+            >
+              {obsLoadingMore ? 'Carregando…' : `Carregar mais (${obsActions.length} de ${obsTotal})`}
+            </button>
           </div>
         )}
       </div>

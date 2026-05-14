@@ -349,13 +349,132 @@ router.post('/rules/default/:instanceId', async (req: AuthRequest, res) => {
   }
 });
 
+function csvEscapeCell(raw: string): string {
+  const s = raw ?? '';
+  if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+  return s;
+}
+
+function actionDataToCsvCell(data: unknown): string {
+  if (data == null) return '';
+  if (typeof data === 'string') return csvEscapeCell(data);
+  try {
+    return csvEscapeCell(JSON.stringify(data));
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Exportar ações de blindagem em CSV (Fase D).
+ * GET /api/blindage/actions/export?instanceId=&actionType=&limit=5000&since=&until=
+ * — `limit` máximo 10000.
+ */
+router.get('/actions/export', async (req: AuthRequest, res) => {
+  try {
+    const rawLimit = parseInt(String(req.query.limit ?? '5000'), 10);
+    const limit = Math.min(10000, Math.max(1, Number.isFinite(rawLimit) ? rawLimit : 5000));
+    const { instanceId, actionType, since, until } = req.query;
+
+    let query = `
+      SELECT 
+        ba.id,
+        ba.created_at,
+        ba.action_type,
+        ba.instance_id,
+        ba.rule_id,
+        ba.action_data,
+        br.rule_name,
+        br.rule_type,
+        i.name as instance_name
+      FROM blindage_actions ba
+      LEFT JOIN blindage_rules br ON ba.rule_id = br.id
+      LEFT JOIN instances i ON ba.instance_id = i.id
+      WHERE 1=1
+    `;
+    const params: any[] = [];
+    let paramCount = 1;
+
+    if (instanceId) {
+      query += ` AND ba.instance_id = $${paramCount}`;
+      params.push(instanceId);
+      paramCount++;
+    }
+
+    if (actionType && typeof actionType === 'string' && actionType.length > 0 && actionType.length <= 80) {
+      query += ` AND ba.action_type = $${paramCount}`;
+      params.push(actionType);
+      paramCount++;
+    }
+
+    if (since && typeof since === 'string') {
+      const d = new Date(since);
+      if (!Number.isNaN(d.getTime())) {
+        query += ` AND ba.created_at >= $${paramCount}::timestamptz`;
+        params.push(d.toISOString());
+        paramCount++;
+      }
+    }
+
+    if (until && typeof until === 'string') {
+      const d = new Date(until);
+      if (!Number.isNaN(d.getTime())) {
+        query += ` AND ba.created_at <= $${paramCount}::timestamptz`;
+        params.push(d.toISOString());
+        paramCount++;
+      }
+    }
+
+    query += ` ORDER BY ba.created_at DESC LIMIT $${paramCount}`;
+    params.push(limit);
+
+    const result = await pool.query(query, params);
+
+    const header = [
+      'id',
+      'created_at',
+      'action_type',
+      'instance_id',
+      'instance_name',
+      'rule_id',
+      'rule_name',
+      'rule_type',
+      'action_data',
+    ];
+    const lines = [header.join(',')];
+    for (const row of result.rows) {
+      const ad = actionDataToCsvCell(row.action_data);
+      const cells = [
+        csvEscapeCell(String(row.id ?? '')),
+        csvEscapeCell(row.created_at ? new Date(row.created_at).toISOString() : ''),
+        csvEscapeCell(String(row.action_type ?? '')),
+        csvEscapeCell(row.instance_id != null ? String(row.instance_id) : ''),
+        csvEscapeCell(String(row.instance_name ?? '')),
+        csvEscapeCell(row.rule_id != null ? String(row.rule_id) : ''),
+        csvEscapeCell(String(row.rule_name ?? '')),
+        csvEscapeCell(String(row.rule_type ?? '')),
+        ad,
+      ];
+      lines.push(cells.join(','));
+    }
+
+    const body = `\ufeff${lines.join('\n')}\n`;
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="blindagem-acoes.csv"');
+    res.send(body);
+  } catch (error) {
+    console.error('Erro ao exportar ações de blindagem:', error);
+    res.status(500).json({ error: 'Erro ao exportar ações de blindagem' });
+  }
+});
+
 /**
  * Listar ações de blindagem (Fase C — observabilidade; `total` = total de linhas no filtro, não só da página).
- * GET /api/blindage/actions?instanceId=123&limit=50&offset=0
+ * GET /api/blindage/actions?instanceId=123&actionType=limit_reached&limit=50&offset=0
  */
 router.get('/actions', async (req: AuthRequest, res) => {
   try {
-    const { instanceId, limit = 50, offset = 0 } = req.query;
+    const { instanceId, actionType, limit = 50, offset = 0 } = req.query;
 
     let query = `
       SELECT 
@@ -375,6 +494,12 @@ router.get('/actions', async (req: AuthRequest, res) => {
     if (instanceId) {
       query += ` AND ba.instance_id = $${paramCount}`;
       params.push(instanceId);
+      paramCount++;
+    }
+
+    if (actionType && typeof actionType === 'string' && actionType.length > 0 && actionType.length <= 80) {
+      query += ` AND ba.action_type = $${paramCount}`;
+      params.push(actionType);
       paramCount++;
     }
 
@@ -406,7 +531,7 @@ router.get('/actions', async (req: AuthRequest, res) => {
  */
 router.get('/stats', async (req: AuthRequest, res) => {
   try {
-    const { instanceId } = req.query;
+    const { instanceId, actionType } = req.query;
 
     let query = `
       SELECT 
@@ -418,10 +543,18 @@ router.get('/stats', async (req: AuthRequest, res) => {
       WHERE 1=1
     `;
     const params: any[] = [];
+    let n = 1;
 
     if (instanceId) {
-      query += ` AND instance_id = $1`;
+      query += ` AND instance_id = $${n}`;
       params.push(instanceId);
+      n++;
+    }
+
+    if (actionType && typeof actionType === 'string' && actionType.length > 0 && actionType.length <= 80) {
+      query += ` AND action_type = $${n}`;
+      params.push(actionType);
+      n++;
     }
 
     query += ` GROUP BY action_type ORDER BY count DESC`;
