@@ -338,6 +338,149 @@ router.get('/filter/ids', async (req: AuthRequest, res) => {
   }
 });
 
+const MAX_CSV_EXPORT = 100_000;
+
+function csvEscapeCell(value: unknown): string {
+  if (value === null || value === undefined) return '';
+  const s = String(value);
+  if (/[",\r\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+  return s;
+}
+
+/**
+ * Exportar contatos filtrados em CSV (mesmos filtros da listagem).
+ * GET /api/contacts/export/csv?search=&tags=&optIn=&optOut=&whatsappValidated=
+ */
+router.get('/export/csv', async (req: AuthRequest, res) => {
+  try {
+    const search = req.query.search as string;
+    const optIn = req.query.optIn as string;
+    const optOut = req.query.optOut as string;
+    const whatsappValidated = req.query.whatsappValidated as string;
+    const tags = req.query.tags as string;
+
+    let exportQuery = `
+      SELECT
+        c.phone_number,
+        COALESCE(c.name, '') AS name,
+        COALESCE(c.email, '') AS email,
+        COALESCE((
+          SELECT string_agg(t2.name, ', ' ORDER BY t2.name)
+          FROM contact_tag_relations ctr2
+          INNER JOIN contact_tags t2 ON ctr2.tag_id = t2.id
+          WHERE ctr2.contact_id = c.id
+        ), '') AS tag_list,
+        c.opt_in,
+        c.opt_out,
+        c.whatsapp_validated,
+        COALESCE(c.source, '') AS source
+      FROM contacts c
+      WHERE 1=1
+    `;
+    const exportParams: any[] = [];
+    let p = 1;
+
+    if (search) {
+      exportQuery += ` AND (c.name ILIKE $${p} OR c.phone_number ILIKE $${p} OR c.email ILIKE $${p})`;
+      exportParams.push(`%${search}%`);
+      p++;
+    }
+
+    if (optIn === 'true') {
+      exportQuery += ` AND c.opt_in = TRUE`;
+    } else if (optIn === 'false') {
+      exportQuery += ` AND c.opt_in = FALSE`;
+    }
+
+    if (optOut === 'true') {
+      exportQuery += ` AND c.opt_out = TRUE`;
+    } else if (optOut === 'false') {
+      exportQuery += ` AND c.opt_out = FALSE`;
+    }
+
+    if (whatsappValidated === 'true') {
+      exportQuery += ` AND c.whatsapp_validated = TRUE`;
+    } else if (whatsappValidated === 'false') {
+      exportQuery += ` AND c.whatsapp_validated = FALSE`;
+    }
+
+    if (tags) {
+      const tagIds = tags.split(',').map((id) => parseInt(id.trim(), 10)).filter((id) => !isNaN(id));
+      if (tagIds.length > 0) {
+        exportQuery += ` AND EXISTS (
+          SELECT 1 FROM contact_tag_relations ctr
+          WHERE ctr.contact_id = c.id
+          AND ctr.tag_id = ANY($${p}::int[])
+        )`;
+        exportParams.push(tagIds);
+        p++;
+      }
+    }
+
+    exportQuery += ` ORDER BY c.created_at DESC LIMIT $${p}`;
+    exportParams.push(MAX_CSV_EXPORT + 1);
+
+    const result = await pool.query(exportQuery, exportParams);
+    const rawRows = result.rows as Array<{
+      phone_number: string;
+      name: string;
+      email: string;
+      tag_list: string;
+      opt_in: boolean;
+      opt_out: boolean;
+      whatsapp_validated: boolean;
+      source: string;
+    }>;
+
+    const truncated = rawRows.length > MAX_CSV_EXPORT;
+    const rows = truncated ? rawRows.slice(0, MAX_CSV_EXPORT) : rawRows;
+
+    const day = new Date().toISOString().slice(0, 10);
+    const filename = `contatos-${day}.csv`;
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    if (truncated) {
+      res.setHeader('X-Export-Truncated', 'true');
+    }
+
+    const headerCols = [
+      'phone_number',
+      'name',
+      'email',
+      'tags',
+      'opt_in',
+      'opt_out',
+      'whatsapp_validated',
+      'source',
+    ];
+    const lines: string[] = [headerCols.join(',')];
+
+    for (const row of rows) {
+      lines.push(
+        [
+          csvEscapeCell(row.phone_number),
+          csvEscapeCell(row.name),
+          csvEscapeCell(row.email),
+          csvEscapeCell(row.tag_list),
+          csvEscapeCell(row.opt_in),
+          csvEscapeCell(row.opt_out),
+          csvEscapeCell(row.whatsapp_validated),
+          csvEscapeCell(row.source),
+        ].join(',')
+      );
+    }
+
+    res.send('\ufeff' + lines.join('\n'));
+  } catch (error: any) {
+    console.error('❌ Erro ao exportar contatos CSV:', error);
+    res.status(500).json({
+      error: 'Erro ao exportar contatos',
+      message: error.message,
+    });
+  }
+});
+
 /**
  * Buscar contato por ID
  * GET /api/contacts/:id

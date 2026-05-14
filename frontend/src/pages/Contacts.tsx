@@ -17,6 +17,7 @@ import {
   AlertTriangle,
   Filter,
   Info,
+  Download,
 } from 'lucide-react';
 
 interface Contact {
@@ -37,6 +38,57 @@ interface TagType {
   name: string;
   color: string;
   category: string;
+}
+
+function parseCSVLine(line: string): string[] {
+  const out: string[] = [];
+  let cur = '';
+  let inQ = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (inQ) {
+      if (c === '"') {
+        if (line[i + 1] === '"') {
+          cur += '"';
+          i++;
+        } else {
+          inQ = false;
+        }
+      } else {
+        cur += c;
+      }
+    } else if (c === '"') {
+      inQ = true;
+    } else if (c === ',') {
+      out.push(cur);
+      cur = '';
+    } else {
+      cur += c;
+    }
+  }
+  out.push(cur);
+  return out.map((s) => s.trim());
+}
+
+function contactFromHeaderRow(headers: string[], cells: string[]) {
+  const norm = headers.map((h) => h.replace(/^\uFEFF/, '').trim().toLowerCase());
+  const col = (candidates: string[]) => {
+    for (const c of candidates) {
+      const i = norm.indexOf(c.toLowerCase());
+      if (i >= 0) return i;
+    }
+    return -1;
+  };
+  const ph = col(['phone_number', 'phone', 'telefone', 'celular', 'whatsapp', 'numero']);
+  const nm = col(['name', 'nome', 'full_name', 'nome_completo']);
+  const em = col(['email', 'e_mail', 'email_address']);
+  const tg = col(['tags', 'tag']);
+  return {
+    phone_number: ph >= 0 ? (cells[ph] ?? '').trim() : '',
+    name: nm >= 0 ? (cells[nm] ?? '').trim() : '',
+    email: em >= 0 ? (cells[em] ?? '').trim() : '',
+    tags: tg >= 0 ? (cells[tg] ?? '').trim() : '',
+  };
 }
 
 export default function Contacts() {
@@ -71,6 +123,7 @@ export default function Contacts() {
   const [showImportModal, setShowImportModal] = useState(false);
   const [importTags, setImportTags] = useState<number[]>([]);
   const [selectingAllFiltered, setSelectingAllFiltered] = useState(false);
+  const [exportingCsv, setExportingCsv] = useState(false);
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(searchTerm.trim()), 450);
@@ -255,31 +308,91 @@ export default function Contacts() {
     }
   };
 
+  const handleExportCsv = async () => {
+    try {
+      setExportingCsv(true);
+      const params = buildFilterIdsParams();
+      const response = await api.get(`/contacts/export/csv?${params.toString()}`, { responseType: 'blob' });
+      const disposition = response.headers['content-disposition'] as string | undefined;
+      let filename = 'contatos.csv';
+      if (disposition) {
+        const m = /filename\*?=(?:UTF-8'')?["']?([^"';]+)["']?/i.exec(disposition) || /filename="([^"]+)"/i.exec(disposition);
+        if (m?.[1]) filename = decodeURIComponent(m[1].trim());
+      }
+      const url = URL.createObjectURL(response.data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+      const truncated = String(response.headers['x-export-truncated'] || '').toLowerCase() === 'true';
+      setToast({
+        message: truncated
+          ? 'CSV baixado (primeiros 100.000 contatos deste filtro; refine o filtro se precisar do restante).'
+          : 'CSV exportado com sucesso.',
+        type: truncated ? 'warning' : 'success',
+      });
+    } catch (error: any) {
+      setToast({ message: error.response?.data?.error || 'Erro ao exportar CSV', type: 'error' });
+    } finally {
+      setExportingCsv(false);
+    }
+  };
+
   const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     try {
       setLoading(true);
-      const text = await file.text();
-      const lines = text.split('\n').filter(line => line.trim());
+      const textRaw = await file.text();
+      const text = textRaw.replace(/^\uFEFF/, '');
+      const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
       if (lines.length === 0) {
         setToast({ message: 'Arquivo vazio', type: 'error' });
         setLoading(false);
         return;
       }
 
-      const firstLine = lines[0].toLowerCase();
-      const hasHeader = firstLine.includes('phone') || firstLine.includes('telefone') || firstLine.includes('nome');
-      const dataLines = hasHeader ? lines.slice(1) : lines;
-      
-      const contactsToImport = dataLines.map((line) => {
-        const parts = line.split(',').map(p => p.trim().replace(/^"|"$/g, ''));
-        return {
-          phone_number: parts[0] || '',
-          name: parts[1] || '',
-          email: parts[2] || '',
-        };
-      }).filter(c => c.phone_number);
+      const firstCells = parseCSVLine(lines[0]);
+      const firstLower = firstCells.map((c) => c.toLowerCase());
+      const headerKeys = new Set([
+        'phone_number', 'phone', 'telefone', 'celular', 'whatsapp', 'numero',
+        'name', 'nome', 'full_name', 'nome_completo',
+        'email', 'e_mail', 'email_address',
+        'tags', 'tag',
+      ]);
+      const hasHeader = firstLower.some((c) => headerKeys.has(c));
+
+      let contactsToImport: Array<{ phone_number: string; name: string; email: string; tags?: string }>;
+
+      if (hasHeader) {
+        const headers = firstCells;
+        contactsToImport = [];
+        for (let i = 1; i < lines.length; i++) {
+          const cells = parseCSVLine(lines[i]);
+          const row = contactFromHeaderRow(headers, cells);
+          if (row.phone_number) {
+            contactsToImport.push({
+              phone_number: row.phone_number,
+              name: row.name,
+              email: row.email,
+              ...(row.tags ? { tags: row.tags } : {}),
+            });
+          }
+        }
+      } else {
+        contactsToImport = lines
+          .map((line) => {
+            const parts = parseCSVLine(line);
+            return {
+              phone_number: parts[0] || '',
+              name: parts[1] || '',
+              email: parts[2] || '',
+              ...(parts[3] ? { tags: parts[3] } : {}),
+            };
+          })
+          .filter((c) => c.phone_number);
+      }
 
       if (contactsToImport.length === 0) {
         setToast({ message: 'Nenhum contato válido encontrado', type: 'error' });
@@ -354,6 +467,16 @@ export default function Contacts() {
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={handleExportCsv}
+              disabled={exportingCsv || loading}
+              className="btn-outline"
+              style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 18px', borderRadius: 12, opacity: exportingCsv || loading ? 0.65 : 1 }}
+            >
+              <Download size={18} />
+              <span>{exportingCsv ? 'Exportando…' : 'Exportar CSV'}</span>
+            </button>
             <button
               onClick={() => setShowImportModal(true)}
               className="btn-outline"
@@ -900,7 +1023,7 @@ export default function Contacts() {
                 <Upload size={32} color="var(--sky)" />
               </div>
               <h3 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-primary)', fontFamily: 'Outfit' }}>Importar Lista de Contatos</h3>
-              <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: 8 }}>Selecione um arquivo CSV com as colunas: telefone, nome, email.</p>
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: 8 }}>CSV com cabeçalho: phone_number, name, email, tags (opcional). Ou três colunas sem cabeçalho: telefone, nome, email. Use &quot;Exportar CSV&quot; para gerar um arquivo compatível com os filtros atuais.</p>
             </div>
             
             <div style={{ marginBottom: 24 }}>
