@@ -209,8 +209,7 @@ router.post('/inscricao-devocional', async (req, res) => {
 
     return res.json({
       success: true,
-      message:
-        'Inscrição registrada! Em instantes validamos seu WhatsApp; inclua este número na lista de disparo do devocional no painel, se ainda não estiver.',
+      message: 'Tudo certo por aqui. Obrigado por se inscrever!',
     });
   } catch (error: any) {
     console.error('❌ Erro na inscrição pública (devocional):', error);
