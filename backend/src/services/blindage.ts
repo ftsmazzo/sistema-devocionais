@@ -1047,8 +1047,13 @@ async function checkAllowedHours(
   const timeRule = rules.find(r => r.rule_type === 'allowed_hours');
   
   if (!timeRule) {
-    console.log(`   ⚠️ Regra de horários permitidos não encontrada para instância ${instanceId}`);
-    addLog('warning', `[Blindage] Regra de horários permitidos não encontrada para instância ${instanceId}`);
+    console.log(
+      `   ℹ️ Nenhuma regra ativa "allowed_hours" (global ou instância ${instanceId}); envio sem janela de horário. Habilite a regra global em Blindagem se quiser restringir.`
+    );
+    addLog(
+      'info',
+      `[Blindage] Sem regra allowed_hours ativa; horário não restringido (instância ${instanceId}).`
+    );
     return { canSend: true };
   }
   
