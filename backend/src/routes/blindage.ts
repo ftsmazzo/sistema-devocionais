@@ -1,7 +1,7 @@
 import express from 'express';
 import { pool } from '../database';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
-import { createDefaultRules } from '../services/blindage';
+import { createDefaultRules, reconcileBlindageRuleConfigs } from '../services/blindage';
 
 const router = express.Router();
 
@@ -234,6 +234,28 @@ router.delete('/rules/:id', async (req: AuthRequest, res) => {
   } catch (error) {
     console.error('Erro ao deletar regra:', error);
     res.status(500).json({ error: 'Erro ao deletar regra' });
+  }
+});
+
+/**
+ * Reconciliar configs de blindagem com o template canônico (merge de chaves ausentes).
+ * POST /api/blindage/reconcile
+ * Body opcional: { "dryRun": true, "strict": true }
+ */
+router.post('/reconcile', async (req: AuthRequest, res) => {
+  try {
+    const dryRun = req.body?.dryRun === true;
+    const strict = req.body?.strict === true;
+    const result = await reconcileBlindageRuleConfigs({ dryRun, strict });
+    res.json({
+      message: dryRun
+        ? 'Simulação de reconciliação concluída (nenhuma alteração gravada)'
+        : 'Reconciliação concluída',
+      ...result,
+    });
+  } catch (error) {
+    console.error('Erro na reconciliação de blindagem:', error);
+    res.status(500).json({ error: 'Erro ao reconciliar regras de blindagem' });
   }
 });
 

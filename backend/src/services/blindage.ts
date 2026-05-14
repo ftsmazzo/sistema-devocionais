@@ -2,9 +2,277 @@ import { pool } from '../database';
 import axios from 'axios';
 import { addLog } from '../routes/logs';
 
+const DEFAULT_BLINDAGE_TIMEZONE = 'America/Sao_Paulo';
+
+/** Config JSONB pode vir como objeto ou string do PostgreSQL */
+function parseRuleConfig(config: unknown): Record<string, any> {
+  if (config == null) return {};
+  if (typeof config === 'string') {
+    try {
+      return JSON.parse(config);
+    } catch {
+      return {};
+    }
+  }
+  if (typeof config === 'object' && !Array.isArray(config)) {
+    return config as Record<string, any>;
+  }
+  return {};
+}
+
+function normalizeRuleRow(row: any): BlindageRule {
+  return { ...row, config: parseRuleConfig(row.config) };
+}
+
+/**
+ * Configuração canônica por `rule_type` (fonte única para INSERT inicial e reconciliação).
+ * Reconciliação só adiciona chaves ausentes; não sobrescreve valores já definidos.
+ */
+export const BLINDAGE_CANONICAL_CONFIGS: Record<string, Record<string, any>> = {
+  message_delay: {
+    min_delay_seconds: 5,
+    max_delay_seconds: 45,
+    progressive: true,
+    base_delay: 5,
+    increment_per_message: 0.5,
+    jitter_min_ms: 150,
+    jitter_max_ms: 450,
+  },
+  message_limit: {
+    max_per_hour: 40,
+    max_per_day: 400,
+    reset_hour: 0,
+    reset_day: 1,
+  },
+  instance_rotation: {
+    enabled: true,
+    min_delay_between_instances: 3,
+    round_robin: true,
+  },
+  allowed_hours: {
+    allowed_hours: [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20],
+    blocked_hours: [22, 23, 0, 1, 2, 3, 4, 5, 6, 7],
+    timezone: 'America/Sao_Paulo',
+  },
+  health_check: {
+    pause_if_degraded: true,
+    pause_if_down: true,
+    check_interval_seconds: 60,
+  },
+  content_validation: {
+    max_length: 4096,
+    blocked_words: [],
+  },
+  number_validation: {
+    validate_format: true,
+    check_whatsapp: true,
+    require_whatsapp_check: false,
+    default_country_code: '55',
+    cache_hours: 24,
+    timeout_ms: 10000,
+  },
+  instance_selection: {
+    selected_instance_ids: [],
+    max_simultaneous: 1,
+    auto_switch_on_failure: true,
+    retry_after_pause: true,
+  },
+};
+
+function mergeMissingDeep(
+  target: Record<string, any>,
+  defaults: Record<string, any>
+): Record<string, any> {
+  const out: Record<string, any> = JSON.parse(JSON.stringify(target || {}));
+  const def: Record<string, any> = JSON.parse(JSON.stringify(defaults || {}));
+  for (const key of Object.keys(def)) {
+    const d = def[key];
+    const t = out[key];
+    if (!(key in out) || t === undefined) {
+      out[key] = d;
+      continue;
+    }
+    if (
+      d !== null &&
+      typeof d === 'object' &&
+      !Array.isArray(d) &&
+      t !== null &&
+      typeof t === 'object' &&
+      !Array.isArray(t)
+    ) {
+      out[key] = mergeMissingDeep(t, d);
+    }
+  }
+  return out;
+}
+
+function stableConfigString(obj: Record<string, any>): string {
+  if (obj === null || typeof obj !== 'object') {
+    return JSON.stringify(obj);
+  }
+  if (Array.isArray(obj)) {
+    return `[${obj.map((x) => stableConfigString(x)).join(',')}]`;
+  }
+  const keys = Object.keys(obj).sort();
+  return `{${keys.map((k) => `${JSON.stringify(k)}:${stableConfigString(obj[k])}`).join(',')}}`;
+}
+
+/** Ajustes mínimos de consistência numérica (opcional, `strict` na reconciliação). */
+function sanitizeBlindageConfigStrict(ruleType: string, cfg: Record<string, any>): Record<string, any> {
+  const c = { ...cfg };
+  if (ruleType === 'message_delay') {
+    const min = Number(c.min_delay_seconds);
+    if (Number.isFinite(min) && min < 0.5) {
+      c.min_delay_seconds = 0.5;
+    }
+    const minS = Number(c.min_delay_seconds);
+    const maxS = Number(c.max_delay_seconds);
+    if (Number.isFinite(minS) && Number.isFinite(maxS) && maxS > 0 && maxS < minS) {
+      c.max_delay_seconds = Math.max(minS * 2, 45);
+    }
+    let jMin = Number(c.jitter_min_ms);
+    let jMax = Number(c.jitter_max_ms);
+    if (Number.isFinite(jMin) && Number.isFinite(jMax) && jMax < jMin) {
+      const swap = jMin;
+      jMin = jMax;
+      jMax = swap;
+      c.jitter_min_ms = jMin;
+      c.jitter_max_ms = jMax;
+    }
+  }
+  return c;
+}
+
+export interface ReconcileBlindageOptions {
+  /** Se true, não grava no banco; só retorna o que mudaria. */
+  dryRun?: boolean;
+  /** Aplica `sanitizeBlindageConfigStrict` após o merge de chaves ausentes. */
+  strict?: boolean;
+}
+
+export interface ReconcileBlindageResult {
+  updated: number;
+  unchanged: number;
+  skippedUnknownType: number;
+  details: Array<{
+    id: number;
+    rule_type: string;
+    instance_id: number | null;
+    changed: boolean;
+  }>;
+}
+
+/**
+ * Reconcilia `config` JSONB de todas as linhas em `blindage_rules` com o template canônico
+ * do respectivo `rule_type` (merge profundo apenas de chaves ausentes).
+ *
+ * Variáveis de ambiente (startup em `index.ts`):
+ * - `BLINDAGE_RECONCILE_ON_STARTUP` — se `false`, não roda no boot (default: roda).
+ * - `BLINDAGE_RECONCILE_STRICT` — se `true`, aplica saneamento numérico após o merge.
+ */
+export async function reconcileBlindageRuleConfigs(
+  options: ReconcileBlindageOptions = {}
+): Promise<ReconcileBlindageResult> {
+  const { dryRun = false, strict = false } = options;
+  const result: ReconcileBlindageResult = {
+    updated: 0,
+    unchanged: 0,
+    skippedUnknownType: 0,
+    details: [],
+  };
+
+  const rows = await pool.query(
+    `SELECT id, instance_id, rule_type, config FROM blindage_rules ORDER BY id`
+  );
+
+  for (const row of rows.rows) {
+    const ruleType = row.rule_type as string;
+    const template = BLINDAGE_CANONICAL_CONFIGS[ruleType];
+    if (!template) {
+      result.skippedUnknownType += 1;
+      result.details.push({
+        id: row.id,
+        rule_type: ruleType,
+        instance_id: row.instance_id,
+        changed: false,
+      });
+      continue;
+    }
+
+    let current = parseRuleConfig(row.config);
+    let merged = mergeMissingDeep(current, template);
+    if (strict) {
+      merged = sanitizeBlindageConfigStrict(ruleType, merged);
+    }
+
+    const before = stableConfigString(current);
+    const after = stableConfigString(merged);
+    const changed = before !== after;
+
+    result.details.push({
+      id: row.id,
+      rule_type: ruleType,
+      instance_id: row.instance_id,
+      changed,
+    });
+
+    if (!changed) {
+      result.unchanged += 1;
+      continue;
+    }
+
+    result.updated += 1;
+    if (!dryRun) {
+      await pool.query(`UPDATE blindage_rules SET config = $1::jsonb WHERE id = $2`, [
+        JSON.stringify(merged),
+        row.id,
+      ]);
+    }
+  }
+
+  const msg = `[Blindage] Reconciliação: ${result.updated} atualizadas, ${result.unchanged} inalteradas, ${result.skippedUnknownType} tipos sem template${dryRun ? ' (dry-run)' : ''}${strict ? ' (strict)' : ''}`;
+  console.log(`✅ ${msg}`);
+  addLog('info', msg);
+  return result;
+}
+
+/**
+ * Fuso horário de referência para limites e delay progressivo:
+ * usa a regra `allowed_hours` se existir; senão padrão SP.
+ */
+function getBlindageTimezoneFromRules(rules: BlindageRule[]): string {
+  const timeRule = rules.find((r) => r.rule_type === 'allowed_hours');
+  const cfg = timeRule ? parseRuleConfig(timeRule.config) : {};
+  return typeof cfg.timezone === 'string' && cfg.timezone.trim()
+    ? cfg.timezone.trim()
+    : DEFAULT_BLINDAGE_TIMEZONE;
+}
+
+function formatCalendarDateInTimezone(d: Date, timeZone: string): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(d);
+}
+
+function getCalendarHourInTimezone(d: Date, timeZone: string): number {
+  return parseInt(
+    new Intl.DateTimeFormat('pt-BR', {
+      timeZone,
+      hour: 'numeric',
+      hour12: false,
+    })
+      .formatToParts(d)
+      .find((p) => p.type === 'hour')?.value || '0',
+    10
+  );
+}
+
 export interface BlindageRule {
   id: number;
-  instance_id: number;
+  instance_id: number | null;
   rule_name: string;
   rule_type: string;
   enabled: boolean;
@@ -25,31 +293,43 @@ export interface BlindageResult {
  */
 
 /**
- * Busca regras ativas de blindagem (APENAS GLOBAIS - instance_id IS NULL)
- * Removida a busca por instância para garantir que todas as regras sejam globais
+ * Busca regras ativas: globais (`instance_id IS NULL`) + regras da instância `forInstanceId` (se informada).
+ * Por `rule_type`, a regra **da instância sobrescreve** a global (última vence na ordenação).
  */
-export async function getActiveRules(instanceId?: number): Promise<BlindageRule[]> {
+export async function getActiveRules(forInstanceId?: number | null): Promise<BlindageRule[]> {
   try {
-    // Buscar APENAS regras globais (instance_id IS NULL)
-    // Isso garante que todas as regras sejam aplicadas globalmente, não por instância
-    const query = `
-      SELECT * FROM blindage_rules 
-      WHERE enabled = TRUE
-        AND instance_id IS NULL
-      ORDER BY rule_type, id
-    `;
+    const result = await pool.query(
+      `SELECT * FROM blindage_rules
+       WHERE enabled = TRUE
+         AND (
+           instance_id IS NULL
+           OR ($1::int IS NOT NULL AND instance_id = $1)
+         )
+       ORDER BY rule_type, (instance_id IS NULL) DESC, id ASC`,
+      [forInstanceId ?? null]
+    );
 
-    const result = await pool.query(query);
-    
-    if (result.rows.length === 0) {
-      console.log(`   ⚠️ Nenhuma regra global de blindagem encontrada`);
-      addLog('warning', `[Blindage] Nenhuma regra global de blindagem encontrada`);
-    } else {
-      console.log(`   📋 ${result.rows.length} regra(s) global(is) de blindagem encontrada(s)`);
-      addLog('debug', `[Blindage] ${result.rows.length} regra(s) global(is) encontrada(s): ${result.rows.map(r => r.rule_type).join(', ')}`);
+    const byType = new Map<string, BlindageRule>();
+    for (const row of result.rows) {
+      const r = normalizeRuleRow(row);
+      byType.set(r.rule_type, r);
     }
-    
-    return result.rows;
+    const merged = Array.from(byType.values());
+
+    if (merged.length === 0) {
+      console.log(`   ⚠️ Nenhuma regra de blindagem ativa encontrada`);
+      addLog('warning', `[Blindage] Nenhuma regra ativa (global${forInstanceId ? ` + instância ${forInstanceId}` : ''})`);
+    } else {
+      console.log(
+        `   📋 ${merged.length} regra(s) ativa(s): ${merged.map((r) => r.rule_type).join(', ')}`
+      );
+      addLog(
+        'debug',
+        `[Blindage] Regras ativas: ${merged.map((r) => r.rule_type).join(', ')}`
+      );
+    }
+
+    return merged;
   } catch (error) {
     console.error('Erro ao buscar regras de blindagem:', error);
     addLog('error', `[Blindage] Erro ao buscar regras: ${error}`);
@@ -58,78 +338,84 @@ export async function getActiveRules(instanceId?: number): Promise<BlindageRule[
 }
 
 /**
- * Aplica todas as blindagens antes de enviar mensagem
+ * Aplica todas as blindagens antes de enviar mensagem.
+ * Ordem: validações com regras globais + preferência → seleção de instância →
+ * regras efetivas (global + instância escolhida) para limites, horário e delay.
  */
-export async function applyBlindage(
-  messageData: {
-    to: string;
-    message: string;
-    instanceId?: number;
-    messageType?: string;
-  }
-): Promise<BlindageResult> {
+export async function applyBlindage(messageData: {
+  to: string;
+  message: string;
+  instanceId?: number;
+  messageType?: string;
+}): Promise<BlindageResult> {
   try {
-    // 1. Buscar regras ativas
-    const rules = await getActiveRules(messageData.instanceId);
+    const rulesPass1 = await getActiveRules(messageData.instanceId ?? undefined);
 
-    // 2. Validar número e verificar WhatsApp
-    const numberValidation = await validatePhoneNumber(messageData.to, messageData.instanceId, rules);
+    const numberValidation = await validatePhoneNumber(
+      messageData.to,
+      messageData.instanceId,
+      rulesPass1
+    );
     if (!numberValidation.canSend) {
       return numberValidation;
     }
 
-    // 3. Validar conteúdo
-    const contentValidation = await validateContent(messageData.message, rules);
+    const contentValidation = await validateContent(
+      messageData.message,
+      rulesPass1,
+      messageData.instanceId ?? null
+    );
     if (!contentValidation.canSend) {
       return contentValidation;
     }
 
-    // 4. Selecionar instância (seleção + rotação)
-    const instanceSelection = await selectInstance(messageData.instanceId, rules);
+    const instanceSelection = await selectInstance(messageData.instanceId, rulesPass1);
     if (!instanceSelection.canSend) {
       return instanceSelection;
     }
 
-    // 5. Verificar saúde da instância
-    const healthCheck = await checkInstanceHealth(instanceSelection.selectedInstanceId!, rules);
+    const selectedId = instanceSelection.selectedInstanceId!;
+    const rules = await getActiveRules(selectedId);
+
+    const healthCheck = await checkInstanceHealth(selectedId, rules);
     if (!healthCheck.canSend) {
       return healthCheck;
     }
 
-    // 6. Verificar limites
-    const limitCheck = await checkLimits(instanceSelection.selectedInstanceId!, rules);
+    const limitCheck = await checkLimits(selectedId, rules);
     if (!limitCheck.canSend) {
       return limitCheck;
     }
 
-    // 7. Verificar horários permitidos
-    const timeCheck = await checkAllowedHours(instanceSelection.selectedInstanceId!, rules);
+    const timeCheck = await checkAllowedHours(selectedId, rules);
     if (!timeCheck.canSend) {
       return timeCheck;
     }
 
-    // 8. Calcular delay necessário (global)
-    const delay = await calculateDelay(instanceSelection.selectedInstanceId!, rules);
+    const delay = await calculateDelay(selectedId, rules);
 
-    // 9. Somar delay entre instâncias (se houver)
     let totalDelay = delay;
     if (instanceSelection.delay && instanceSelection.delay > 0) {
       totalDelay = delay + instanceSelection.delay;
-      console.log(`   🔄 Delay entre instâncias: ${instanceSelection.delay}ms | Delay global: ${delay}ms | Total: ${totalDelay}ms`);
-      addLog('info', `[Blindage] Delay entre instâncias: ${instanceSelection.delay}ms + Delay global: ${delay}ms = Total: ${totalDelay}ms`);
+      console.log(
+        `   🔄 Delay entre instâncias: ${instanceSelection.delay}ms | Delay global: ${delay}ms | Total: ${totalDelay}ms`
+      );
+      addLog(
+        'info',
+        `[Blindage] Delay entre instâncias: ${instanceSelection.delay}ms + Delay global: ${delay}ms = Total: ${totalDelay}ms`
+      );
     }
 
-    // 10. Registrar ação de blindagem
-    await logBlindageAction(instanceSelection.selectedInstanceId!, {
+    await logBlindageAction(selectedId, {
       action_type: 'blindage_applied',
       delay_applied: totalDelay,
-      rules_applied: rules.map(r => r.rule_type),
+      rules_applied: rules.map((r) => r.rule_type),
     });
 
     return {
       canSend: true,
       delay: totalDelay,
-      selectedInstanceId: instanceSelection.selectedInstanceId,
+      selectedInstanceId: selectedId,
     };
   } catch (error: any) {
     console.error('Erro ao aplicar blindagem:', error);
@@ -154,7 +440,7 @@ async function validatePhoneNumber(
     return { canSend: true };
   }
 
-  const config = numberValidationRule.config || {};
+  const config = parseRuleConfig(numberValidationRule.config);
 
   // Normalizar número (sempre fazer, mesmo se não validar formato)
   const cleanNumber = phoneNumber.replace(/[\s\-\(\)]/g, '');
@@ -176,7 +462,7 @@ async function validatePhoneNumber(
     // Validar formato E.164 básico: +[1-9][0-9]{1,14}
     const e164Regex = /^\+[1-9]\d{1,14}$/;
     if (!e164Regex.test(normalizedNumber)) {
-      await logBlindageAction(numberValidationRule.instance_id, {
+      await logBlindageAction(instanceId ?? null, {
         action_type: 'number_blocked',
         reason: 'invalid_format',
         phone_number: phoneNumber,
@@ -218,7 +504,7 @@ async function validatePhoneNumber(
         instanceForCheck = instanceResult.rows[0].id;
       }
 
-      // Buscar dados da instância
+      const logInstanceId: number | null = instanceForCheck ?? instanceId ?? null;
       const instanceResult = await pool.query(
         `SELECT instance_name, api_url, api_key 
          FROM instances 
@@ -242,7 +528,6 @@ async function validatePhoneNumber(
       const numberToCheck = normalizedNumber.replace('+', '');
 
       // Verificar cache primeiro
-      const cacheKey = `whatsapp_check_${numberToCheck}`;
       const cacheResult = await pool.query(
         `SELECT is_valid, checked_at 
          FROM number_validation_cache 
@@ -295,36 +580,64 @@ async function validatePhoneNumber(
             }
           }
 
-          // Evolution API retorna array com status de cada número
+          // Evolution API: só considerar válido/inválido com evidência explícita no corpo.
+          let gotExplicitResult = false;
           if (checkResponse && checkResponse.data) {
             if (Array.isArray(checkResponse.data)) {
-              const numberStatus = checkResponse.data.find((n: any) => 
-                n.jid === `${numberToCheck}@s.whatsapp.net` || 
+              const numberStatus = checkResponse.data.find((n: any) =>
+                n.jid === `${numberToCheck}@s.whatsapp.net` ||
                 n.number === numberToCheck ||
                 n.jid?.includes(numberToCheck)
               );
-              isValid = numberStatus?.exists === true || 
-                       numberStatus?.status === 'valid' || 
-                       numberStatus?.onWhatsApp === true ||
-                       numberStatus?.isWhatsApp === true;
+              if (numberStatus != null) {
+                gotExplicitResult = true;
+                isValid =
+                  numberStatus.exists === true ||
+                  numberStatus.status === 'valid' ||
+                  numberStatus.onWhatsApp === true ||
+                  numberStatus.isWhatsApp === true;
+              }
             } else if (checkResponse.data.exists !== undefined) {
+              gotExplicitResult = true;
               isValid = checkResponse.data.exists === true;
-            } else if (checkResponse.status === 200) {
-              // Se retornou 200, assumir que está válido
-              isValid = true;
             }
           }
 
-          // Salvar no cache
-          await pool.query(
-            `INSERT INTO number_validation_cache (phone_number, is_valid, checked_at)
-             VALUES ($1, $2, CURRENT_TIMESTAMP)
-             ON CONFLICT (phone_number) 
-             DO UPDATE SET is_valid = $2, checked_at = CURRENT_TIMESTAMP`,
-            [numberToCheck, isValid]
-          );
+          if (!gotExplicitResult) {
+            const httpStatus = checkResponse?.status ?? 'n/a';
+            console.log(
+              `   ⚠️ Evolution não retornou confirmação explícita de WhatsApp para ${numberToCheck} (HTTP ${httpStatus}) — não cacheando.`
+            );
+            if (config.require_whatsapp_check === true) {
+              await logBlindageAction(logInstanceId, {
+                action_type: 'number_check_failed',
+                reason: 'ambiguous_or_unparsed_response',
+                phone_number: numberToCheck,
+                http_status: httpStatus,
+              }, numberValidationRule.id);
+              return {
+                canSend: false,
+                reason:
+                  'Não foi possível confirmar se o número está no WhatsApp (resposta da API sem campos esperados).',
+                blockedBy: 'number_validation',
+              };
+            }
+            return { canSend: true };
+          }
 
-          console.log(`   ${isValid ? '✅' : '❌'} Número verificado via API: ${numberToCheck} = ${isValid ? 'válido' : 'inválido'}`);
+          if (gotExplicitResult) {
+            await pool.query(
+              `INSERT INTO number_validation_cache (phone_number, is_valid, checked_at)
+               VALUES ($1, $2, CURRENT_TIMESTAMP)
+               ON CONFLICT (phone_number) 
+               DO UPDATE SET is_valid = $2, checked_at = CURRENT_TIMESTAMP`,
+              [numberToCheck, isValid]
+            );
+          }
+
+          console.log(
+            `   ${isValid ? '✅' : '❌'} Número verificado via API: ${numberToCheck} = ${isValid ? 'válido' : 'inválido'}`
+          );
         } catch (apiError: any) {
           console.error('   ⚠️ Erro ao verificar número via Evolution API:', apiError.message);
           
@@ -334,7 +647,7 @@ async function validatePhoneNumber(
             return { canSend: true };
           }
 
-          await logBlindageAction(numberValidationRule.instance_id, {
+          await logBlindageAction(logInstanceId, {
             action_type: 'number_check_failed',
             reason: 'api_error',
             phone_number: numberToCheck,
@@ -350,7 +663,7 @@ async function validatePhoneNumber(
       }
 
       if (!isValid) {
-        await logBlindageAction(numberValidationRule.instance_id, {
+        await logBlindageAction(logInstanceId, {
           action_type: 'number_blocked',
           reason: 'not_on_whatsapp',
           phone_number: numberToCheck,
@@ -384,18 +697,22 @@ async function validatePhoneNumber(
 /**
  * Valida conteúdo da mensagem
  */
-async function validateContent(message: string, rules: BlindageRule[]): Promise<BlindageResult> {
-  const contentRule = rules.find(r => r.rule_type === 'content_validation');
+async function validateContent(
+  message: string,
+  rules: BlindageRule[],
+  logContextInstanceId?: number | null
+): Promise<BlindageResult> {
+  const contentRule = rules.find((r) => r.rule_type === 'content_validation');
   if (!contentRule || !contentRule.enabled) {
     return { canSend: true };
   }
 
-  const config = contentRule.config || {};
-  const instanceId = contentRule.instance_id;
+  const config = parseRuleConfig(contentRule.config);
+  const logInstanceId = (contentRule.instance_id as number | null) ?? logContextInstanceId ?? null;
 
   // Verificar tamanho máximo
   if (config.max_length && message.length > config.max_length) {
-    await logBlindageAction(instanceId, {
+    await logBlindageAction(logInstanceId, {
       action_type: 'content_blocked',
       reason: 'message_too_long',
       message_length: message.length,
@@ -414,7 +731,7 @@ async function validateContent(message: string, rules: BlindageRule[]): Promise<
     const lowerMessage = message.toLowerCase();
     for (const word of config.blocked_words) {
       if (lowerMessage.includes(word.toLowerCase())) {
-        await logBlindageAction(instanceId, {
+        await logBlindageAction(logInstanceId, {
           action_type: 'content_blocked',
           reason: 'blocked_word',
           word: word,
@@ -444,10 +761,7 @@ async function selectInstance(
   let availableInstanceIds: number[] = [];
   
   if (selectionRule && selectionRule.enabled) {
-    const config = selectionRule.config || {};
-    
-    // Parse config se for string (vindo do banco)
-    const parsedConfig = typeof config === 'string' ? JSON.parse(config) : config;
+    const parsedConfig = parseRuleConfig(selectionRule.config);
     const selectedIds = Array.isArray(parsedConfig.selected_instance_ids) ? parsedConfig.selected_instance_ids : [];
     
     console.log(`🔍 Regra de seleção encontrada. IDs selecionados:`, selectedIds);
@@ -506,7 +820,7 @@ async function selectInstance(
     };
   }
 
-  const config = rotationRule.config || {};
+  const config = parseRuleConfig(rotationRule.config);
   
   // Buscar instâncias disponíveis com informações de uso
   const instancesResult = await pool.query(
@@ -578,12 +892,14 @@ async function checkInstanceHealth(
   instanceId: number,
   rules: BlindageRule[]
 ): Promise<BlindageResult> {
-  const healthRule = rules.find(r => r.rule_type === 'health_check');
+  const healthRule = rules.find((r) => r.rule_type === 'health_check');
   if (!healthRule || !healthRule.enabled) {
     return { canSend: true };
   }
 
-  const config = healthRule.config || {};
+  const config = parseRuleConfig(healthRule.config);
+  const pauseIfDown = config.pause_if_down !== false;
+  const pauseIfDegraded = config.pause_if_degraded !== false;
 
   const instanceResult = await pool.query(
     `SELECT health_status, status FROM instances WHERE id = $1`,
@@ -600,42 +916,68 @@ async function checkInstanceHealth(
 
   const instance = instanceResult.rows[0];
 
-  // Verificar se a instância está realmente conectada (status é mais confiável que health_status)
-  // Se status = 'connected', a instância está funcionando, independente do health_status
-  if (instance.status === 'connected') {
-    // Se está conectada, permitir envio mesmo se health_status estiver como 'down' ou 'degraded'
-    // O health_status pode estar desatualizado, mas o status 'connected' é atualizado em tempo real
-    return { canSend: true };
+  if (instance.status !== 'connected') {
+    await logBlindageAction(instanceId, {
+      action_type: 'health_blocked',
+      reason: 'instance_not_connected',
+      status: instance.status,
+      health_status: instance.health_status,
+    }, healthRule.id);
+
+    return {
+      canSend: false,
+      reason: `Instância não está conectada (status: ${instance.status})`,
+      blockedBy: 'health_check',
+    };
   }
 
-  // Se não está conectada, bloquear
-  await logBlindageAction(instanceId, {
-    action_type: 'health_blocked',
-    reason: 'instance_not_connected',
-    status: instance.status,
-    health_status: instance.health_status,
-  }, healthRule.id);
+  const hs = instance.health_status || 'healthy';
 
-  return {
-    canSend: false,
-    reason: `Instância não está conectada (status: ${instance.status})`,
-    blockedBy: 'health_check',
-  };
+  if (hs === 'down' && pauseIfDown) {
+    await logBlindageAction(instanceId, {
+      action_type: 'health_blocked',
+      reason: 'health_down',
+      health_status: hs,
+      status: instance.status,
+    }, healthRule.id);
+    return {
+      canSend: false,
+      reason: 'Instância com saúde "down" — envio pausado pela blindagem.',
+      blockedBy: 'health_check',
+    };
+  }
+
+  if (hs === 'degraded' && pauseIfDegraded) {
+    await logBlindageAction(instanceId, {
+      action_type: 'health_blocked',
+      reason: 'health_degraded',
+      health_status: hs,
+      status: instance.status,
+    }, healthRule.id);
+    return {
+      canSend: false,
+      reason: 'Instância degradada — envio pausado pela blindagem.',
+      blockedBy: 'health_check',
+    };
+  }
+
+  return { canSend: true };
 }
 
 /**
  * Verifica limites de envio
  */
 async function checkLimits(instanceId: number, rules: BlindageRule[]): Promise<BlindageResult> {
-  const limitRule = rules.find(r => r.rule_type === 'message_limit');
+  const limitRule = rules.find((r) => r.rule_type === 'message_limit');
   if (!limitRule || !limitRule.enabled) {
     return { canSend: true };
   }
 
-  const config = limitRule.config || {};
+  const config = parseRuleConfig(limitRule.config);
+  const tz = getBlindageTimezoneFromRules(rules);
   const now = new Date();
-  const currentHour = now.getHours();
-  const currentDate = now.toISOString().split('T')[0];
+  const currentHour = getCalendarHourInTimezone(now, tz);
+  const currentDate = formatCalendarDateInTimezone(now, tz);
 
   // Verificar limite por hora
   if (config.max_per_hour) {
@@ -716,7 +1058,7 @@ async function checkAllowedHours(
     return { canSend: true };
   }
 
-  const config = timeRule.config || {};
+  const config = parseRuleConfig(timeRule.config);
   const timezone = config.timezone || 'America/Sao_Paulo';
   
   // Obter hora atual no timezone configurado
@@ -788,85 +1130,109 @@ async function checkAllowedHours(
 }
 
 /**
- * Calcula delay necessário antes de enviar
- * IMPORTANTE: Calcula baseado na última mensagem GLOBAL (de qualquer instância) para evitar envios simultâneos
+ * Calcula delay (ms) antes de enviar, com base na última mensagem global e na regra `message_delay`.
+ * - Se ainda não decorreu o intervalo mínimo desde o último envio global: espera só o restante.
+ * - Se já decorreu: aplica apenas jitter leve (evita burst simultâneo sem "penalizar" com o mínimo inteiro de novo).
  */
 async function calculateDelay(instanceId: number, rules: BlindageRule[]): Promise<number> {
-  const delayRule = rules.find(r => r.rule_type === 'message_delay');
+  const delayRule = rules.find((r) => r.rule_type === 'message_delay');
   if (!delayRule || !delayRule.enabled) {
     console.log('   ℹ️ Regra de delay desabilitada ou não encontrada. Sem delay.');
     return 0;
   }
 
-  const config = delayRule.config || {};
-  let minDelaySeconds = config.min_delay_seconds || 3;
+  const config = parseRuleConfig(delayRule.config);
+  const tz = getBlindageTimezoneFromRules(rules);
+  let minDelaySeconds = Math.max(0.5, Number(config.min_delay_seconds) || 5);
 
-  // Delay progressivo
   if (config.progressive) {
-    // Buscar quantas mensagens foram enviadas na última hora (GLOBAL, não por instância)
     const now = new Date();
-    const currentHour = now.getHours();
-    const currentDate = now.toISOString().split('T')[0];
+    const currentHour = getCalendarHourInTimezone(now, tz);
+    const currentDate = formatCalendarDateInTimezone(now, tz);
 
     const metrics = await pool.query(
       `SELECT SUM(messages_sent) as total_messages
        FROM message_metrics 
-       WHERE metric_date = $1 
+       WHERE metric_date = $1::date 
          AND hour = $2`,
       [currentDate, currentHour]
     );
 
-    const messagesThisHour = parseInt(metrics.rows[0]?.total_messages || '0');
-    const baseDelay = config.base_delay || minDelaySeconds;
-    const increment = config.increment_per_message || 0.5;
+    const messagesThisHour = parseInt(metrics.rows[0]?.total_messages || '0', 10);
+    const baseDelay = Math.max(minDelaySeconds, Number(config.base_delay) || minDelaySeconds);
+    const increment = Number(config.increment_per_message);
+    const inc = Number.isFinite(increment) ? increment : 0.5;
 
-    minDelaySeconds = baseDelay + (messagesThisHour * increment);
+    minDelaySeconds = baseDelay + messagesThisHour * inc;
 
-    // Limitar delay máximo
-    if (config.max_delay_seconds && minDelaySeconds > config.max_delay_seconds) {
-      minDelaySeconds = config.max_delay_seconds;
+    if (config.max_delay_seconds != null) {
+      const cap = Number(config.max_delay_seconds);
+      if (Number.isFinite(cap) && cap > 0 && minDelaySeconds > cap) {
+        minDelaySeconds = cap;
+      }
     }
   }
 
-  // CRÍTICO: Verificar última mensagem enviada GLOBALMENTE (de qualquer instância)
-  // Isso garante que não haja envios simultâneos mesmo com rotação de instâncias
+  let jMin =
+    Number.isFinite(Number(config.jitter_min_ms)) && Number(config.jitter_min_ms) >= 0
+      ? Number(config.jitter_min_ms)
+      : 150;
+  let jMax =
+    Number.isFinite(Number(config.jitter_max_ms)) && Number(config.jitter_max_ms) > 0
+      ? Number(config.jitter_max_ms)
+      : 450;
+  if (jMax < jMin) {
+    const swap = jMin;
+    jMin = jMax;
+    jMax = swap;
+  }
+  const jitterMin = jMin;
+  const jitterMax = jMax;
+
   const globalLastSentResult = await pool.query(
     `SELECT MAX(last_message_sent_at) as global_last_sent 
      FROM instances 
      WHERE status = 'connected' AND last_message_sent_at IS NOT NULL`
   );
 
-  let delayNeeded = 0;
-  if (globalLastSentResult.rows[0]?.global_last_sent) {
-    const lastSent = new Date(globalLastSentResult.rows[0].global_last_sent);
-    const secondsSinceLastSent = (Date.now() - lastSent.getTime()) / 1000;
+  const globalLast = globalLastSentResult.rows[0]?.global_last_sent;
 
-    console.log(`   ⏱️ Última mensagem global: ${secondsSinceLastSent.toFixed(2)}s atrás | Delay mínimo necessário: ${minDelaySeconds}s`);
-
-    if (secondsSinceLastSent < minDelaySeconds) {
-      // Precisa esperar mais tempo
-      delayNeeded = (minDelaySeconds - secondsSinceLastSent) * 1000; // em milissegundos
-      console.log(`   ⏳ Delay necessário: ${(delayNeeded / 1000).toFixed(2)}s (${delayNeeded}ms)`);
-    } else {
-      // Já passou o tempo mínimo, mas ainda aplicar um pequeno delay para garantir espaçamento
-      // Aplicar pelo menos o delay mínimo configurado
-      delayNeeded = minDelaySeconds * 1000;
-      console.log(`   ⏳ Aplicando delay mínimo: ${minDelaySeconds}s (${delayNeeded}ms)`);
-    }
-  } else {
-    // Primeira mensagem do sistema, aplicar delay mínimo
-    delayNeeded = minDelaySeconds * 1000;
-    console.log(`   ⏳ Primeira mensagem do sistema, aplicando delay mínimo: ${minDelaySeconds}s (${delayNeeded}ms)`);
+  if (!globalLast) {
+    const delayMs = Math.ceil(minDelaySeconds * 1000);
+    console.log(
+      `   ⏳ Primeiro envio registrado (sem last_message_sent_at global) — delay mínimo: ${minDelaySeconds}s (${delayMs}ms)`
+    );
+    return delayMs;
   }
 
-  return Math.ceil(delayNeeded);
+  const lastSent = new Date(globalLast);
+  const secondsSinceLastSent = (Date.now() - lastSent.getTime()) / 1000;
+
+  console.log(
+    `   ⏱️ Última mensagem global: ${secondsSinceLastSent.toFixed(2)}s atrás | Intervalo mínimo: ${minDelaySeconds}s`
+  );
+
+  if (secondsSinceLastSent < minDelaySeconds) {
+    const waitMs = Math.ceil((minDelaySeconds - secondsSinceLastSent) * 1000);
+    console.log(`   ⏳ Aguardando intervalo mínimo: ${(waitMs / 1000).toFixed(2)}s (${waitMs}ms)`);
+    return waitMs;
+  }
+
+  const jitterRange = jitterMax - jitterMin;
+  const jitterMs =
+    jitterRange <= 0 ? jitterMin : jitterMin + Math.floor(Math.random() * (jitterRange + 1));
+
+  console.log(
+    `   ⏳ Intervalo mínimo já respeitado — jitter ${jitterMs}ms (faixa ${jitterMin}–${jitterMax}ms)`
+  );
+  return jitterMs;
 }
 
 /**
  * Registra ação de blindagem
  */
 async function logBlindageAction(
-  instanceId: number,
+  instanceId: number | null,
   actionData: any,
   ruleId?: number
 ): Promise<void> {
@@ -887,116 +1253,42 @@ async function logBlindageAction(
  */
 export async function createGlobalDefaultRules(): Promise<void> {
   try {
-    const defaultRules = [
-      {
-        instance_id: null, // NULL = regra global
-        rule_name: 'Delay Mínimo Entre Mensagens',
-        rule_type: 'message_delay',
-        enabled: true,
-        config: {
-          min_delay_seconds: 3,
-          max_delay_seconds: 10,
-          progressive: true,
-          base_delay: 3,
-          increment_per_message: 0.5,
-        },
-      },
-      {
-        instance_id: null,
-        rule_name: 'Limite de Mensagens',
-        rule_type: 'message_limit',
-        enabled: true,
-        config: {
-          max_per_hour: 50,
-          max_per_day: 500,
-          reset_hour: 0,
-          reset_day: 1,
-        },
-      },
-      {
-        instance_id: null,
-        rule_name: 'Rotação de Instâncias',
-        rule_type: 'instance_rotation',
-        enabled: true,
-        config: {
-          enabled: true,
-          min_delay_between_instances: 1,
-          round_robin: true,
-        },
-      },
-      {
-        instance_id: null,
-        rule_name: 'Horários Permitidos',
-        rule_type: 'allowed_hours',
-        enabled: true,
-        config: {
-          allowed_hours: [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20],
-          blocked_hours: [22, 23, 0, 1, 2, 3, 4, 5, 6, 7],
-          timezone: 'America/Sao_Paulo',
-        },
-      },
-      {
-        instance_id: null,
-        rule_name: 'Health Check',
-        rule_type: 'health_check',
-        enabled: true,
-        config: {
-          pause_if_degraded: true,
-          pause_if_down: true,
-          check_interval_seconds: 60,
-        },
-      },
-      {
-        instance_id: null,
-        rule_name: 'Validação de Conteúdo',
-        rule_type: 'content_validation',
-        enabled: true,
-        config: {
-          max_length: 4096,
-          blocked_words: [],
-        },
-      },
-      {
-        instance_id: null,
-        rule_name: 'Validação de Número',
-        rule_type: 'number_validation',
-        enabled: true,
-        config: {
-          validate_format: true,
-          check_whatsapp: true,
-          require_whatsapp_check: false,
-          default_country_code: '55',
-          cache_hours: 24,
-          timeout_ms: 10000,
-        },
-      },
-      {
-        instance_id: null,
-        rule_name: 'Seleção de Instâncias',
-        rule_type: 'instance_selection',
-        enabled: true,
-        config: {
-          selected_instance_ids: [],
-          max_simultaneous: 1,
-          auto_switch_on_failure: true,
-          retry_after_pause: true,
-        },
-      },
+    const defaultRules: Array<{
+      instance_id: null;
+      rule_name: string;
+      rule_type: string;
+      enabled: boolean;
+    }> = [
+      { instance_id: null, rule_name: 'Delay Mínimo Entre Mensagens', rule_type: 'message_delay', enabled: true },
+      { instance_id: null, rule_name: 'Limite de Mensagens', rule_type: 'message_limit', enabled: true },
+      { instance_id: null, rule_name: 'Rotação de Instâncias', rule_type: 'instance_rotation', enabled: true },
+      { instance_id: null, rule_name: 'Horários Permitidos', rule_type: 'allowed_hours', enabled: true },
+      { instance_id: null, rule_name: 'Health Check', rule_type: 'health_check', enabled: true },
+      { instance_id: null, rule_name: 'Validação de Conteúdo', rule_type: 'content_validation', enabled: true },
+      { instance_id: null, rule_name: 'Validação de Número', rule_type: 'number_validation', enabled: true },
+      { instance_id: null, rule_name: 'Seleção de Instâncias', rule_type: 'instance_selection', enabled: true },
     ];
 
     for (const rule of defaultRules) {
+      const template = BLINDAGE_CANONICAL_CONFIGS[rule.rule_type];
+      if (!template) {
+        console.warn(`   ⚠️ Sem template canônico para rule_type=${rule.rule_type}, ignorando INSERT`);
+        continue;
+      }
+      const config = { ...template };
+
       // Verificar se a regra já existe antes de inserir
       const existing = await pool.query(
         `SELECT id FROM blindage_rules 
          WHERE rule_type = $1 AND instance_id IS NULL`,
         [rule.rule_type]
       );
-      
+
       if (existing.rows.length === 0) {
         await pool.query(
           `INSERT INTO blindage_rules (instance_id, rule_name, rule_type, enabled, config)
            VALUES ($1, $2, $3, $4, $5)`,
-          [rule.instance_id, rule.rule_name, rule.rule_type, rule.enabled, JSON.stringify(rule.config)]
+          [rule.instance_id, rule.rule_name, rule.rule_type, rule.enabled, JSON.stringify(config)]
         );
         console.log(`   ✅ Regra global criada: ${rule.rule_type}`);
       } else {

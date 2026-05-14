@@ -17,7 +17,7 @@ import dispatchRoutes from './routes/dispatches';
 import logsRoutes from './routes/logs';
 import { errorHandler } from './middleware/errorHandler';
 import { executeDevocionalDispatch } from './services/devocionalScheduler';
-import { createGlobalDefaultRules } from './services/blindage';
+import { createGlobalDefaultRules, reconcileBlindageRuleConfigs } from './services/blindage';
 import { processRetryQueue } from './services/retryQueue';
 
 dotenv.config();
@@ -113,6 +113,16 @@ async function start() {
     // Criar regras globais de blindagem padrão se não existirem
     await createGlobalDefaultRules();
     console.log('✅ Regras globais de blindagem verificadas');
+
+    // Reconciliar JSON de regras existentes (chaves novas do template, sem apagar customizações)
+    if (process.env.BLINDAGE_RECONCILE_ON_STARTUP !== 'false') {
+      await reconcileBlindageRuleConfigs({
+        strict: process.env.BLINDAGE_RECONCILE_STRICT === 'true',
+        dryRun: false,
+      });
+    } else {
+      console.log('ℹ️ Reconciliação de blindagem no startup desativada (BLINDAGE_RECONCILE_ON_STARTUP=false)');
+    }
     
     server = app.listen(PORT, '0.0.0.0', () => {
       console.log(`🚀 Servidor rodando na porta ${PORT}`);
