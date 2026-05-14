@@ -449,7 +449,7 @@ export async function initializeDatabase() {
         bible_version VARCHAR(50) DEFAULT 'ACF',
         signature VARCHAR(255) DEFAULT 'Alex e Daniela Mantovani',
         gemini_api_key TEXT,
-        model_name VARCHAR(100) DEFAULT 'gemini-1.5-flash',
+        model_name VARCHAR(100) DEFAULT 'gemini-2.5-flash',
         character_limit INTEGER DEFAULT 4000,
         enabled BOOLEAN DEFAULT TRUE,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -460,8 +460,15 @@ export async function initializeDatabase() {
     // Inserir configuração padrão de IA se não existir
     await client.query(`
       INSERT INTO devocional_ai_config (central_theme, journey_description, preaching_tone, bible_version, signature, model_name)
-      SELECT 'Expressar', 'Uma jornada de fé focada em expressar Cristo no dia a dia.', 'Afetuoso, inspirador, levemente bem humorado e acolhedor.', 'ACF', 'Alex e Daniela Mantovani', 'gemini-1.5-flash'
+      SELECT 'Expressar', 'Uma jornada de fé focada em expressar Cristo no dia a dia.', 'Afetuoso, inspirador, levemente bem humorado e acolhedor.', 'ACF', 'Alex e Daniela Mantovani', 'gemini-2.5-flash'
       WHERE NOT EXISTS (SELECT 1 FROM devocional_ai_config)
+    `);
+
+    // Migrar modelos deprecados para o modelo atual
+    await client.query(`
+      UPDATE devocional_ai_config
+      SET model_name = 'gemini-2.5-flash'
+      WHERE model_name IN ('gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-2.0-flash', 'gemini-2.0-flash-lite')
     `);
 
     // Criar tabela de configuração de IA para marketing

@@ -224,8 +224,8 @@ export default function SessaoDevocional() {
                     onChange={(e) => setConfig({ ...config, model_name: e.target.value })}
                     className="input-dark"
                   >
-                    <option value="gemini-1.5-flash">Gemini 1.5 Flash (Rápido)</option>
-                    <option value="gemini-1.5-pro">Gemini 1.5 Pro (Mais profundo)</option>
+                    <option value="gemini-2.5-flash">Gemini 2.5 Flash (Rápido ⚡)</option>
+                    <option value="gemini-2.5-pro">Gemini 2.5 Pro (Mais profundo 🧠)</option>
                   </select>
                 </div>
               </div>
