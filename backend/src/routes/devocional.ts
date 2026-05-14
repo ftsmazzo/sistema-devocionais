@@ -560,9 +560,11 @@ router.put('/ai-config', authenticateToken, async (req: AuthRequest, res) => {
         enabled ?? null
       ];
 
+      let nextParam = 9;
       if (updateKey) {
-        sets.splice(sets.length - 1, 0, `gemini_api_key = $${params.length + 1}`);
+        sets.splice(sets.length - 1, 0, `gemini_api_key = $${nextParam}`);
         params.push(gemini_api_key.trim());
+        nextParam++;
       }
 
       params.push(id);
@@ -570,7 +572,7 @@ router.put('/ai-config', authenticateToken, async (req: AuthRequest, res) => {
       const query = `
         UPDATE devocional_ai_config
         SET ${sets.join(', ')}
-        WHERE id = $${params.length}
+        WHERE id = $${nextParam}
         RETURNING *
       `;
 
@@ -585,6 +587,256 @@ router.put('/ai-config', authenticateToken, async (req: AuthRequest, res) => {
   } catch (error: any) {
     console.error('❌ Erro ao atualizar configuração de IA:', error);
     res.status(500).json({ error: 'Erro ao salvar configuração de IA' });
+  }
+});
+
+function normJourneyDate(v: unknown): string | null {
+  if (v == null || v === '') return null;
+  const s = String(v).trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
+}
+
+/**
+ * Listar jornadas (cada uma com período e texto próprios — a ativa é usada na geração)
+ * GET /api/devocional/journeys
+ */
+router.get('/journeys', authenticateToken, async (req: AuthRequest, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, title, central_theme, journey_description, preaching_tone,
+              bible_version, signature, start_date, end_date, is_active,
+              created_at, updated_at
+       FROM devocional_journeys
+       ORDER BY start_date DESC, id DESC`
+    );
+    res.json({ journeys: result.rows });
+  } catch (error: any) {
+    console.error('❌ Erro ao listar jornadas:', error);
+    res.status(500).json({ error: 'Erro ao listar jornadas' });
+  }
+});
+
+/**
+ * Criar jornada
+ * POST /api/devocional/journeys
+ */
+router.post('/journeys', authenticateToken, async (req: AuthRequest, res) => {
+  try {
+    const {
+      title, central_theme, journey_description, preaching_tone,
+      bible_version, signature, start_date, end_date, activate
+    } = req.body;
+
+    const titleNorm = title != null && String(title).trim() ? String(title).trim() : 'Nova jornada';
+    const start = normJourneyDate(start_date);
+    if (!start) {
+      return res.status(400).json({ error: 'Data de início da jornada é obrigatória (AAAA-MM-DD).' });
+    }
+    const end = normJourneyDate(end_date);
+    if (end && end < start) {
+      return res.status(400).json({ error: 'Data fim deve ser >= data início.' });
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      if (activate === true) {
+        await client.query(`UPDATE devocional_journeys SET is_active = false`);
+      }
+      const ins = await client.query(
+        `INSERT INTO devocional_journeys (
+          title, central_theme, journey_description, preaching_tone,
+          bible_version, signature, start_date, end_date, is_active
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        RETURNING *`,
+        [
+          titleNorm,
+          central_theme ?? '',
+          journey_description ?? '',
+          preaching_tone ?? '',
+          bible_version ?? 'ACF',
+          signature ?? '',
+          start,
+          end,
+          activate === true
+        ]
+      );
+      if (activate !== true) {
+        const cnt = await client.query(
+          `SELECT COUNT(*)::int AS c FROM devocional_journeys WHERE is_active = true`
+        );
+        if (cnt.rows[0].c === 0) {
+          await client.query(
+            `UPDATE devocional_journeys SET is_active = true WHERE id = $1`,
+            [ins.rows[0].id]
+          );
+        }
+      }
+      await client.query('COMMIT');
+      const fin = await pool.query(`SELECT * FROM devocional_journeys WHERE id = $1`, [ins.rows[0].id]);
+      res.status(201).json({ success: true, journey: fin.rows[0] });
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
+  } catch (error: any) {
+    console.error('❌ Erro ao criar jornada:', error);
+    res.status(500).json({ error: 'Erro ao criar jornada', message: error.message });
+  }
+});
+
+/**
+ * Atualizar jornada
+ * PUT /api/devocional/journeys/:journeyId
+ */
+router.put('/journeys/:journeyId', authenticateToken, async (req: AuthRequest, res) => {
+  try {
+    const journeyId = parseInt(req.params.journeyId, 10);
+    if (Number.isNaN(journeyId)) {
+      return res.status(400).json({ error: 'ID inválido' });
+    }
+
+    const {
+      title, central_theme, journey_description, preaching_tone,
+      bible_version, signature, start_date, end_date
+    } = req.body;
+
+    const start = normJourneyDate(start_date);
+    if (!start) {
+      return res.status(400).json({ error: 'Data de início da jornada é obrigatória (AAAA-MM-DD).' });
+    }
+    const end = normJourneyDate(end_date);
+    if (end && end < start) {
+      return res.status(400).json({ error: 'Data fim deve ser >= data início.' });
+    }
+
+    const titleNorm = title != null && String(title).trim() ? String(title).trim() : 'Jornada';
+
+    const result = await pool.query(
+      `UPDATE devocional_journeys SET
+        title = $1,
+        central_theme = $2,
+        journey_description = $3,
+        preaching_tone = $4,
+        bible_version = $5,
+        signature = $6,
+        start_date = $7::date,
+        end_date = $8::date,
+        updated_at = CURRENT_TIMESTAMP
+       WHERE id = $9
+       RETURNING *`,
+      [
+        titleNorm,
+        central_theme ?? '',
+        journey_description ?? '',
+        preaching_tone ?? '',
+        bible_version ?? 'ACF',
+        signature ?? '',
+        start,
+        end,
+        journeyId
+      ]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Jornada não encontrada' });
+    }
+
+    res.json({ success: true, journey: result.rows[0] });
+  } catch (error: any) {
+    console.error('❌ Erro ao atualizar jornada:', error);
+    res.status(500).json({ error: 'Erro ao atualizar jornada' });
+  }
+});
+
+/**
+ * Definir jornada ativa (única usada na geração por IA)
+ * POST /api/devocional/journeys/:journeyId/activate
+ */
+router.post('/journeys/:journeyId/activate', authenticateToken, async (req: AuthRequest, res) => {
+  try {
+    const journeyId = parseInt(req.params.journeyId, 10);
+    if (Number.isNaN(journeyId)) {
+      return res.status(400).json({ error: 'ID inválido' });
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const chk = await client.query(`SELECT id FROM devocional_journeys WHERE id = $1`, [journeyId]);
+      if (chk.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: 'Jornada não encontrada' });
+      }
+      await client.query(`UPDATE devocional_journeys SET is_active = false`);
+      await client.query(
+        `UPDATE devocional_journeys SET is_active = true, updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
+        [journeyId]
+      );
+      await client.query('COMMIT');
+      const result = await pool.query(`SELECT * FROM devocional_journeys WHERE id = $1`, [journeyId]);
+      res.json({ success: true, journey: result.rows[0] });
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
+  } catch (error: any) {
+    console.error('❌ Erro ao ativar jornada:', error);
+    res.status(500).json({ error: 'Erro ao ativar jornada' });
+  }
+});
+
+/**
+ * Excluir jornada
+ * DELETE /api/devocional/journeys/:journeyId
+ */
+router.delete('/journeys/:journeyId', authenticateToken, async (req: AuthRequest, res) => {
+  try {
+    const journeyId = parseInt(req.params.journeyId, 10);
+    if (Number.isNaN(journeyId)) {
+      return res.status(400).json({ error: 'ID inválido' });
+    }
+
+    const row = await pool.query(
+      `SELECT is_active FROM devocional_journeys WHERE id = $1`,
+      [journeyId]
+    );
+    if (row.rows.length === 0) {
+      return res.status(404).json({ error: 'Jornada não encontrada' });
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      if (row.rows[0].is_active) {
+        const other = await client.query(
+          `SELECT id FROM devocional_journeys WHERE id <> $1 ORDER BY start_date DESC, id DESC LIMIT 1`,
+          [journeyId]
+        );
+        if (other.rows.length > 0) {
+          await client.query(`UPDATE devocional_journeys SET is_active = false`);
+          await client.query(
+            `UPDATE devocional_journeys SET is_active = true WHERE id = $1`,
+            [other.rows[0].id]
+          );
+        }
+      }
+      await client.query(`DELETE FROM devocional_journeys WHERE id = $1`, [journeyId]);
+      await client.query('COMMIT');
+      res.json({ success: true });
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
+  } catch (error: any) {
+    console.error('❌ Erro ao excluir jornada:', error);
+    res.status(500).json({ error: 'Erro ao excluir jornada' });
   }
 });
 

@@ -503,6 +503,53 @@ export async function initializeDatabase() {
       WHERE model_name IN ('gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-2.0-flash', 'gemini-2.0-flash-lite')
     `);
 
+    await client.query(`
+      ALTER TABLE devocional_ai_config
+        ADD COLUMN IF NOT EXISTS journey_title VARCHAR(255),
+        ADD COLUMN IF NOT EXISTS journey_start_date DATE,
+        ADD COLUMN IF NOT EXISTS journey_end_date DATE
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS devocional_journeys (
+        id SERIAL PRIMARY KEY,
+        title VARCHAR(255) NOT NULL DEFAULT 'Jornada',
+        central_theme VARCHAR(255) NOT NULL,
+        journey_description TEXT NOT NULL,
+        preaching_tone TEXT NOT NULL,
+        bible_version VARCHAR(50) NOT NULL DEFAULT 'ACF',
+        signature VARCHAR(255) NOT NULL DEFAULT '',
+        start_date DATE NOT NULL,
+        end_date DATE,
+        is_active BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_devocional_journeys_active ON devocional_journeys (is_active) WHERE is_active = true
+    `);
+
+    await client.query(`
+      INSERT INTO devocional_journeys (
+        title, central_theme, journey_description, preaching_tone,
+        bible_version, signature, start_date, end_date, is_active
+      )
+      SELECT
+        COALESCE(NULLIF(TRIM(dac.journey_title), ''), 'Jornada principal'),
+        dac.central_theme,
+        dac.journey_description,
+        dac.preaching_tone,
+        dac.bible_version,
+        dac.signature,
+        COALESCE(dac.journey_start_date, CURRENT_DATE),
+        dac.journey_end_date,
+        true
+      FROM (SELECT * FROM devocional_ai_config ORDER BY id DESC LIMIT 1) dac
+      WHERE NOT EXISTS (SELECT 1 FROM devocional_journeys)
+    `);
+
     // Criar tabela de configuração de IA para marketing
     await client.query(`
       CREATE TABLE IF NOT EXISTS marketing_ai_config (

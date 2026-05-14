@@ -14,7 +14,10 @@ import {
   Brain,
   MessageSquare,
   History,
-  Key
+  Key,
+  Plus,
+  Trash2,
+  Star
 } from 'lucide-react';
 
 interface AIConfig {
@@ -28,6 +31,34 @@ interface AIConfig {
   character_limit: number;
 }
 
+interface DevocionalJourney {
+  id: number;
+  title: string;
+  central_theme: string;
+  journey_description: string;
+  preaching_tone: string;
+  bible_version: string;
+  signature: string;
+  start_date: string;
+  end_date: string | null;
+  is_active: boolean;
+}
+
+function todaySaoPauloYmd(): string {
+  const fmt = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Sao_Paulo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  });
+  return fmt.format(new Date());
+}
+
+function ymd(v: string | null | undefined): string {
+  if (!v) return '';
+  return String(v).slice(0, 10);
+}
+
 export default function SessaoDevocional() {
   const [config, setConfig] = useState<AIConfig>({
     central_theme: '',
@@ -39,12 +70,16 @@ export default function SessaoDevocional() {
     model_name: 'gemini-2.5-flash',
     character_limit: 4000
   });
+  const [journeys, setJourneys] = useState<DevocionalJourney[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [savingJourneyId, setSavingJourneyId] = useState<number | null>(null);
   const [generating, setGenerating] = useState(false);
   const [testResult, setTestResult] = useState<any>(null);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
-  
+  const [showNewJourney, setShowNewJourney] = useState(false);
+  const [newActivate, setNewActivate] = useState(true);
+
   const navigate = useNavigate();
   const { user } = useAuthStore();
 
@@ -53,19 +88,28 @@ export default function SessaoDevocional() {
       navigate('/login');
       return;
     }
-    loadConfig();
+    loadAll();
   }, [user, navigate]);
 
-  const loadConfig = async () => {
+  const loadAll = async () => {
     try {
       setLoading(true);
-      const response = await api.get('/devocional/ai-config');
-      if (response.data.config) {
-        setConfig(response.data.config);
+      const [cfgRes, jRes] = await Promise.all([
+        api.get('/devocional/ai-config'),
+        api.get('/devocional/journeys')
+      ]);
+      if (cfgRes.data.config) {
+        setConfig(cfgRes.data.config);
       }
+      const list: DevocionalJourney[] = (jRes.data.journeys || []).map((j: DevocionalJourney) => ({
+        ...j,
+        start_date: ymd(j.start_date as unknown as string),
+        end_date: j.end_date ? ymd(j.end_date as unknown as string) : null
+      }));
+      setJourneys(list);
     } catch (error) {
-      console.error('Erro ao carregar config de IA:', error);
-      setToast({ message: 'Erro ao carregar configurações.', type: 'error' });
+      console.error('Erro ao carregar:', error);
+      setToast({ message: 'Erro ao carregar configurações ou jornadas.', type: 'error' });
     } finally {
       setLoading(false);
     }
@@ -76,7 +120,7 @@ export default function SessaoDevocional() {
     setSaving(true);
     try {
       await api.put('/devocional/ai-config', config);
-      setToast({ message: 'Configurações de IA salvas com sucesso!', type: 'success' });
+      setToast({ message: 'Configurações globais salvas!', type: 'success' });
     } catch (error) {
       setToast({ message: 'Erro ao salvar configurações.', type: 'error' });
     } finally {
@@ -84,16 +128,90 @@ export default function SessaoDevocional() {
     }
   };
 
-  const [testDate, setTestDate] = useState(new Date().toISOString().split('T')[0]);
+  const updateJourneyLocal = (id: number, patch: Partial<DevocionalJourney>) => {
+    setJourneys(prev => prev.map(j => (j.id === id ? { ...j, ...patch } : j)));
+  };
+
+  const saveJourney = async (j: DevocionalJourney) => {
+    setSavingJourneyId(j.id);
+    try {
+      await api.put(`/devocional/journeys/${j.id}`, {
+        title: j.title,
+        central_theme: j.central_theme,
+        journey_description: j.journey_description,
+        preaching_tone: j.preaching_tone,
+        bible_version: j.bible_version,
+        signature: j.signature,
+        start_date: j.start_date,
+        end_date: j.end_date || null
+      });
+      setToast({ message: `Jornada "${j.title}" salva.`, type: 'success' });
+      await loadAll();
+    } catch (error: any) {
+      setToast({
+        message: error.response?.data?.error || 'Erro ao salvar jornada.',
+        type: 'error'
+      });
+    } finally {
+      setSavingJourneyId(null);
+    }
+  };
+
+  const activateJourney = async (id: number) => {
+    try {
+      await api.post(`/devocional/journeys/${id}/activate`);
+      setToast({ message: 'Jornada ativa atualizada. A geração usará esta jornada.', type: 'success' });
+      await loadAll();
+    } catch (error) {
+      setToast({ message: 'Erro ao ativar jornada.', type: 'error' });
+    }
+  };
+
+  const deleteJourney = async (j: DevocionalJourney) => {
+    if (!confirm(`Excluir a jornada "${j.title}"? Esta ação não pode ser desfeita.`)) return;
+    try {
+      await api.delete(`/devocional/journeys/${j.id}`);
+      setToast({ message: 'Jornada excluída.', type: 'success' });
+      await loadAll();
+    } catch (error) {
+      setToast({ message: 'Erro ao excluir jornada.', type: 'error' });
+    }
+  };
+
+  const createJourney = async () => {
+    try {
+      await api.post('/devocional/journeys', {
+        title: `Nova jornada — ${todaySaoPauloYmd()}`,
+        central_theme: config.central_theme,
+        journey_description: config.journey_description,
+        preaching_tone: config.preaching_tone,
+        bible_version: config.bible_version,
+        signature: config.signature,
+        start_date: todaySaoPauloYmd(),
+        end_date: null,
+        activate: newActivate
+      });
+      setToast({ message: 'Jornada criada.', type: 'success' });
+      setShowNewJourney(false);
+      await loadAll();
+    } catch (error: any) {
+      setToast({
+        message: error.response?.data?.error || 'Erro ao criar jornada.',
+        type: 'error'
+      });
+    }
+  };
+
+  const [testDate, setTestDate] = useState(todaySaoPauloYmd());
 
   const handleTestGeneration = async () => {
     if (!testDate) {
       setToast({ message: 'Selecione uma data para o teste.', type: 'error' });
       return;
     }
-    
+
     if (!confirm(`Deseja gerar um devocional para a data ${testDate}? Isso atualizará o conteúdo dessa data no sistema.`)) return;
-    
+
     setGenerating(true);
     setTestResult(null);
     try {
@@ -117,7 +235,6 @@ export default function SessaoDevocional() {
 
   return (
     <div style={{ maxWidth: 1000, margin: '0 auto' }}>
-      {/* Toast */}
       {toast && (
         <div style={{
           position: 'fixed', bottom: 24, right: 24, zIndex: 1000,
@@ -132,7 +249,6 @@ export default function SessaoDevocional() {
         </div>
       )}
 
-      {/* Header */}
       <div style={{ marginBottom: 40 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
           <div style={{
@@ -143,20 +259,21 @@ export default function SessaoDevocional() {
           </div>
           <div>
             <h1 style={{ fontSize: '2rem', fontWeight: 800, color: 'var(--text-primary)', margin: 0, fontFamily: 'Outfit' }}>Sessão Devocional</h1>
-            <p style={{ margin: '4px 0 0', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Configure o "Pastor Virtual" e controle a jornada espiritual da sua lista.</p>
+            <p style={{ margin: '4px 0 0', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+              A geração por IA usa a <strong>jornada ativa</strong> (tom, texto e período). Os valores abaixo viram padrão ao criar uma jornada nova.
+            </p>
           </div>
         </div>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 380px', gap: 24, alignItems: 'start' }}>
-        {/* Main Config Form */}
         <div className="glass-card" style={{ padding: 32 }}>
           <form onSubmit={handleSave}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-              
+
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
                 <div>
-                  <label className="label-premium"><Sparkles size={14} /> Tema Central</label>
+                  <label className="label-premium"><Sparkles size={14} /> Tema central (padrão)</label>
                   <input
                     type="text"
                     value={config.central_theme}
@@ -164,10 +281,10 @@ export default function SessaoDevocional() {
                     className="input-dark"
                     placeholder="Ex: Expressar"
                   />
-                  <p className="input-hint">O coração da jornada espiritual.</p>
+                  <p className="input-hint">Copiado para novas jornadas; cada jornada pode editar o seu.</p>
                 </div>
                 <div>
-                  <label className="label-premium"><BookOpen size={14} /> Versão Bíblica</label>
+                  <label className="label-premium"><BookOpen size={14} /> Versão bíblica (padrão)</label>
                   <select
                     value={config.bible_version}
                     onChange={(e) => setConfig({ ...config, bible_version: e.target.value })}
@@ -178,37 +295,34 @@ export default function SessaoDevocional() {
                     <option value="ARA">Almeida Revista e Atualizada (ARA)</option>
                     <option value="NTLH">Nova Tradução na Linguagem de Hoje (NTLH)</option>
                   </select>
-                  <p className="input-hint">Tradução usada nos versículos.</p>
                 </div>
               </div>
 
               <div>
-                <label className="label-premium"><History size={14} /> Descrição da Jornada</label>
+                <label className="label-premium"><History size={14} /> Descrição da jornada (padrão)</label>
                 <textarea
                   value={config.journey_description}
                   onChange={(e) => setConfig({ ...config, journey_description: e.target.value })}
                   className="input-dark"
                   style={{ minHeight: 100, resize: 'vertical' }}
-                  placeholder="Descreva como a jornada deve evoluir ao longo do tempo..."
+                  placeholder="Descreva o arco espiritual..."
                 />
-                <p className="input-hint">Instruções para a IA manter a progressão teológica.</p>
               </div>
 
               <div>
-                <label className="label-premium"><MessageSquare size={14} /> Tom da Pregação</label>
+                <label className="label-premium"><MessageSquare size={14} /> Tom da pregação (padrão)</label>
                 <textarea
                   value={config.preaching_tone}
                   onChange={(e) => setConfig({ ...config, preaching_tone: e.target.value })}
                   className="input-dark"
                   style={{ minHeight: 80, resize: 'vertical' }}
-                  placeholder="Ex: Afetuoso, inspirador, levemente bem humorado e acolhedor."
+                  placeholder="Ex: Afetuoso, inspirador..."
                 />
-                <p className="input-hint">Define a "personalidade" do devocional.</p>
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
                 <div>
-                  <label className="label-premium"><User size={14} /> Assinatura Final</label>
+                  <label className="label-premium"><User size={14} /> Assinatura (padrão)</label>
                   <input
                     type="text"
                     value={config.signature}
@@ -230,8 +344,8 @@ export default function SessaoDevocional() {
                 </div>
               </div>
 
-              <div style={{ 
-                padding: 20, borderRadius: 16, background: 'rgba(245, 158, 11, 0.05)', 
+              <div style={{
+                padding: 20, borderRadius: 16, background: 'rgba(245, 158, 11, 0.05)',
                 border: '1px solid rgba(245, 158, 11, 0.1)', marginTop: 8
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
@@ -252,11 +366,6 @@ export default function SessaoDevocional() {
                   className="input-dark"
                   placeholder="Sua API Key do Gemini"
                 />
-                <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 8 }}>
-                  {config.gemini_api_key === '********' 
-                    ? 'A chave está salva de forma segura. Insira uma nova para substituir.' 
-                    : 'Insira sua chave API do Gemini para habilitar a geração.'}
-                </p>
               </div>
 
               <button
@@ -268,15 +377,184 @@ export default function SessaoDevocional() {
                 {saving ? <RefreshCw size={20} className="animate-spin" /> : (
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
                     <Save size={20} />
-                    <span>Salvar Configurações Criativas</span>
+                    <span>Salvar padrões globais</span>
                   </div>
                 )}
               </button>
             </div>
           </form>
+
+          <div style={{ height: 1, background: 'var(--border)', margin: '32px 0' }} />
+
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+            <h2 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 800, color: 'var(--text-primary)' }}>Jornadas</h2>
+            <button
+              type="button"
+              onClick={() => setShowNewJourney(v => !v)}
+              className="btn-outline"
+              style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 14px', fontSize: '0.85rem' }}
+            >
+              <Plus size={16} />
+              Nova jornada
+            </button>
+          </div>
+          <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', margin: '0 0 20px', lineHeight: 1.5 }}>
+            Cada jornada é um <strong>novo início</strong>: período próprio, texto e tom. Só a jornada <strong>ativa</strong> entra na geração.
+            O primeiro devocional dentro do período (sem registros anteriores nessa jornada) recebe instruções especiais de abertura na IA.
+          </p>
+
+          {showNewJourney && (
+            <div style={{
+              padding: 16, borderRadius: 12, marginBottom: 20,
+              border: '1px solid rgba(59, 130, 246, 0.25)', background: 'rgba(59, 130, 246, 0.06)'
+            }}>
+              <p style={{ margin: '0 0 12px', fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
+                Será criada com os padrões globais acima, início em <strong>{todaySaoPauloYmd()}</strong> (edite depois no card).
+              </p>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.82rem', marginBottom: 12, cursor: 'pointer' }}>
+                <input type="checkbox" checked={newActivate} onChange={(e) => setNewActivate(e.target.checked)} />
+                Tornar esta jornada a ativa ao criar
+              </label>
+              <button type="button" onClick={createJourney} className="btn-gold" style={{ padding: '10px 18px', border: 'none', borderRadius: 10 }}>
+                Criar jornada
+              </button>
+            </div>
+          )}
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+            {journeys.map(j => (
+              <div
+                key={j.id}
+                style={{
+                  padding: 20, borderRadius: 16,
+                  border: j.is_active ? '1px solid rgba(245, 158, 11, 0.45)' : '1px solid var(--border)',
+                  background: j.is_active ? 'rgba(245, 158, 11, 0.06)' : 'rgba(0,0,0,0.15)'
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, flexWrap: 'wrap', gap: 8 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    {j.is_active && (
+                      <span style={{
+                        fontSize: '0.65rem', fontWeight: 800, letterSpacing: '0.06em',
+                        padding: '4px 10px', borderRadius: 20, background: 'rgba(245,158,11,0.2)', color: '#fbbf24'
+                      }}>
+                        ATIVA NA IA
+                      </span>
+                    )}
+                    <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>#{j.id}</span>
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    {!j.is_active && (
+                      <button type="button" onClick={() => activateJourney(j.id)} className="btn-outline" style={{ padding: '6px 12px', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <Star size={14} /> Ativar
+                      </button>
+                    )}
+                    <button type="button" onClick={() => deleteJourney(j)} className="btn-outline" style={{ padding: '6px 12px', fontSize: '0.75rem', color: '#fb7185', borderColor: 'rgba(251,113,133,0.35)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <Trash2 size={14} /> Excluir
+                    </button>
+                  </div>
+                </div>
+
+                <div style={{ marginBottom: 12 }}>
+                  <label className="label-premium" style={{ fontSize: '0.7rem' }}>Nome</label>
+                  <input
+                    className="input-dark"
+                    value={j.title}
+                    onChange={(e) => updateJourneyLocal(j.id, { title: e.target.value })}
+                  />
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
+                  <div>
+                    <label className="label-premium" style={{ fontSize: '0.7rem' }}>Início</label>
+                    <input
+                      type="date"
+                      className="input-dark"
+                      style={{ colorScheme: 'dark' }}
+                      value={j.start_date}
+                      onChange={(e) => updateJourneyLocal(j.id, { start_date: e.target.value })}
+                    />
+                  </div>
+                  <div>
+                    <label className="label-premium" style={{ fontSize: '0.7rem' }}>Fim (opcional)</label>
+                    <input
+                      type="date"
+                      className="input-dark"
+                      style={{ colorScheme: 'dark' }}
+                      value={j.end_date ?? ''}
+                      onChange={(e) => updateJourneyLocal(j.id, { end_date: e.target.value || null })}
+                    />
+                  </div>
+                </div>
+                <div style={{ marginBottom: 12 }}>
+                  <label className="label-premium" style={{ fontSize: '0.7rem' }}>Tema central</label>
+                  <input
+                    className="input-dark"
+                    value={j.central_theme}
+                    onChange={(e) => updateJourneyLocal(j.id, { central_theme: e.target.value })}
+                  />
+                </div>
+                <div style={{ marginBottom: 12 }}>
+                  <label className="label-premium" style={{ fontSize: '0.7rem' }}>Descrição da jornada</label>
+                  <textarea
+                    className="input-dark"
+                    style={{ minHeight: 72, resize: 'vertical' }}
+                    value={j.journey_description}
+                    onChange={(e) => updateJourneyLocal(j.id, { journey_description: e.target.value })}
+                  />
+                </div>
+                <div style={{ marginBottom: 12 }}>
+                  <label className="label-premium" style={{ fontSize: '0.7rem' }}>Tom da pregação</label>
+                  <textarea
+                    className="input-dark"
+                    style={{ minHeight: 56, resize: 'vertical' }}
+                    value={j.preaching_tone}
+                    onChange={(e) => updateJourneyLocal(j.id, { preaching_tone: e.target.value })}
+                  />
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
+                  <div>
+                    <label className="label-premium" style={{ fontSize: '0.7rem' }}>Bíblia</label>
+                    <select
+                      className="input-dark"
+                      value={j.bible_version}
+                      onChange={(e) => updateJourneyLocal(j.id, { bible_version: e.target.value })}
+                    >
+                      <option value="ACF">ACF</option>
+                      <option value="NVI">NVI</option>
+                      <option value="ARA">ARA</option>
+                      <option value="NTLH">NTLH</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="label-premium" style={{ fontSize: '0.7rem' }}>Assinatura</label>
+                    <input
+                      className="input-dark"
+                      value={j.signature}
+                      onChange={(e) => updateJourneyLocal(j.id, { signature: e.target.value })}
+                    />
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  disabled={savingJourneyId === j.id}
+                  onClick={() => saveJourney(j)}
+                  className="btn-gold"
+                  style={{ width: '100%', padding: '12px', border: 'none', borderRadius: 10, marginTop: 4 }}
+                >
+                  {savingJourneyId === j.id ? <RefreshCw size={18} className="animate-spin" /> : (
+                    <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+                      <Save size={18} /> Salvar esta jornada
+                    </span>
+                  )}
+                </button>
+              </div>
+            ))}
+            {journeys.length === 0 && (
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Nenhuma jornada cadastrada. Crie uma com o botão acima (o sistema migra uma jornada inicial ao atualizar o servidor).</p>
+            )}
+          </div>
         </div>
 
-        {/* Sidebar: Status & Testing */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
           <div className="glass-card" style={{ padding: 24 }}>
             <h3 style={{ margin: '0 0 16px', fontSize: '1.1rem', fontWeight: 700 }}>Status da Geração</h3>
@@ -286,12 +564,14 @@ export default function SessaoDevocional() {
                 <span style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--gold-primary)' }}>Gemini Ativado</span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Geração Automática</span>
-                <span style={{ fontSize: '0.75rem', padding: '2px 8px', borderRadius: 20, background: 'rgba(16, 185, 129, 0.1)', color: '#10b981', fontWeight: 700 }}>ATIVO</span>
+                <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Jornada ativa</span>
+                <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                  {journeys.find(x => x.is_active)?.title ?? '—'}
+                </span>
               </div>
-              
+
               <div style={{ height: 1, background: 'var(--border)', margin: '4px 0' }} />
-              
+
               <div>
                 <label className="label-premium" style={{ fontSize: '0.7rem' }}>📅 Data para Gerar</label>
                 <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
@@ -343,11 +623,13 @@ export default function SessaoDevocional() {
                 <CheckCircle2 size={18} />
                 <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 700 }}>Resultado do Teste</h3>
               </div>
-              <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', maxHeight: 300, overflowY: 'auto', whiteSpace: 'pre-wrap', padding: 12, background: 'rgba(0,0,0,0.2)', borderRadius: 8 }}>
-                <strong>Título:</strong> {testResult.title}\n\n
-                {testResult.text}
+              <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', maxHeight: 300, overflowY: 'auto', padding: 12, background: 'rgba(0,0,0,0.2)', borderRadius: 8 }}>
+                <div style={{ marginBottom: 10 }}>
+                  <strong>Título:</strong> {testResult.title}
+                </div>
+                <div style={{ whiteSpace: 'pre-wrap', fontSize: '0.82rem', lineHeight: 1.45 }}>{testResult.text}</div>
               </div>
-              <button 
+              <button
                 onClick={() => setTestResult(null)}
                 style={{ width: '100%', marginTop: 12, padding: '8px', background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: '0.8rem', cursor: 'pointer' }}
               >
