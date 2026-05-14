@@ -3,12 +3,10 @@ import {
   BookOpen,
   AlertCircle,
   Loader2,
-  Sparkles,
   Phone,
   User,
   Mail,
   Heart,
-  Sunrise,
 } from 'lucide-react';
 
 function onlyDigits(s: string): string {
@@ -32,21 +30,21 @@ export default function LandingDevocional() {
     setError(null);
     const nameTrim = name.trim();
     if (nameTrim.length < 2) {
-      setError('Como podemos te chamar? Escreve seu nome com carinho.');
+      setError('Informe seu nome.');
       return;
     }
     const dddDigits = onlyDigits(ddd).slice(0, 2);
     const telDigits = onlyDigits(telefone);
     if (dddDigits.length !== 2) {
-      setError('Qual é o DDD da sua região? São dois númerinhos.');
+      setError('DDD com 2 dígitos.');
       return;
     }
     if (telDigits.length < 8 || telDigits.length > 9) {
-      setError('Confere o número do celular? Falta algum dígito.');
+      setError('Confira o número do celular.');
       return;
     }
     if (!consent) {
-      setError('Marca a caixinha abaixo para a gente poder te mandar mensagem no WhatsApp.');
+      setError('Marque a opção abaixo para continuar.');
       return;
     }
     setLoading(true);
@@ -64,7 +62,7 @@ export default function LandingDevocional() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(data.error || 'Deu um probleminha. Tenta de novo daqui a pouquinho?');
+        setError(data.error || 'Tente novamente em instantes.');
         return;
       }
       const how = nameTrim.split(/\s+/)[0];
@@ -76,7 +74,7 @@ export default function LandingDevocional() {
       setEmail('');
       setConsent(false);
     } catch {
-      setError('Sem internet agora? Verifica sua conexão e tenta outra vez.');
+      setError('Sem conexão. Tente de novo.');
     } finally {
       setLoading(false);
     }
@@ -126,118 +124,112 @@ export default function LandingDevocional() {
         }}
       />
 
-      <div style={{ width: '100%', maxWidth: 440, position: 'relative' }}>
-        <div style={{ textAlign: 'center', marginBottom: 26 }}>
+      <div style={{ width: '100%', maxWidth: 420, position: 'relative' }}>
+        {/* Branding — alinhado ao Login / sistema */}
+        <div style={{ textAlign: 'center', marginBottom: 28 }}>
           <div
             style={{
-              width: 68,
-              height: 68,
+              width: 72,
+              height: 72,
               borderRadius: 20,
               background: 'linear-gradient(135deg, #f59e0b, #d97706)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              margin: '0 auto 18px',
-              boxShadow: '0 14px 36px rgba(245, 158, 11, 0.25)',
+              margin: '0 auto 20px',
+              boxShadow: '0 12px 32px rgba(245, 158, 11, 0.3)',
             }}
           >
-            <BookOpen size={34} color="#0d0c14" strokeWidth={2.2} />
+            <BookOpen size={36} color="#0d0c14" strokeWidth={2.5} />
           </div>
           <h1
             style={{
-              fontSize: '1.75rem',
+              fontSize: '2rem',
               fontWeight: 800,
-              margin: '0 0 10px',
+              margin: '0 0 8px',
               fontFamily: 'Outfit, sans-serif',
-              background: 'linear-gradient(135deg, #fde68a, #fbbf24, #f59e0b)',
+              background: 'linear-gradient(135deg, #f59e0b, #fbbf24)',
               WebkitBackgroundClip: 'text',
               WebkitTextFillColor: 'transparent',
               backgroundClip: 'text',
             }}
           >
-            Um abraço no seu dia
+            Devocional Diário
           </h1>
           <p
             style={{
               margin: 0,
-              fontSize: '0.95rem',
+              fontSize: '0.88rem',
               color: 'var(--text-secondary)',
-              lineHeight: 1.55,
-              maxWidth: 380,
-              marginLeft: 'auto',
-              marginRight: 'auto',
+              lineHeight: 1.45,
             }}
           >
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, verticalAlign: 'middle' }}>
-              <Sparkles size={15} color="var(--gold-primary)" style={{ flexShrink: 0 }} />
-            </span>
-            Deixa seu contato aqui embaixo e a gente te manda, no WhatsApp, um carinho em forma de mensagem — uma
-            palavra para fortalecer sua fé no dia a dia.
+            Palavra de Deus no seu dia · pelo WhatsApp
           </p>
         </div>
 
         {!done ? (
-          <div className="glass-card" style={{ padding: '26px 22px', position: 'relative' }}>
+          <div className="glass-card" style={{ padding: '24px 22px', position: 'relative' }}>
             <p
               style={{
-                margin: '0 0 22px',
-                fontSize: '0.9rem',
+                margin: '0 0 20px',
+                fontSize: '0.88rem',
                 color: 'var(--text-secondary)',
-                lineHeight: 1.6,
+                lineHeight: 1.5,
                 textAlign: 'center',
               }}
             >
-              É rapidinho: nome, DDD e número do celular. Se quiser, deixa seu e-mail também — é opcional.
+              Preenche abaixo. É rápido.
             </p>
 
             {error && (
               <div
                 style={{
-                  padding: '12px 14px',
+                  padding: '11px 13px',
                   borderRadius: 12,
-                  marginBottom: 18,
+                  marginBottom: 16,
                   display: 'flex',
                   alignItems: 'flex-start',
-                  gap: 10,
-                  fontSize: '0.86rem',
-                  lineHeight: 1.45,
+                  gap: 9,
+                  fontSize: '0.84rem',
+                  lineHeight: 1.4,
                   background: 'rgba(244,63,94,0.08)',
                   border: '1px solid rgba(244,63,94,0.3)',
                   color: '#fda4af',
                 }}
               >
-                <AlertCircle size={18} style={{ flexShrink: 0, marginTop: 1 }} />
+                <AlertCircle size={17} style={{ flexShrink: 0, marginTop: 1 }} />
                 {error}
               </div>
             )}
 
             <form onSubmit={handleSubmit}>
               <label className="label-premium" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <User size={14} /> Seu nome
+                <User size={14} /> Nome
               </label>
               <input
                 className="input-dark"
                 type="text"
                 autoComplete="name"
-                placeholder="Ex.: Maria, João, como você gosta"
+                placeholder="Seu nome"
                 required
                 minLength={2}
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                style={{ width: '100%', marginBottom: 16 }}
+                style={{ width: '100%', marginBottom: 14 }}
               />
 
               <label className="label-premium" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <Phone size={14} /> Seu WhatsApp
+                <Phone size={14} /> WhatsApp
               </label>
-              <div style={{ display: 'flex', gap: 10, alignItems: 'stretch', marginBottom: 16 }}>
+              <div style={{ display: 'flex', gap: 10, alignItems: 'stretch', marginBottom: 14 }}>
                 <input
                   className="input-dark"
                   type="text"
                   inputMode="numeric"
                   autoComplete="tel-area-code"
                   placeholder="DDD"
-                  aria-label="DDD do celular"
+                  aria-label="DDD"
                   maxLength={2}
                   value={ddd}
                   onChange={(e) => setDdd(onlyDigits(e.target.value).slice(0, 2))}
@@ -248,7 +240,7 @@ export default function LandingDevocional() {
                   type="tel"
                   inputMode="numeric"
                   autoComplete="tel-national"
-                  placeholder="Número do celular"
+                  placeholder="Celular"
                   aria-label="Número do celular"
                   maxLength={9}
                   value={telefone}
@@ -258,17 +250,16 @@ export default function LandingDevocional() {
               </div>
 
               <label className="label-premium" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <Mail size={14} /> E-mail{' '}
-                <span style={{ fontWeight: 500, color: 'var(--text-muted)', fontSize: '0.78rem' }}>se quiser</span>
+                <Mail size={14} /> E-mail <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>(opcional)</span>
               </label>
               <input
                 className="input-dark"
                 type="email"
                 autoComplete="email"
-                placeholder="Só se você quiser receber novidades por e-mail"
+                placeholder="Opcional"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                style={{ width: '100%', marginBottom: 16 }}
+                style={{ width: '100%', marginBottom: 14 }}
               />
 
               <div style={{ position: 'absolute', left: -9999, width: 1, height: 1, overflow: 'hidden' }} aria-hidden>
@@ -282,22 +273,19 @@ export default function LandingDevocional() {
                   alignItems: 'flex-start',
                   gap: 10,
                   cursor: 'pointer',
-                  fontSize: '0.84rem',
+                  fontSize: '0.82rem',
                   color: 'var(--text-secondary)',
-                  marginBottom: 22,
-                  lineHeight: 1.5,
+                  marginBottom: 18,
+                  lineHeight: 1.45,
                 }}
               >
                 <input
                   type="checkbox"
                   checked={consent}
                   onChange={(e) => setConsent(e.target.checked)}
-                  style={{ marginTop: 4, width: 17, height: 17, accentColor: 'var(--gold-primary)', flexShrink: 0 }}
+                  style={{ marginTop: 3, width: 16, height: 16, accentColor: 'var(--gold-primary)', flexShrink: 0 }}
                 />
-                <span>
-                  Sim, quero receber essas mensagens de fé no meu WhatsApp. Sei que posso parar quando quiser falando
-                  com a equipe.
-                </span>
+                <span>Quero receber o devocional neste WhatsApp.</span>
               </label>
 
               <button
@@ -306,7 +294,7 @@ export default function LandingDevocional() {
                 className="btn-gold"
                 style={{
                   width: '100%',
-                  padding: '15px',
+                  padding: '14px',
                   border: 'none',
                   borderRadius: 12,
                   fontWeight: 700,
@@ -318,7 +306,7 @@ export default function LandingDevocional() {
                   opacity: loading ? 0.85 : 1,
                 }}
               >
-                {loading ? <Loader2 size={22} className="animate-spin" /> : 'Quero receber no meu WhatsApp'}
+                {loading ? <Loader2 size={22} className="animate-spin" /> : 'Quero receber'}
               </button>
             </form>
           </div>
@@ -326,32 +314,31 @@ export default function LandingDevocional() {
           <div
             className="glass-card"
             style={{
-              padding: '32px 26px',
+              padding: '28px 22px',
               textAlign: 'center',
-              borderColor: 'rgba(245, 158, 11, 0.22)',
-              boxShadow: '0 0 40px rgba(245, 158, 11, 0.08)',
+              borderColor: 'rgba(245, 158, 11, 0.2)',
             }}
           >
             <div
               style={{
-                width: 56,
-                height: 56,
+                width: 52,
+                height: 52,
                 borderRadius: '50%',
-                margin: '0 auto 18px',
-                background: 'linear-gradient(135deg, rgba(16,185,129,0.2), rgba(245,158,11,0.15))',
+                margin: '0 auto 16px',
+                background: 'rgba(16,185,129,0.12)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                border: '1px solid rgba(16,185,129,0.25)',
+                border: '1px solid rgba(16,185,129,0.28)',
               }}
             >
-              <Heart size={26} color="#6ee7b7" fill="rgba(16,185,129,0.35)" strokeWidth={1.8} />
+              <Heart size={24} color="#6ee7b7" fill="rgba(16,185,129,0.25)" strokeWidth={1.8} />
             </div>
 
             <h2
               style={{
-                margin: '0 0 12px',
-                fontSize: '1.35rem',
+                margin: '0 0 10px',
+                fontSize: '1.25rem',
                 fontWeight: 800,
                 fontFamily: 'Outfit, sans-serif',
                 color: 'var(--text-primary)',
@@ -360,31 +347,13 @@ export default function LandingDevocional() {
               Obrigado{firstName ? `, ${firstName}` : ''}!
             </h2>
 
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: 8,
-                marginBottom: 14,
-                color: 'var(--gold-light)',
-                fontSize: '0.82rem',
-                fontWeight: 600,
-              }}
-            >
-              <Sunrise size={18} strokeWidth={2.2} />
-              Amanhã começa um novo amanhecer na sua palma
-            </div>
-
-            <p style={{ margin: '0 0 18px', fontSize: '0.92rem', color: 'var(--text-secondary)', lineHeight: 1.65 }}>
-              Guarda um cantinho do coração: <strong style={{ color: 'var(--text-primary)' }}>a partir de amanhã</strong>,
-              quando o sol levantar, uma <strong style={{ color: 'var(--gold-light)' }}>Palavra de Deus</strong> pode
-              chegar no seu WhatsApp — leve, para te lembrar que Ele caminha com você em cada passo.
+            <p style={{ margin: '0 0 10px', fontSize: '0.9rem', color: 'var(--text-secondary)', lineHeight: 1.55 }}>
+              Deus te abençoe. <strong style={{ color: 'var(--text-primary)' }}>Amanhã</strong> você pode receber uma
+              palavra da Escritura aqui no WhatsApp.
             </p>
 
-            <p style={{ margin: 0, fontSize: '0.84rem', color: 'var(--text-muted)', lineHeight: 1.55 }}>
-              Fica de olho nas mensagens. Se demorar um pouquinho, sem pressa: boas coisas valem a espera. Deus te
-              abençoe hoje e sempre.
+            <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--text-muted)', lineHeight: 1.45 }}>
+              Fique atento às mensagens do dia.
             </p>
 
             <button
@@ -392,11 +361,11 @@ export default function LandingDevocional() {
               onClick={resetAnother}
               className="btn-outline"
               style={{
-                marginTop: 26,
+                marginTop: 22,
                 width: '100%',
-                padding: '12px',
+                padding: '11px',
                 borderRadius: 12,
-                fontSize: '0.85rem',
+                fontSize: '0.84rem',
                 fontWeight: 600,
               }}
             >
