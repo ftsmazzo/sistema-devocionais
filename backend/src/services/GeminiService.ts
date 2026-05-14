@@ -26,7 +26,8 @@ export class GeminiService {
   async generateStructuredContent<T>(prompt: string, schema?: any): Promise<T> {
     try {
       const modelName = this.model.startsWith('models/') ? this.model : `models/${this.model}`;
-      const url = `https://generativelanguage.googleapis.com/v1/${modelName}:generateContent?key=${this.apiKey}`;
+      // v1 não aceita responseMimeType em generationConfig; v1beta aceita (JSON mode).
+      const url = `https://generativelanguage.googleapis.com/v1beta/${modelName}:generateContent?key=${this.apiKey}`;
       
       const response = await axios.post<GeminiResponse>(
         url,
@@ -44,8 +45,7 @@ export class GeminiService {
             temperature: 0.7,
             topK: 40,
             topP: 0.95,
-            maxOutputTokens: 8192,
-            responseMimeType: 'application/json'
+            maxOutputTokens: 8192
           }
         },
         {
@@ -77,7 +77,8 @@ export class GeminiService {
   async generateText(prompt: string): Promise<string> {
     try {
       const modelName = this.model.startsWith('models/') ? this.model : `models/${this.model}`;
-      const url = `https://generativelanguage.googleapis.com/v1/${modelName}:generateContent?key=${this.apiKey}`;
+      // v1 não aceita responseMimeType em generationConfig; v1beta aceita (JSON mode).
+      const url = `https://generativelanguage.googleapis.com/v1beta/${modelName}:generateContent?key=${this.apiKey}`;
       
       const response = await axios.post<GeminiResponse>(
         url,

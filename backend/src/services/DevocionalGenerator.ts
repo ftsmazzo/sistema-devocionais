@@ -23,11 +23,13 @@ export class DevocionalGenerator {
 
       // 1. Buscar configuração de IA
       const configResult = await pool.query(
-        `SELECT * FROM devocional_ai_config WHERE enabled = true LIMIT 1`
+        `SELECT * FROM devocional_ai_config
+         WHERE enabled IS NULL OR enabled = true
+         ORDER BY id DESC LIMIT 1`
       );
 
       if (configResult.rows.length === 0) {
-        throw new Error('Configuração de IA de devocional não encontrada ou desativada.');
+        throw new Error('Configuração de IA de devocional não encontrada ou desativada (enabled = false).');
       }
 
       const config: DevocionalAIConfig = configResult.rows[0];

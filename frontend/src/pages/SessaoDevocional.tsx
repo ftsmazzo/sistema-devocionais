@@ -234,9 +234,16 @@ export default function SessaoDevocional() {
                 padding: 20, borderRadius: 16, background: 'rgba(245, 158, 11, 0.05)', 
                 border: '1px solid rgba(245, 158, 11, 0.1)', marginTop: 8
               }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: 'var(--gold-primary)', marginBottom: 12 }}>
-                  <Key size={18} />
-                  <span style={{ fontWeight: 700, fontSize: '0.9rem' }}>Credenciais de IA</span>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: 'var(--gold-primary)' }}>
+                    <Key size={18} />
+                    <span style={{ fontWeight: 700, fontSize: '0.9rem' }}>Credenciais de IA</span>
+                  </div>
+                  {config.gemini_api_key === '********' && (
+                    <span style={{ fontSize: '0.65rem', background: 'rgba(16,185,129,0.1)', color: '#10b981', padding: '2px 8px', borderRadius: 10, fontWeight: 700 }}>
+                      SALVO NO BANCO
+                    </span>
+                  )}
                 </div>
                 <input
                   type="password"
@@ -246,7 +253,9 @@ export default function SessaoDevocional() {
                   placeholder="Sua API Key do Gemini"
                 />
                 <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 8 }}>
-                  Se deixado como '********', o sistema usará a chave padrão configurada no servidor.
+                  {config.gemini_api_key === '********' 
+                    ? 'A chave está salva de forma segura. Insira uma nova para substituir.' 
+                    : 'Insira sua chave API do Gemini para habilitar a geração.'}
                 </p>
               </div>
 
