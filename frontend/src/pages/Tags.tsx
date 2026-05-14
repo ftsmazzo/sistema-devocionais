@@ -155,7 +155,7 @@ export default function Tags() {
                 Gestão de Tags
               </h1>
               <p style={{ margin: '4px 0 0', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                Organize e segmente sua base de contatos com inteligência.
+                Três tags de sistema (devocional, testadores, bloqueado) são criadas automaticamente e não podem ser excluídas. Crie outras livremente.
               </p>
             </div>
           </div>
@@ -215,18 +215,18 @@ export default function Tags() {
                 >
                   <Edit size={14} /> Editar
                 </button>
-                {/* Apenas permite excluir se não for categoria protegida */}
-                {!['devocional', 'bloqueado', 'teste'].includes(tag.category) ? (
+                {!['devocional', 'bloqueado', 'testadores'].includes(tag.category) ? (
                   <button
+                    type="button"
                     onClick={() => handleDelete(tag.id)}
                     style={{ padding: '8px 12px', borderRadius: 10, background: 'rgba(244, 63, 94, 0.1)', color: 'var(--rose)', border: '1px solid rgba(244, 63, 94, 0.2)', cursor: 'pointer' }}
                   >
                     <Trash2 size={14} />
                   </button>
                 ) : (
-                  <div style={{ padding: '8px 12px', borderRadius: 10, background: 'rgba(255, 255, 255, 0.05)', color: 'var(--text-muted)', border: '1px solid var(--border)', cursor: 'not-allowed', display: 'flex', alignItems: 'center', gap: 5, fontSize: '0.75rem' }} title="Tags de sistema não podem ser excluídas">
+                  <div style={{ padding: '8px 12px', borderRadius: 10, background: 'rgba(255, 255, 255, 0.05)', color: 'var(--text-muted)', border: '1px solid var(--border)', cursor: 'not-allowed', display: 'flex', alignItems: 'center', gap: 5, fontSize: '0.75rem' }} title="Tags padrão do sistema (devocional, testadores, bloqueado) não podem ser excluídas">
                     <Trash2 size={14} />
-                    <span>Fixa</span>
+                    <span>Sistema</span>
                   </div>
                 )}
               </div>

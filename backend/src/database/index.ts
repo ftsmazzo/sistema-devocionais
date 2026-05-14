@@ -673,18 +673,37 @@ export async function initializeDatabase() {
       )
     `);
 
-    // Criar tags padrão se não existirem (checar por nome em minúsculo para não duplicar VIP/Teste etc)
+    // Remover tags padrão antigas (marketing/vip/teste) — relações somem em CASCADE
+    await client.query(`
+      DELETE FROM contact_tags
+      WHERE category IN ('marketing', 'vip', 'teste')
+    `);
+
+    // Apenas 3 tags de sistema: devocional, testadores, bloqueado
     const existingTags = await client.query(
       `SELECT LOWER(name) as lower_name FROM contact_tags`
     );
     const existingLower = new Set((existingTags.rows || []).map((r: { lower_name: string }) => r.lower_name));
 
     const defaultTags = [
-      { name: 'devocional', color: '#10b981', category: 'devocional', description: 'Contatos que recebem devocionais' },
-      { name: 'marketing', color: '#3b82f6', category: 'marketing', description: 'Contatos para campanhas de marketing' },
-      { name: 'vip', color: '#f59e0b', category: 'vip', description: 'Contatos VIP' },
-      { name: 'teste', color: '#8b5cf6', category: 'teste', description: 'Contatos para testes' },
-      { name: 'bloqueado', color: '#ef4444', category: 'bloqueado', description: 'Contatos bloqueados/opt-out' }
+      {
+        name: 'devocional',
+        color: '#10b981',
+        category: 'devocional',
+        description: 'Contatos que recebem o Devocional Diário',
+      },
+      {
+        name: 'testadores',
+        color: '#14b8a6',
+        category: 'testadores',
+        description: 'Contatos para testes e homologação',
+      },
+      {
+        name: 'bloqueado',
+        color: '#ef4444',
+        category: 'bloqueado',
+        description: 'Contatos bloqueados / opt-out',
+      },
     ];
 
     for (const tag of defaultTags) {

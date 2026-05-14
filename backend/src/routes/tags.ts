@@ -136,6 +136,16 @@ router.put('/:id', async (req: AuthRequest, res) => {
     const { id } = req.params;
     const { name, color, description, category } = req.body;
 
+    const existingRow = await pool.query(`SELECT category, name FROM contact_tags WHERE id = $1`, [id]);
+    if (existingRow.rows.length === 0) {
+      return res.status(404).json({ error: 'Tag não encontrada' });
+    }
+    const prevCategory = existingRow.rows[0].category as string;
+    const systemCategories = ['devocional', 'bloqueado', 'testadores'];
+    if (systemCategories.includes(prevCategory) && category !== undefined && !systemCategories.includes(category)) {
+      return res.status(400).json({ error: 'Não é possível alterar a categoria de tags padrão do sistema' });
+    }
+
     const updates: string[] = [];
     const params: any[] = [];
     let paramCount = 1;
@@ -214,10 +224,10 @@ router.delete('/:id', async (req: AuthRequest, res) => {
     }
 
     const category = tagResult.rows[0].category;
-    const defaultCategories = ['devocional', 'bloqueado'];
-    
-    if (defaultCategories.includes(category)) {
-      return res.status(400).json({ error: 'Não é possível deletar tags padrão' });
+    const systemCategories = ['devocional', 'bloqueado', 'testadores'];
+
+    if (systemCategories.includes(category)) {
+      return res.status(400).json({ error: 'Não é possível deletar tags padrão do sistema' });
     }
 
     await pool.query(
