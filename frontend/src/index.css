@@ -250,13 +250,37 @@
     border: 1px solid rgba(156, 163, 175, 0.2);
   }
 
-  /* ── Page Fade-in ── */
+  /* ── Page Fade-in (sem transform: fixed nos modais herdaria deste ancestral) ── */
   .page-enter {
-    animation: pageEnter 0.3s ease-out both;
+    animation: pageEnter 0.35s ease-out both;
   }
   @keyframes pageEnter {
-    from { opacity: 0; transform: translateY(8px); }
-    to   { opacity: 1; transform: translateY(0); }
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
+
+  /* ── Modal overlay: viewport, rolagem no backdrop, painel centrado quando couber ── */
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1100;
+    box-sizing: border-box;
+    min-height: 100dvh;
+    padding: 24px 16px 40px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    background: rgba(0, 0, 0, 0.82);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+  }
+  .modal-overlay-panel {
+    margin-top: auto;
+    margin-bottom: auto;
+    flex-shrink: 0;
+    width: 100%;
   }
 
   /* ── Shimmer Skeleton ── */

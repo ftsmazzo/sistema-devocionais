@@ -505,8 +505,8 @@ export default function Instances() {
 
       {/* Modal foto de perfil */}
       {profileModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.82)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1150, padding: 20 }}>
-          <div className="glass-card" style={{ width: '100%', maxWidth: 480, padding: 0 }}>
+        <div className="modal-overlay" style={{ zIndex: 1150 }}>
+          <div className="glass-card modal-overlay-panel" style={{ width: '100%', maxWidth: 480, padding: 0 }}>
             <div style={{ padding: '22px 28px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                 <div style={{ width: 44, height: 44, borderRadius: 12, background: 'rgba(245,158,11,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--gold-primary)' }}>
@@ -549,8 +549,8 @@ export default function Instances() {
 
       {/* Modal Criar/Editar */}
       {showModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100, padding: 20 }}>
-          <div className="glass-card" style={{ width: '100%', maxWidth: 500, padding: 0 }}>
+        <div className="modal-overlay">
+          <div className="glass-card modal-overlay-panel" style={{ width: '100%', maxWidth: 500, padding: 0 }}>
             <div style={{ padding: '24px 32px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <h2 style={{ margin: 0, fontSize: '1.5rem', fontWeight: 800, color: 'var(--text-primary)', fontFamily: 'Outfit' }}>
                 {editingInstance ? 'Editar Instância' : 'Nova Instância'}
@@ -594,8 +594,8 @@ export default function Instances() {
 
       {/* Modal QR Code */}
       {showQrModal && qrCode && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.9)', backdropFilter: 'blur(10px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1200, padding: 20 }}>
-          <div className="glass-card" style={{ width: '100%', maxWidth: 450, padding: 32, textAlign: 'center' }}>
+        <div className="modal-overlay" style={{ zIndex: 1200, background: 'rgba(0,0,0,0.92)', backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)' }}>
+          <div className="glass-card modal-overlay-panel" style={{ width: '100%', maxWidth: 450, padding: 32, textAlign: 'center' }}>
             <div style={{ 
               width: 64, height: 64, borderRadius: 20, background: 'rgba(16, 185, 129, 0.1)', color: '#10b981',
               display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 24px'

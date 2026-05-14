@@ -393,8 +393,8 @@ export default function Dispatches() {
 
       {/* Modal Criar Disparo */}
       {showCreateModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100, padding: 20 }}>
-          <div className="glass-card" style={{ width: '100%', maxWidth: 700, maxHeight: '90vh', overflowY: 'auto', padding: 0 }}>
+        <div className="modal-overlay">
+          <div className="glass-card modal-overlay-panel" style={{ width: '100%', maxWidth: 700, maxHeight: 'min(90vh, 900px)', overflowY: 'auto', padding: 0 }}>
             <div style={{ padding: '24px 32px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <h2 style={{ margin: 0, fontSize: '1.5rem', fontWeight: 800, color: 'var(--text-primary)', fontFamily: 'Outfit' }}>Configurar Novo Disparo</h2>
               <button onClick={() => setShowCreateModal(false)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}><X size={28} /></button>
@@ -546,8 +546,8 @@ export default function Dispatches() {
 
       {/* Detail Modal */}
       {detailDispatch && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100, padding: 20 }}>
-          <div className="glass-card" style={{ width: '100%', maxWidth: 800, maxHeight: '85vh', overflow: 'hidden', padding: 0, display: 'flex', flexDirection: 'column' }}>
+        <div className="modal-overlay">
+          <div className="glass-card modal-overlay-panel" style={{ width: '100%', maxWidth: 800, maxHeight: 'min(85vh, 880px)', overflow: 'hidden', padding: 0, display: 'flex', flexDirection: 'column' }}>
             <div style={{ padding: '24px 32px', borderBottom: '1px solid var(--border)', background: 'rgba(255,255,255,0.02)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <div>
                 <h3 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-primary)' }}>{detailDispatch.name}</h3>

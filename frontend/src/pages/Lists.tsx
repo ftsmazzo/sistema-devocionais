@@ -1,8 +1,5 @@
 import { useEffect, useState } from 'react';
 import api from '@/lib/api';
-import Button from '@/components/ui/Button';
-import Input from '@/components/ui/Input';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/Card';
 import Toast from '@/components/ui/Toast';
 import Switch from '@/components/ui/Switch';
 import {
@@ -14,6 +11,7 @@ import {
   Filter,
   RefreshCw,
   Eye,
+  X,
 } from 'lucide-react';
 
 interface ContactList {
@@ -220,24 +218,55 @@ export default function Lists() {
     return colors[type] || 'from-gray-500 to-gray-600';
   };
 
+  const listTypeHeaderBg = (type: string) => {
+    const m: Record<string, string> = {
+      static: 'linear-gradient(135deg, rgba(14, 165, 233, 0.22) 0%, rgba(6, 182, 212, 0.06) 100%)',
+      dynamic: 'linear-gradient(135deg, rgba(168, 85, 247, 0.26) 0%, rgba(236, 72, 153, 0.08) 100%)',
+      hybrid: 'linear-gradient(135deg, rgba(16, 185, 129, 0.22) 0%, rgba(5, 150, 105, 0.07) 100%)',
+    };
+    return m[type] ?? 'linear-gradient(135deg, rgba(71, 85, 105, 0.2), rgba(30, 41, 59, 0.15))';
+  };
+
   return (
     <div>
+      <style>{`
+        .lists-label {
+          display: block;
+          font-size: 0.75rem;
+          font-weight: 600;
+          color: var(--text-secondary);
+          margin-bottom: 8px;
+          text-transform: uppercase;
+          letter-spacing: 0.06em;
+        }
+        @media (max-width: 520px) {
+          .lists-type-grid { grid-template-columns: 1fr !important; }
+        }
+      `}</style>
       {/* Header */}
-      <div className="mb-8">
+      <div style={{ marginBottom: 40 }}>
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div>
-            <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-3 mb-2">
-              <div className="w-10 h-10 bg-gradient-to-br from-green-500 to-emerald-500 rounded-xl flex items-center justify-center shadow-lg">
-                <List className="h-6 w-6 text-white" />
-              </div>
-              Listas de Contatos
-            </h1>
-            <p className="text-gray-600 text-sm ml-13">
-              Crie listas estáticas, dinâmicas ou híbridas para seus disparos
-            </p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+            <div style={{
+              width: 56, height: 56, borderRadius: 16,
+              background: 'linear-gradient(135deg, #a78bfa, #7c3aed)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              boxShadow: '0 8px 24px rgba(124, 58, 237, 0.25)',
+            }}>
+              <List size={28} color="#0d0c14" strokeWidth={2.5} />
+            </div>
+            <div>
+              <h1 style={{ fontSize: '2rem', fontWeight: 800, color: 'var(--text-primary)', margin: 0, letterSpacing: '-0.02em', fontFamily: 'Outfit, sans-serif' }}>
+                Listas de contatos
+              </h1>
+              <p style={{ margin: '4px 0 0', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                Crie listas estáticas, dinâmicas ou híbridas para seus disparos.
+              </p>
+            </div>
           </div>
-          
-          <Button
+
+          <button
+            type="button"
             onClick={() => {
               setEditingList(null);
               setFormData({
@@ -254,11 +283,12 @@ export default function Lists() {
               });
               setShowModal(true);
             }}
-            className="flex items-center gap-2 bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600 text-white shadow-lg"
+            className="btn-gold"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '10px 22px', borderRadius: 12, border: 'none', cursor: 'pointer', fontWeight: 700, fontSize: '0.9rem' }}
           >
-            <Plus className="h-5 w-5" />
-            Nova Lista
-          </Button>
+            <Plus className="h-5 w-5" strokeWidth={2.5} />
+            Nova lista
+          </button>
         </div>
       </div>
 
@@ -266,212 +296,219 @@ export default function Lists() {
       {loading ? (
         <div className="flex items-center justify-center py-12">
           <div className="text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-600 mx-auto mb-4"></div>
-            <p className="text-gray-600">Carregando listas...</p>
+            <div className="animate-spin rounded-full h-12 w-12 border-2 border-transparent border-t-amber-500 border-r-amber-500/40 mx-auto mb-4" />
+            <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Carregando listas…</p>
           </div>
         </div>
       ) : lists.length === 0 ? (
-        <Card className="border-2 border-gray-200 rounded-2xl shadow-md">
-          <CardContent className="p-12 text-center">
-            <List className="h-16 w-16 text-gray-300 mx-auto mb-4" />
-            <h3 className="text-lg font-semibold text-gray-900 mb-2">Nenhuma lista encontrada</h3>
-            <p className="text-gray-600 mb-6">Crie sua primeira lista de contatos</p>
-            <Button
-              onClick={() => {
-                setEditingList(null);
-                setFormData({
-                  name: '',
-                  description: '',
-                  list_type: 'static',
-                  filter_config: {
-                    tags: [],
-                    exclude_tags: [],
-                    opt_in: undefined,
-                    opt_out: undefined,
-                    whatsapp_validated: undefined,
-                  },
-                });
-                setShowModal(true);
-              }}
-              className="bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600 text-white"
-            >
-              <Plus className="h-4 w-4 mr-2" />
-              Criar Lista
-            </Button>
-          </CardContent>
-        </Card>
+        <div className="glass-card" style={{ padding: 48, textAlign: 'center' }}>
+          <List className="h-16 w-16 mx-auto mb-4" style={{ color: 'var(--text-muted)', opacity: 0.5 }} />
+          <h3 style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-primary)', margin: '0 0 8px' }}>Nenhuma lista encontrada</h3>
+          <p style={{ color: 'var(--text-secondary)', marginBottom: 24, fontSize: '0.9rem' }}>Crie sua primeira lista de contatos.</p>
+          <button
+            type="button"
+            onClick={() => {
+              setEditingList(null);
+              setFormData({
+                name: '',
+                description: '',
+                list_type: 'static',
+                filter_config: {
+                  tags: [],
+                  exclude_tags: [],
+                  opt_in: undefined,
+                  opt_out: undefined,
+                  whatsapp_validated: undefined,
+                },
+              });
+              setShowModal(true);
+            }}
+            className="btn-gold"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '10px 22px', borderRadius: 12, border: 'none', cursor: 'pointer', fontWeight: 700 }}
+          >
+            <Plus className="h-4 w-4" strokeWidth={2.5} />
+            Criar lista
+          </button>
+        </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {lists.map(list => (
-            <Card key={list.id} className="border-2 border-gray-200 hover:border-green-300 hover:shadow-lg transition-all duration-300 rounded-2xl overflow-hidden bg-white shadow-md">
-              <CardHeader className={`bg-gradient-to-br ${getListTypeColor(list.list_type)} bg-opacity-10 border-b-2 border-gray-100 px-6 py-4`}>
-                <div className="flex items-start justify-between">
-                  <div className="flex-1">
-                    <CardTitle className="text-lg font-bold text-gray-900 mb-1">
-                      {list.name}
-                    </CardTitle>
-                    <div className="flex items-center gap-2 mt-2">
-                      <span className={`px-2 py-0.5 rounded-lg text-xs font-medium bg-gradient-to-r ${getListTypeColor(list.list_type)} text-white`}>
-                        {getListTypeLabel(list.list_type)}
-                      </span>
-                    </div>
-                  </div>
+          {lists.map((list) => (
+            <div key={list.id} className="glass-card" style={{ overflow: 'hidden', padding: 0, display: 'flex', flexDirection: 'column' }}>
+              <div
+                style={{
+                  padding: '20px 22px',
+                  background: listTypeHeaderBg(list.list_type),
+                  borderBottom: '1px solid var(--border)',
+                }}
+              >
+                <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 800, color: 'var(--text-primary)', fontFamily: 'Outfit, sans-serif' }}>
+                  {list.name}
+                </h3>
+                <div style={{ marginTop: 10 }}>
+                  <span className={`inline-block px-2.5 py-1 rounded-lg text-xs font-bold bg-gradient-to-r ${getListTypeColor(list.list_type)} text-white shadow-sm`}>
+                    {getListTypeLabel(list.list_type)}
+                  </span>
                 </div>
-                {list.description && (
-                  <CardDescription className="text-sm text-gray-600 mt-2">
+                {list.description ? (
+                  <p style={{ margin: '12px 0 0', fontSize: '0.82rem', color: 'var(--text-muted)', lineHeight: 1.45 }}>
                     {list.description}
-                  </CardDescription>
-                )}
-              </CardHeader>
-              <CardContent className="p-6">
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-gray-600 flex items-center gap-2">
+                  </p>
+                ) : null}
+              </div>
+              <div style={{ padding: 22, flex: 1, display: 'flex', flexDirection: 'column' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '0.88rem' }}>
+                    <span style={{ color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 8 }}>
                       <Users className="h-4 w-4" />
-                      Total de contatos:
+                      Total de contatos
                     </span>
-                    <span className="font-bold text-gray-900">{list.total_contacts || 0}</span>
+                    <span style={{ fontWeight: 800, color: 'var(--text-primary)' }}>{list.total_contacts || 0}</span>
                   </div>
-
                   {list.list_type === 'hybrid' && (
-                    <div className="flex items-center justify-between text-sm">
-                      <span className="text-gray-600">Contatos estáticos:</span>
-                      <span className="font-medium text-gray-900">{list.static_contacts_count || 0}</span>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '0.88rem' }}>
+                      <span style={{ color: 'var(--text-secondary)' }}>Contatos estáticos</span>
+                      <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{list.static_contacts_count || 0}</span>
                     </div>
                   )}
-
-                  <div className="flex items-center gap-2 pt-4 border-t border-gray-100">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => handlePreview(list.id)}
-                      className="flex-1"
-                    >
-                      <Eye className="h-4 w-4 mr-1" />
-                      Preview
-                    </Button>
-                    {(list.list_type === 'dynamic' || list.list_type === 'hybrid') && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => handleRefresh(list.id)}
-                        className="text-blue-600 hover:text-blue-700 hover:border-blue-300"
-                        title="Atualizar lista"
-                      >
-                        <RefreshCw className="h-4 w-4" />
-                      </Button>
-                    )}
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => handleEdit(list)}
-                      className="text-gray-600 hover:text-gray-700 hover:border-gray-300"
-                    >
-                      <Edit className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => handleDelete(list.id)}
-                      className="text-red-600 hover:text-red-700 hover:border-red-300"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
                 </div>
-              </CardContent>
-            </Card>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 20, paddingTop: 18, borderTop: '1px solid var(--border)' }}>
+                  <button
+                    type="button"
+                    className="btn-outline"
+                    style={{ flex: '1 1 100px', minHeight: 40, borderRadius: 10, fontSize: '0.8rem', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, cursor: 'pointer' }}
+                    onClick={() => handlePreview(list.id)}
+                  >
+                    <Eye className="h-4 w-4" />
+                    Preview
+                  </button>
+                  {(list.list_type === 'dynamic' || list.list_type === 'hybrid') && (
+                    <button
+                      type="button"
+                      className="btn-outline"
+                      style={{ minWidth: 44, minHeight: 40, borderRadius: 10, padding: '0 12px', cursor: 'pointer', color: '#38bdf8', borderColor: 'rgba(56, 189, 248, 0.35)' }}
+                      onClick={() => handleRefresh(list.id)}
+                      title="Atualizar lista"
+                    >
+                      <RefreshCw className="h-4 w-4" />
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="btn-outline"
+                    style={{ minWidth: 44, minHeight: 40, borderRadius: 10, padding: '0 12px', cursor: 'pointer' }}
+                    onClick={() => handleEdit(list)}
+                  >
+                    <Edit className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-outline"
+                    style={{ minWidth: 44, minHeight: 40, borderRadius: 10, padding: '0 12px', cursor: 'pointer', color: '#fb7185', borderColor: 'rgba(244, 63, 94, 0.25)' }}
+                    onClick={() => handleDelete(list.id)}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+            </div>
           ))}
         </div>
       )}
 
-      {/* Modal Criar/Editar */}
+      {/* Modal Criar/Editar — tema escuro alinhado ao restante do app */}
       {showModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 overflow-y-auto">
-          <Card className="w-full max-w-2xl border-2 border-gray-200 rounded-2xl shadow-xl my-8">
-            <CardHeader className="bg-gradient-to-br from-green-50 to-emerald-50 border-b-2 border-gray-100 px-6 py-4">
-              <CardTitle className="text-xl font-bold text-gray-900">
+        <div className="modal-overlay">
+          <div className="glass-card modal-overlay-panel" style={{ width: '100%', maxWidth: 640, padding: 0, overflow: 'hidden', boxShadow: '0 24px 64px rgba(0,0,0,0.6)' }}>
+            <div style={{ padding: '22px 28px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'rgba(16, 185, 129, 0.08)' }}>
+              <h2 style={{ margin: 0, fontSize: '1.35rem', fontWeight: 800, color: 'var(--text-primary)', fontFamily: 'Outfit, sans-serif' }}>
                 {editingList ? 'Editar Lista' : 'Nova Lista'}
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="p-6">
-              <form onSubmit={handleSubmit} className="space-y-6">
+              </h2>
+              <button
+                type="button"
+                onClick={() => { setShowModal(false); setEditingList(null); }}
+                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 4 }}
+                aria-label="Fechar"
+              >
+                <X size={24} />
+              </button>
+            </div>
+            <form onSubmit={handleSubmit} style={{ padding: 28 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Nome *
-                  </label>
-                  <Input
+                  <label className="lists-label">Nome *</label>
+                  <input
                     type="text"
                     value={formData.name}
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                     placeholder="Nome da lista"
                     required
-                    className="h-12 border-2 border-gray-300 rounded-xl focus:border-green-500"
+                    className="input-dark"
+                    style={{ width: '100%', padding: '12px 16px' }}
                   />
                 </div>
-                
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Descrição
-                  </label>
-                  <Input
+                  <label className="lists-label">Descrição</label>
+                  <input
                     type="text"
                     value={formData.description}
                     onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                     placeholder="Descrição opcional"
-                    className="h-12 border-2 border-gray-300 rounded-xl focus:border-green-500"
+                    className="input-dark"
+                    style={{ width: '100%', padding: '12px 16px' }}
                   />
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Tipo de Lista *
-                  </label>
-                  <div className="grid grid-cols-3 gap-3">
-                    {(['static', 'dynamic', 'hybrid'] as const).map(type => (
-                      <button
-                        key={type}
-                        type="button"
-                        onClick={() => setFormData({ ...formData, list_type: type })}
-                        className={`p-4 rounded-xl border-2 transition-all ${
-                          formData.list_type === type
-                            ? `border-green-500 bg-gradient-to-br ${getListTypeColor(type)} bg-opacity-10`
-                            : 'border-gray-200 hover:border-gray-300'
-                        }`}
-                      >
-                        <div className="text-sm font-semibold text-gray-900 mb-1">
-                          {getListTypeLabel(type)}
-                        </div>
-                        <div className="text-xs text-gray-600">
-                          {type === 'static' && 'Contatos fixos'}
-                          {type === 'dynamic' && 'Baseada em filtros'}
-                          {type === 'hybrid' && 'Estática + Dinâmica'}
-                        </div>
-                      </button>
-                    ))}
+                  <label className="lists-label">Tipo de lista *</label>
+                  <div className="lists-type-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginTop: 8 }}>
+                    {(['static', 'dynamic', 'hybrid'] as const).map((type) => {
+                      const selected = formData.list_type === type;
+                      return (
+                        <button
+                          key={type}
+                          type="button"
+                          onClick={() => setFormData({ ...formData, list_type: type })}
+                          style={{
+                            padding: '14px 12px',
+                            borderRadius: 12,
+                            border: selected ? '2px solid var(--gold-primary)' : '1px solid var(--border)',
+                            background: selected ? 'rgba(245, 158, 11, 0.12)' : 'var(--bg-elevated)',
+                            cursor: 'pointer',
+                            textAlign: 'left',
+                            transition: 'border-color 0.2s, background 0.2s',
+                          }}
+                        >
+                          <div style={{ fontSize: '0.88rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: 4 }}>
+                            {getListTypeLabel(type)}
+                          </div>
+                          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', lineHeight: 1.35 }}>
+                            {type === 'static' && 'Contatos fixos'}
+                            {type === 'dynamic' && 'Baseada em filtros'}
+                            {type === 'hybrid' && 'Estática + dinâmica'}
+                          </div>
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
 
-                {/* Filtros para listas dinâmicas/híbridas */}
                 {(formData.list_type === 'dynamic' || formData.list_type === 'hybrid') && (
-                  <div className="space-y-4 pt-4 border-t border-gray-100">
-                    <div className="flex items-center gap-2 mb-4">
-                      <Filter className="h-5 w-5 text-gray-600" />
-                      <h3 className="text-sm font-semibold text-gray-900">Filtros</h3>
+                  <div style={{ paddingTop: 20, borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 20 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <Filter size={18} color="var(--text-muted)" />
+                      <h3 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 700, color: 'var(--text-primary)' }}>Filtros</h3>
                     </div>
 
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Tags (incluir contatos com estas tags)
-                      </label>
-                      <p className="text-xs text-gray-500 mb-2">
-                        Selecione as tags para filtrar contatos. A lista incluirá apenas contatos que possuem pelo menos uma das tags selecionadas.
+                      <label className="lists-label">Tags (incluir)</label>
+                      <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: '6px 0 10px', lineHeight: 1.45 }}>
+                        Contatos que tenham pelo menos uma das tags selecionadas entram na lista.
                       </p>
-                      <div className="flex flex-wrap gap-2 p-3 border-2 border-gray-200 rounded-xl min-h-[60px] bg-gray-50">
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, padding: 12, borderRadius: 12, border: '1px solid var(--border)', background: 'rgba(0,0,0,0.2)', minHeight: 56 }}>
                         {tags.length === 0 ? (
-                          <span className="text-sm text-gray-400">Nenhuma tag disponível. Crie tags na página de Tags.</span>
+                          <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Nenhuma tag. Crie na página Tags.</span>
                         ) : (
-                          tags.map(tag => {
+                          tags.map((tag) => {
                             const isSelected = formData.filter_config.tags?.includes(tag.id);
                             return (
                               <button
@@ -482,27 +519,26 @@ export default function Lists() {
                                   if (isSelected) {
                                     setFormData({
                                       ...formData,
-                                      filter_config: {
-                                        ...formData.filter_config,
-                                        tags: current.filter(id => id !== tag.id)
-                                      }
+                                      filter_config: { ...formData.filter_config, tags: current.filter((id) => id !== tag.id) },
                                     });
                                   } else {
                                     setFormData({
                                       ...formData,
-                                      filter_config: {
-                                        ...formData.filter_config,
-                                        tags: [...current, tag.id]
-                                      }
+                                      filter_config: { ...formData.filter_config, tags: [...current, tag.id] },
                                     });
                                   }
                                 }}
-                                className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
-                                  isSelected
-                                    ? 'text-white shadow-md'
-                                    : 'bg-white text-gray-700 hover:bg-gray-100 border border-gray-300'
-                                }`}
-                                style={isSelected ? { backgroundColor: tag.color } : {}}
+                                style={{
+                                  padding: '6px 12px',
+                                  borderRadius: 8,
+                                  fontSize: '0.8rem',
+                                  fontWeight: 600,
+                                  border: 'none',
+                                  cursor: 'pointer',
+                                  color: isSelected ? '#fff' : 'var(--text-secondary)',
+                                  background: isSelected ? tag.color : 'rgba(255,255,255,0.06)',
+                                  boxShadow: isSelected ? '0 2px 8px rgba(0,0,0,0.25)' : undefined,
+                                }}
                               >
                                 {isSelected ? '✓ ' : ''}{tag.name}
                               </button>
@@ -513,17 +549,15 @@ export default function Lists() {
                     </div>
 
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Tags (excluir contatos com estas tags)
-                      </label>
-                      <p className="text-xs text-gray-500 mb-2">
-                        Selecione as tags para excluir contatos. A lista não incluirá contatos que possuem qualquer uma das tags selecionadas.
+                      <label className="lists-label">Tags (excluir)</label>
+                      <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: '6px 0 10px', lineHeight: 1.45 }}>
+                        Contatos com qualquer uma destas tags ficam de fora.
                       </p>
-                      <div className="flex flex-wrap gap-2 p-3 border-2 border-gray-200 rounded-xl min-h-[60px] bg-gray-50">
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, padding: 12, borderRadius: 12, border: '1px solid var(--border)', background: 'rgba(0,0,0,0.2)', minHeight: 56 }}>
                         {tags.length === 0 ? (
-                          <span className="text-sm text-gray-400">Nenhuma tag disponível.</span>
+                          <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Nenhuma tag.</span>
                         ) : (
-                          tags.map(tag => {
+                          tags.map((tag) => {
                             const isSelected = formData.filter_config.exclude_tags?.includes(tag.id);
                             return (
                               <button
@@ -534,26 +568,25 @@ export default function Lists() {
                                   if (isSelected) {
                                     setFormData({
                                       ...formData,
-                                      filter_config: {
-                                        ...formData.filter_config,
-                                        exclude_tags: current.filter(id => id !== tag.id)
-                                      }
+                                      filter_config: { ...formData.filter_config, exclude_tags: current.filter((id) => id !== tag.id) },
                                     });
                                   } else {
                                     setFormData({
                                       ...formData,
-                                      filter_config: {
-                                        ...formData.filter_config,
-                                        exclude_tags: [...current, tag.id]
-                                      }
+                                      filter_config: { ...formData.filter_config, exclude_tags: [...current, tag.id] },
                                     });
                                   }
                                 }}
-                                className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all border-2 ${
-                                  isSelected
-                                    ? 'border-red-500 bg-red-50 text-red-700'
-                                    : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-100'
-                                }`}
+                                style={{
+                                  padding: '6px 12px',
+                                  borderRadius: 8,
+                                  fontSize: '0.8rem',
+                                  fontWeight: 600,
+                                  cursor: 'pointer',
+                                  border: isSelected ? '2px solid #fb7185' : '1px solid var(--border)',
+                                  color: isSelected ? '#fb7185' : 'var(--text-secondary)',
+                                  background: isSelected ? 'rgba(244, 63, 94, 0.1)' : 'rgba(255,255,255,0.04)',
+                                }}
                               >
                                 {isSelected ? '✕ ' : ''}{tag.name}
                               </button>
@@ -563,153 +596,118 @@ export default function Lists() {
                       </div>
                     </div>
 
-                    <div className="space-y-3">
-                      <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-4 mb-4">
-                        <p className="text-sm text-blue-900 font-medium mb-2">ℹ️ Como funciona a validação</p>
-                        <div className="text-xs text-blue-700 space-y-1">
-                          <p><strong>Opt-in:</strong> Por padrão, contatos importados já têm opt-in = TRUE. Use o filtro apenas se quiser garantir.</p>
-                          <p><strong>WhatsApp Validado:</strong> Contatos são validados automaticamente via Evolution API durante o import. Números sem WhatsApp são automaticamente tagados como "bloqueado".</p>
-                          <p className="mt-2 font-semibold">💡 Dica: Use o botão "Validar WhatsApp (API)" na página de Contatos para revalidar números selecionados. Números inválidos serão tagados como "bloqueado" automaticamente!</p>
-                        </div>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <label className="text-sm font-medium text-gray-700">
-                          Apenas opt-in
-                        </label>
+                    <div style={{ padding: 14, borderRadius: 12, border: '1px solid rgba(56, 189, 248, 0.35)', background: 'rgba(56, 189, 248, 0.08)', fontSize: '0.78rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                      <strong style={{ color: 'var(--text-primary)' }}>Validação e disparos</strong>
+                      <p style={{ margin: '8px 0 0' }}>
+                        Disparos usam contatos com WhatsApp validado, opt-in e sem opt-out. Revalide números na página Contatos se necessário.
+                      </p>
+                    </div>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <span style={{ fontSize: '0.88rem', color: 'var(--text-primary)', fontWeight: 500 }}>Apenas opt-in</span>
                         <Switch
                           checked={formData.filter_config.opt_in === true}
-                          onCheckedChange={(checked) => setFormData({
-                            ...formData,
-                            filter_config: {
-                              ...formData.filter_config,
-                              opt_in: checked ? true : undefined
-                            }
-                          })}
+                          onCheckedChange={(checked) =>
+                            setFormData({
+                              ...formData,
+                              filter_config: { ...formData.filter_config, opt_in: checked ? true : undefined },
+                            })
+                          }
                         />
                       </div>
-                      <div className="flex items-center justify-between">
-                        <label className="text-sm font-medium text-gray-700">
-                          Apenas WhatsApp validado
-                        </label>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <span style={{ fontSize: '0.88rem', color: 'var(--text-primary)', fontWeight: 500 }}>Apenas WhatsApp validado</span>
                         <Switch
                           checked={formData.filter_config.whatsapp_validated === true}
-                          onCheckedChange={(checked) => setFormData({
-                            ...formData,
-                            filter_config: {
-                              ...formData.filter_config,
-                              whatsapp_validated: checked ? true : undefined
-                            }
-                          })}
+                          onCheckedChange={(checked) =>
+                            setFormData({
+                              ...formData,
+                              filter_config: { ...formData.filter_config, whatsapp_validated: checked ? true : undefined },
+                            })
+                          }
                         />
                       </div>
-                      <div className="flex items-center justify-between">
-                        <label className="text-sm font-medium text-gray-700">
-                          Excluir opt-out
-                        </label>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <span style={{ fontSize: '0.88rem', color: 'var(--text-primary)', fontWeight: 500 }}>Excluir opt-out</span>
                         <Switch
                           checked={formData.filter_config.opt_out === false}
-                          onCheckedChange={(checked) => setFormData({
-                            ...formData,
-                            filter_config: {
-                              ...formData.filter_config,
-                              opt_out: checked ? false : undefined
-                            }
-                          })}
-                        />
-                      </div>
-
-                      <div className="flex items-center justify-between">
-                        <label className="text-sm font-medium text-gray-700">
-                          Excluir opt-out
-                        </label>
-                        <Switch
-                          checked={formData.filter_config.opt_out === false}
-                          onCheckedChange={(checked) => setFormData({
-                            ...formData,
-                            filter_config: {
-                              ...formData.filter_config,
-                              opt_out: checked ? false : undefined
-                            }
-                          })}
-                        />
-                      </div>
-
-                      <div className="flex items-center justify-between">
-                        <label className="text-sm font-medium text-gray-700">
-                          Apenas WhatsApp validado
-                        </label>
-                        <Switch
-                          checked={formData.filter_config.whatsapp_validated === true}
-                          onCheckedChange={(checked) => setFormData({
-                            ...formData,
-                            filter_config: {
-                              ...formData.filter_config,
-                              whatsapp_validated: checked ? true : undefined
-                            }
-                          })}
+                          onCheckedChange={(checked) =>
+                            setFormData({
+                              ...formData,
+                              filter_config: { ...formData.filter_config, opt_out: checked ? false : undefined },
+                            })
+                          }
                         />
                       </div>
                     </div>
                   </div>
                 )}
 
-                <div className="flex items-center gap-3 pt-4 border-t border-gray-100">
-                  <Button
+                <div style={{ display: 'flex', gap: 12, paddingTop: 8 }}>
+                  <button
                     type="button"
-                    variant="outline"
-                    onClick={() => {
-                      setShowModal(false);
-                      setEditingList(null);
-                    }}
-                    className="flex-1"
+                    onClick={() => { setShowModal(false); setEditingList(null); }}
+                    className="btn-outline"
+                    style={{ flex: 1, padding: '14px 0', borderRadius: 12, cursor: 'pointer' }}
                   >
                     Cancelar
-                  </Button>
-                  <Button
-                    type="submit"
-                    className="flex-1 bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600 text-white"
-                  >
+                  </button>
+                  <button type="submit" className="btn-gold" style={{ flex: 1, padding: '14px 0', borderRadius: 12, border: 'none', cursor: 'pointer' }}>
                     {editingList ? 'Atualizar' : 'Criar'}
-                  </Button>
+                  </button>
                 </div>
-              </form>
-            </CardContent>
-          </Card>
+              </div>
+            </form>
+          </div>
         </div>
       )}
 
       {/* Modal Preview */}
       {showPreview && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <Card className="w-full max-w-2xl border-2 border-gray-200 rounded-2xl shadow-xl">
-            <CardHeader className="bg-gradient-to-br from-green-50 to-emerald-50 border-b-2 border-gray-100 px-6 py-4">
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-xl font-bold text-gray-900">
-                  Preview de Contatos
-                </CardTitle>
-                <button
-                  onClick={() => setShowPreview(false)}
-                  className="text-gray-400 hover:text-gray-600"
-                >
-                  ✕
-                </button>
-              </div>
-            </CardHeader>
-            <CardContent className="p-6 max-h-96 overflow-y-auto">
+        <div className="modal-overlay">
+          <div className="glass-card modal-overlay-panel" style={{ width: '100%', maxWidth: 560, padding: 0, overflow: 'hidden', boxShadow: '0 24px 64px rgba(0,0,0,0.6)' }}>
+            <div style={{ padding: '22px 28px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'rgba(16, 185, 129, 0.08)' }}>
+              <h2 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-primary)', fontFamily: 'Outfit, sans-serif' }}>
+                Preview de contatos
+              </h2>
+              <button
+                type="button"
+                onClick={() => setShowPreview(false)}
+                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 4 }}
+                aria-label="Fechar"
+              >
+                <X size={24} />
+              </button>
+            </div>
+            <div style={{ padding: 24, maxHeight: 'min(70vh, 420px)', overflowY: 'auto' }}>
               {previewContacts.length === 0 ? (
-                <p className="text-gray-500 text-center py-8">Nenhum contato encontrado</p>
+                <p style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '32px 0', margin: 0 }}>Nenhum contato encontrado</p>
               ) : (
-                <div className="space-y-2">
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                   {previewContacts.map((contact: any) => (
-                    <div key={contact.id} className="p-3 bg-gray-50 rounded-lg">
-                      <div className="font-medium text-gray-900">{contact.name || 'Sem nome'}</div>
-                      <div className="text-sm text-gray-600">{contact.phone_number}</div>
+                    <div
+                      key={contact.id}
+                      style={{
+                        padding: '12px 14px',
+                        borderRadius: 12,
+                        border: '1px solid var(--border)',
+                        background: 'var(--bg-elevated)',
+                      }}
+                    >
+                      <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{contact.name || 'Sem nome'}</div>
+                      <div style={{ fontSize: '0.875rem', color: 'var(--text-muted)', marginTop: 4 }}>{contact.phone_number}</div>
                     </div>
                   ))}
                 </div>
               )}
-            </CardContent>
-          </Card>
+            </div>
+            <div style={{ padding: '16px 24px', borderTop: '1px solid var(--border)' }}>
+              <button type="button" className="btn-outline" style={{ width: '100%', padding: '12px 0', borderRadius: 12, cursor: 'pointer' }} onClick={() => setShowPreview(false)}>
+                Fechar
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, type CSSProperties } from 'react';
 import api from '@/lib/api';
-import Button from '@/components/ui/Button';
+import Toast from '@/components/ui/Toast';
+import Switch from '@/components/ui/Switch';
 import {
   BookOpen,
   Save,
@@ -134,250 +135,299 @@ export default function DevocionalConfig() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <RefreshCw className="h-8 w-8 animate-spin mx-auto mb-4 text-primary" />
-          <p>Carregando configuração...</p>
+      <div style={{ minHeight: '48vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ textAlign: 'center' }}>
+          <RefreshCw className="h-9 w-9 animate-spin mx-auto mb-4" style={{ color: 'var(--gold-primary)' }} />
+          <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Carregando configuração…</p>
         </div>
       </div>
     );
   }
 
+  const labelStyle: CSSProperties = {
+    display: 'block',
+    fontSize: '0.75rem',
+    fontWeight: 600,
+    color: 'var(--text-secondary)',
+    marginBottom: 8,
+    textTransform: 'uppercase',
+    letterSpacing: '0.06em',
+  };
+
+  const devSnippet =
+    todayDevocional && todayDevocional.text.length > 200
+      ? `${todayDevocional.text.slice(0, 200)}…`
+      : todayDevocional?.text ?? '';
+
   return (
     <div>
-      {/* Header */}
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-3 mb-2">
-          <div className="w-10 h-10 bg-gradient-to-br from-green-500 to-emerald-500 rounded-xl flex items-center justify-center shadow-lg">
-            <BookOpen className="h-6 w-6 text-white" />
+      <div style={{ marginBottom: 36 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+          <div
+            style={{
+              width: 56,
+              height: 56,
+              borderRadius: 16,
+              background: 'linear-gradient(135deg, #10b981, #059669)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              boxShadow: '0 8px 24px rgba(16, 185, 129, 0.25)',
+            }}
+          >
+            <BookOpen size={28} color="#0d0c14" strokeWidth={2.5} />
           </div>
-          Configuração do Devocional
-        </h1>
-        <p className="text-gray-600 text-sm ml-13">
-          Configure o disparo automático diário de devocionais
-        </p>
+          <div>
+            <h1 style={{ margin: 0, fontSize: '2rem', fontWeight: 800, color: 'var(--text-primary)', fontFamily: 'Outfit, sans-serif', letterSpacing: '-0.02em' }}>
+              Configuração do devocional
+            </h1>
+            <p style={{ margin: '6px 0 0', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+              Disparo automático diário e prévia do conteúdo de hoje
+            </p>
+          </div>
+        </div>
       </div>
 
-      {/* Configurações */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 space-y-6">
-        {/* Lista de Contatos */}
+      <div className="glass-card" style={{ padding: 28, display: 'flex', flexDirection: 'column', gap: 28 }}>
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
-            <List className="h-4 w-4" />
-            Lista de Contatos *
+          <label style={{ ...labelStyle, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <List size={16} style={{ opacity: 0.85 }} />
+            Lista de contatos *
           </label>
           <select
             value={config.list_id || ''}
-            onChange={(e) => setConfig({ ...config, list_id: e.target.value ? parseInt(e.target.value) : undefined })}
-            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+            onChange={(e) => setConfig({ ...config, list_id: e.target.value ? parseInt(e.target.value, 10) : undefined })}
+            className="input-dark"
           >
             <option value="">Selecione uma lista</option>
             {lists.map((list) => (
               <option key={list.id} value={list.id}>
-                {list.name} ({list.total_contacts || 0} contatos) - {list.list_type}
+                {list.name} ({list.total_contacts || 0} contatos) — {list.list_type}
               </option>
             ))}
           </select>
-          <p className="text-xs text-gray-500 mt-1">
-            A lista deve ter contatos com tag "devocional" e WhatsApp validado
+          <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 8, lineHeight: 1.45 }}>
+            A lista deve incluir contatos com a tag &quot;devocional&quot; e WhatsApp validado.
           </p>
         </div>
 
-        {/* Horário de Disparo */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
-            <Clock className="h-4 w-4" />
-            Horário de Disparo (America/São_Paulo)
+          <label style={{ ...labelStyle, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Clock size={16} style={{ opacity: 0.85 }} />
+            Horário de disparo ({config.timezone})
           </label>
-          <div className="grid grid-cols-2 gap-4">
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
             <div>
-              <label className="block text-xs text-gray-600 mb-1">Hora</label>
+              <span style={{ ...labelStyle, fontSize: '0.68rem', marginBottom: 6 }}>Hora</span>
               <input
                 type="number"
-                min="0"
-                max="23"
+                min={0}
+                max={23}
                 value={config.dispatch_hour}
-                onChange={(e) => setConfig({ ...config, dispatch_hour: parseInt(e.target.value) || 0 })}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                onChange={(e) => setConfig({ ...config, dispatch_hour: parseInt(e.target.value, 10) || 0 })}
+                className="input-dark"
               />
             </div>
             <div>
-              <label className="block text-xs text-gray-600 mb-1">Minuto</label>
+              <span style={{ ...labelStyle, fontSize: '0.68rem', marginBottom: 6 }}>Minuto</span>
               <input
                 type="number"
-                min="0"
-                max="59"
+                min={0}
+                max={59}
                 value={config.dispatch_minute}
-                onChange={(e) => setConfig({ ...config, dispatch_minute: parseInt(e.target.value) || 0 })}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                onChange={(e) => setConfig({ ...config, dispatch_minute: parseInt(e.target.value, 10) || 0 })}
+                className="input-dark"
               />
             </div>
           </div>
-          <p className="text-xs text-gray-500 mt-1">
-            O disparo será executado automaticamente todos os dias às {String(config.dispatch_hour).padStart(2, '0')}:{String(config.dispatch_minute).padStart(2, '0')} (horário de Brasília)
+          <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 8 }}>
+            Execução diária às {String(config.dispatch_hour).padStart(2, '0')}:{String(config.dispatch_minute).padStart(2, '0')} (horário da configuração).
           </p>
         </div>
 
-        {/* Telefone para Notificações */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
-            <Bell className="h-4 w-4" />
-            Telefone para Notificações (opcional)
+          <label style={{ ...labelStyle, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Bell size={16} style={{ opacity: 0.85 }} />
+            Telefone para notificações (opcional)
           </label>
           <input
             type="text"
             value={config.notification_phone || ''}
             onChange={(e) => setConfig({ ...config, notification_phone: e.target.value })}
             placeholder="5516999999999"
-            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+            className="input-dark"
           />
-          <p className="text-xs text-gray-500 mt-1">
-            Receberá notificações quando o disparo iniciar, concluir ou houver erros
+          <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 8 }}>
+            Recebe avisos quando o disparo iniciar, concluir ou em caso de erro.
           </p>
         </div>
 
-        {/* Habilitado/Desabilitado */}
-        <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Disparo Automático Habilitado
-            </label>
-            <p className="text-xs text-gray-600">
-              Quando habilitado, o sistema dispara automaticamente todos os dias no horário configurado
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 16,
+            padding: 18,
+            borderRadius: 12,
+            border: '1px solid var(--border)',
+            background: 'rgba(0,0,0,0.12)',
+          }}
+        >
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontWeight: 700, color: 'var(--text-primary)', fontSize: '0.95rem', marginBottom: 4 }}>Disparo automático</div>
+            <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', margin: 0, lineHeight: 1.5 }}>
+              Quando ativo, o sistema envia o devocional do dia no horário configurado, sem precisar criar disparo manual.
             </p>
           </div>
-          <label className="relative inline-flex items-center cursor-pointer">
-            <input
-              type="checkbox"
-              checked={config.enabled}
-              onChange={(e) => setConfig({ ...config, enabled: e.target.checked })}
-              className="sr-only peer"
-            />
-            <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-green-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-500"></div>
-          </label>
+          <Switch checked={config.enabled} onCheckedChange={(enabled) => setConfig({ ...config, enabled })} />
         </div>
 
-        {/* Devocional do Dia */}
         {todayDevocional ? (
-          <div className="bg-gradient-to-br from-green-50 to-emerald-50 border-2 border-green-200 rounded-xl p-6">
-            <div className="flex items-center gap-3 mb-4">
-              <BookOpen className="h-6 w-6 text-green-600" />
+          <div
+            style={{
+              borderRadius: 14,
+              border: '1px solid rgba(16, 185, 129, 0.35)',
+              background: 'linear-gradient(145deg, rgba(16, 185, 129, 0.12) 0%, rgba(5, 150, 105, 0.06) 50%, rgba(0,0,0,0.15) 100%)',
+              padding: 22,
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+              <div
+                style={{
+                  width: 44,
+                  height: 44,
+                  borderRadius: 12,
+                  background: 'rgba(16, 185, 129, 0.2)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: '#34d399',
+                }}
+              >
+                <BookOpen size={22} />
+              </div>
               <div>
-                <h3 className="text-lg font-bold text-gray-900">Devocional de Hoje</h3>
-                <p className="text-sm text-gray-600">
-                  {formatDevocionalDate(todayDevocional.date)}
-                </p>
+                <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 800, color: 'var(--text-primary)', fontFamily: 'Outfit, sans-serif' }}>
+                  Devocional de hoje
+                </h3>
+                <p style={{ margin: '4px 0 0', fontSize: '0.82rem', color: 'var(--text-muted)' }}>{formatDevocionalDate(todayDevocional.date)}</p>
               </div>
             </div>
-            <div className="bg-white rounded-lg p-4 border border-green-200">
-              <h4 className="font-semibold text-gray-900 mb-2">{todayDevocional.title}</h4>
+            <div
+              style={{
+                borderRadius: 12,
+                padding: 16,
+                border: '1px solid var(--border)',
+                background: 'var(--bg-elevated)',
+              }}
+            >
+              <h4 style={{ margin: '0 0 10px', fontWeight: 700, color: 'var(--text-primary)', fontSize: '1rem' }}>{todayDevocional.title}</h4>
               {todayDevocional.versiculo_principal && (
-                <div className="mb-2 text-sm text-gray-700">
-                  <span className="font-medium">Versículo Principal:</span>{' '}
+                <p style={{ margin: '0 0 10px', fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
+                  <strong style={{ color: 'var(--text-primary)' }}>Versículo principal:</strong>{' '}
                   {todayDevocional.versiculo_principal.referencia}
-                </div>
+                </p>
               )}
-              <div className="text-sm text-gray-600 line-clamp-3">
-                {todayDevocional.text.substring(0, 200)}...
-              </div>
+              <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.55 }}>{devSnippet}</p>
             </div>
           </div>
         ) : (
-          <div className="bg-yellow-50 border-2 border-yellow-200 rounded-xl p-4">
-            <div className="flex items-start gap-3">
-              <AlertCircle className="h-5 w-5 text-yellow-600 mt-0.5 flex-shrink-0" />
-              <div className="text-sm text-yellow-900">
-                <p className="font-semibold">⚠️ Nenhum devocional encontrado para hoje</p>
-                <p className="text-yellow-800 mt-1">
-                  O N8N deve criar o devocional às 3:30 da manhã. Verifique se o workflow está funcionando.
+          <div
+            style={{
+              borderRadius: 14,
+              padding: 18,
+              border: '1px solid rgba(245, 158, 11, 0.35)',
+              background: 'rgba(245, 158, 11, 0.08)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+              <AlertCircle className="h-5 w-5 flex-shrink-0" style={{ color: '#fbbf24', marginTop: 2 }} />
+              <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                <p style={{ margin: 0, fontWeight: 700, color: 'var(--text-primary)' }}>Nenhum devocional encontrado para hoje</p>
+                <p style={{ margin: '8px 0 0' }}>
+                  O N8N costuma gerar o devocional pela manhã. Confira o workflow e os logs se esta mensagem persistir.
                 </p>
               </div>
             </div>
           </div>
         )}
 
-        {/* Status do Disparo Automático */}
         {config.enabled ? (
-          <div className="bg-green-50 border-2 border-green-200 rounded-xl p-4">
-            <div className="flex items-start gap-3">
-              <CheckCircle2 className="h-5 w-5 text-green-600 mt-0.5 flex-shrink-0" />
-              <div className="text-sm text-green-900">
-                <p className="font-semibold mb-2">✅ Disparo Automático ATIVO</p>
-                <p className="text-green-800">
-                  O sistema disparará automaticamente todos os dias às <strong>{String(config.dispatch_hour).padStart(2, '0')}:{String(config.dispatch_minute).padStart(2, '0')}</strong> (horário de {config.timezone}).
-                  Você <strong>não precisa</strong> criar disparos manuais na página "Disparos". O sistema fará isso automaticamente.
+          <div style={{ borderRadius: 12, padding: 16, border: '1px solid rgba(16, 185, 129, 0.35)', background: 'rgba(16, 185, 129, 0.08)' }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+              <CheckCircle2 className="h-5 w-5 flex-shrink-0" style={{ color: '#34d399', marginTop: 2 }} />
+              <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.55 }}>
+                <p style={{ margin: '0 0 8px', fontWeight: 700, color: 'var(--text-primary)' }}>Disparo automático ativo</p>
+                <p style={{ margin: 0 }}>
+                  Envios diários às <strong style={{ color: 'var(--text-primary)' }}>{String(config.dispatch_hour).padStart(2, '0')}:{String(config.dispatch_minute).padStart(2, '0')}</strong> ({config.timezone}). Não é necessário criar disparos manuais na página Disparos para o devocional diário.
                 </p>
               </div>
             </div>
           </div>
         ) : (
-          <div className="bg-yellow-50 border-2 border-yellow-200 rounded-xl p-4">
-            <div className="flex items-start gap-3">
-              <AlertCircle className="h-5 w-5 text-yellow-600 mt-0.5 flex-shrink-0" />
-              <div className="text-sm text-yellow-900">
-                <p className="font-semibold mb-2">⚠️ Disparo Automático DESATIVADO</p>
-                <p className="text-yellow-800">
-                  O disparo automático está desabilitado. Ative-o acima para que o sistema envie devocionais automaticamente todos os dias.
-                </p>
+          <div style={{ borderRadius: 12, padding: 16, border: '1px solid rgba(245, 158, 11, 0.3)', background: 'rgba(245, 158, 11, 0.06)' }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+              <AlertCircle className="h-5 w-5 flex-shrink-0" style={{ color: '#fbbf24', marginTop: 2 }} />
+              <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.55 }}>
+                <p style={{ margin: '0 0 8px', fontWeight: 700, color: 'var(--text-primary)' }}>Disparo automático desligado</p>
+                <p style={{ margin: 0 }}>Ative o interruptor acima para retomar os envios automáticos.</p>
               </div>
             </div>
           </div>
         )}
 
-        {/* Informações Importantes */}
-        <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-4">
-          <div className="flex items-start gap-3">
-            <AlertCircle className="h-5 w-5 text-blue-600 mt-0.5 flex-shrink-0" />
-            <div className="text-sm text-blue-900">
-              <p className="font-semibold mb-2">ℹ️ Como funciona:</p>
-              <ul className="space-y-1 text-blue-800">
-                <li>• O N8N cria o devocional às 3:30 da manhã</li>
-                <li>• O sistema dispara automaticamente às {String(config.dispatch_hour).padStart(2, '0')}:{String(config.dispatch_minute).padStart(2, '0')}</li>
-                <li>• A mensagem é personalizada com saudação (Bom dia/Tarde/Noite) + primeiro nome</li>
-                <li>• Contatos são validados automaticamente (WhatsApp + opt-in)</li>
-                <li>• Sistema de pontuação: após 3 falhas consecutivas, contato é tagado como "bloqueado"</li>
-                <li>• <strong>Não é necessário criar disparos manuais</strong> - o sistema faz isso automaticamente</li>
+        <div style={{ borderRadius: 12, padding: 16, border: '1px solid rgba(56, 189, 248, 0.35)', background: 'rgba(56, 189, 248, 0.06)' }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+            <AlertCircle className="h-5 w-5 flex-shrink-0" style={{ color: '#38bdf8', marginTop: 2 }} />
+            <div style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', lineHeight: 1.55 }}>
+              <p style={{ margin: '0 0 8px', fontWeight: 700, color: 'var(--text-primary)' }}>Como funciona</p>
+              <ul style={{ margin: 0, paddingLeft: 18 }}>
+                <li>O conteúdo do dia é preparado pelo fluxo N8N.</li>
+                <li>O backend agenda o disparo no horário configurado.</li>
+                <li>Mensagens usam saudação e primeiro nome quando disponível.</li>
+                <li>Respeitam validação de WhatsApp, opt-in e opt-out.</li>
+                <li>Falhas repetidas podem marcar o contato como bloqueado.</li>
               </ul>
             </div>
           </div>
         </div>
 
-        {/* Botão Salvar */}
-        <div className="flex justify-end pt-4 border-t border-gray-200">
-          <Button
+        <div style={{ display: 'flex', justifyContent: 'flex-end', paddingTop: 8, borderTop: '1px solid var(--border)' }}>
+          <button
+            type="button"
             onClick={handleSave}
             disabled={saving || !config.list_id}
-            className="bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600"
+            className="btn-gold"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 8,
+              padding: '12px 24px',
+              borderRadius: 12,
+              border: 'none',
+              cursor: saving || !config.list_id ? 'not-allowed' : 'pointer',
+              fontWeight: 700,
+              opacity: saving || !config.list_id ? 0.55 : 1,
+            }}
           >
             {saving ? (
               <>
-                <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-                Salvando...
+                <RefreshCw className="h-4 w-4 animate-spin" />
+                Salvando…
               </>
             ) : (
               <>
-                <Save className="h-4 w-4 mr-2" />
-                Salvar Configuração
+                <Save className="h-4 w-4" />
+                Salvar configuração
               </>
             )}
-          </Button>
+          </button>
         </div>
       </div>
 
-      {/* Toast */}
       {toast && (
-        <div
-          className={`fixed bottom-4 right-4 p-4 rounded-lg shadow-lg ${
-            toast.type === 'success' ? 'bg-green-500' : 'bg-red-500'
-          } text-white z-50 flex items-center gap-2`}
-        >
-          {toast.type === 'success' ? (
-            <CheckCircle2 className="h-5 w-5" />
-          ) : (
-            <AlertCircle className="h-5 w-5" />
-          )}
-          {toast.message}
-        </div>
+        <Toast message={toast.message} type={toast.type} duration={4000} onClose={() => setToast(null)} />
       )}
     </div>
   );

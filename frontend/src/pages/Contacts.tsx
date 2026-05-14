@@ -806,8 +806,8 @@ export default function Contacts() {
 
       {/* Modal - Adicionar/Editar */}
       {showModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100, padding: 20 }}>
-          <div className="glass-card" style={{ width: '100%', maxWidth: 480, padding: 0, overflow: 'hidden', boxShadow: '0 24px 64px rgba(0,0,0,0.6)' }}>
+        <div className="modal-overlay">
+          <div className="glass-card modal-overlay-panel" style={{ width: '100%', maxWidth: 480, padding: 0, overflow: 'hidden', boxShadow: '0 24px 64px rgba(0,0,0,0.6)' }}>
             <div style={{ padding: '24px 32px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <h3 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-primary)', fontFamily: 'Outfit' }}>
                 {editingContact ? 'Editar Contato' : 'Novo Contato'}
@@ -893,8 +893,8 @@ export default function Contacts() {
 
       {/* Modal - Importar CSV */}
       {showImportModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100, padding: 20 }}>
-          <div className="glass-card" style={{ width: '100%', maxWidth: 480, padding: 32, boxShadow: '0 24px 64px rgba(0,0,0,0.6)' }}>
+        <div className="modal-overlay">
+          <div className="glass-card modal-overlay-panel" style={{ width: '100%', maxWidth: 480, padding: 32, boxShadow: '0 24px 64px rgba(0,0,0,0.6)' }}>
             <div style={{ textAlign: 'center', marginBottom: 24 }}>
               <div style={{ width: 64, height: 64, borderRadius: 20, background: 'rgba(56, 189, 248, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
                 <Upload size={32} color="var(--sky)" />
@@ -938,8 +938,8 @@ export default function Contacts() {
 
       {/* Modal - Ações em Massa */}
       {showBulkTagModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100, padding: 20 }}>
-          <div className="glass-card" style={{ width: '100%', maxWidth: 480, padding: 32 }}>
+        <div className="modal-overlay">
+          <div className="glass-card modal-overlay-panel" style={{ width: '100%', maxWidth: 480, padding: 32 }}>
             <h3 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-primary)', fontFamily: 'Outfit', marginBottom: 24 }}>Ações para {selectedContacts.length} contatos</h3>
             
             <div style={{ marginBottom: 24 }}>
