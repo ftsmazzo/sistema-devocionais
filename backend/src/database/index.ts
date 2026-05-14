@@ -106,7 +106,9 @@ export async function initializeDatabase() {
       ADD COLUMN IF NOT EXISTS last_message_sent_at TIMESTAMP,
       ADD COLUMN IF NOT EXISTS last_message_received_at TIMESTAMP,
       ADD COLUMN IF NOT EXISTS health_status VARCHAR(50) DEFAULT 'healthy',
-      ADD COLUMN IF NOT EXISTS health_checked_at TIMESTAMP
+      ADD COLUMN IF NOT EXISTS health_checked_at TIMESTAMP,
+      ADD COLUMN IF NOT EXISTS profile_picture_url TEXT,
+      ADD COLUMN IF NOT EXISTS profile_picture_updated_at TIMESTAMP
     `);
 
     // Criar tabela de mensagens

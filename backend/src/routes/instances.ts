@@ -1,10 +1,51 @@
 import express from 'express';
 import axios from 'axios';
 import { pool } from '../database';
-import { authenticateToken, AuthRequest } from '../middleware/auth';
+import { authenticateToken } from '../middleware/auth';
 import { createDefaultRules } from '../services/blindage';
 
 const router = express.Router();
+
+function digitsOnly(phone: string): string {
+  return String(phone).replace(/\D/g, '');
+}
+
+function toWhatsAppJid(phone: string): string {
+  const d = digitsOnly(phone);
+  if (!d) return '';
+  return `${d}@s.whatsapp.net`;
+}
+
+/** POST /chat/fetchProfilePictureUrl/{instance} — Evolution v2 */
+async function evolutionFetchProfilePictureUrl(instance: {
+  api_url: string;
+  api_key: string;
+  instance_name: string;
+  phone_number: string | null;
+}): Promise<string | null> {
+  const jid = instance.phone_number ? toWhatsAppJid(instance.phone_number) : '';
+  if (!jid) return null;
+  const url = `${instance.api_url}/chat/fetchProfilePictureUrl/${instance.instance_name}`;
+  try {
+    const res = await axios.post(
+      url,
+      { number: jid },
+      {
+        headers: {
+          apikey: instance.api_key,
+          'Content-Type': 'application/json',
+        },
+        validateStatus: () => true,
+      }
+    );
+    if (res.status >= 200 && res.status < 300 && res.data?.profilePictureUrl) {
+      return String(res.data.profilePictureUrl);
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
 
 // Todas as rotas requerem autenticação
 router.use(authenticateToken);
@@ -13,7 +54,8 @@ router.use(authenticateToken);
 router.get('/', async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT id, name, instance_name, status, phone_number, qr_code, last_connection, created_at, updated_at
+      `SELECT id, name, instance_name, status, phone_number, qr_code, last_connection, created_at, updated_at,
+              profile_picture_url, profile_picture_updated_at
        FROM instances 
        ORDER BY created_at DESC`
     );
@@ -29,7 +71,8 @@ router.get('/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const result = await pool.query(
-      `SELECT id, name, instance_name, status, phone_number, qr_code, last_connection, created_at, updated_at
+      `SELECT id, name, instance_name, status, phone_number, qr_code, last_connection, created_at, updated_at,
+              profile_picture_url, profile_picture_updated_at
        FROM instances WHERE id = $1`,
       [id]
     );
@@ -69,7 +112,8 @@ router.post('/', async (req, res) => {
     const result = await pool.query(
       `INSERT INTO instances (name, api_key, api_url, instance_name, status)
        VALUES ($1, $2, $3, $4, 'disconnected')
-       RETURNING id, name, instance_name, status, phone_number, qr_code, last_connection, created_at, updated_at`,
+       RETURNING id, name, instance_name, status, phone_number, qr_code, last_connection, created_at, updated_at,
+                 profile_picture_url, profile_picture_updated_at`,
       [name, api_key, api_url, instance_name]
     );
 
@@ -107,7 +151,8 @@ router.put('/:id', async (req, res) => {
            instance_name = COALESCE($2, instance_name),
            updated_at = CURRENT_TIMESTAMP
        WHERE id = $3
-       RETURNING id, name, instance_name, status, phone_number, qr_code, last_connection, created_at, updated_at`,
+       RETURNING id, name, instance_name, status, phone_number, qr_code, last_connection, created_at, updated_at,
+                 profile_picture_url, profile_picture_updated_at`,
       [name, instance_name, id]
     );
 
@@ -474,6 +519,8 @@ router.post('/:id/disconnect', async (req, res) => {
        SET status = 'disconnected',
        qr_code = NULL,
        phone_number = NULL,
+       profile_picture_url = NULL,
+       profile_picture_updated_at = NULL,
        updated_at = CURRENT_TIMESTAMP
        WHERE id = $1`,
       [id]
@@ -589,19 +636,38 @@ router.get('/:id/status', async (req, res) => {
       // Instância não existe na Evolution API
       status = 'disconnected';
       qrCode = null;
+      phoneNumber = null;
       console.log(`   ❌ Instância não encontrada na Evolution API`);
     }
 
-    // Atualizar status, QR code e número de telefone no banco
+    // Atualizar status, QR code e número (sem COALESCE: offline deve limpar o número)
+    const clearProfile = status === 'disconnected';
     await pool.query(
       `UPDATE instances 
        SET status = $1,
            qr_code = $2,
-           phone_number = COALESCE($3, phone_number),
+           phone_number = $3,
+           profile_picture_url = CASE WHEN $4 THEN NULL ELSE profile_picture_url END,
+           profile_picture_updated_at = CASE WHEN $4 THEN NULL ELSE profile_picture_updated_at END,
            updated_at = CURRENT_TIMESTAMP
-       WHERE id = $4`,
-      [status, qrCode, phoneNumber, id]
+       WHERE id = $5`,
+      [status, qrCode, phoneNumber, clearProfile, id]
     );
+
+    if (status === 'connected' && phoneNumber) {
+      const picUrl = await evolutionFetchProfilePictureUrl({
+        api_url: instance.api_url,
+        api_key: instance.api_key,
+        instance_name: instance.instance_name,
+        phone_number: phoneNumber,
+      });
+      if (picUrl) {
+        await pool.query(
+          `UPDATE instances SET profile_picture_url = $1, profile_picture_updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
+          [picUrl, id]
+        );
+      }
+    }
 
     res.json({
       status,
@@ -617,6 +683,117 @@ router.get('/:id/status', async (req, res) => {
       error: 'Erro ao verificar status',
       details: error.response?.data || error.message,
     });
+  }
+});
+
+/** Atualiza foto de perfil na Evolution (URL pública da imagem) e sincroniza cache local */
+router.post('/:id/profile-picture', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const pictureUrl = typeof req.body?.pictureUrl === 'string' ? req.body.pictureUrl.trim() : '';
+    if (!pictureUrl || !/^https?:\/\//i.test(pictureUrl)) {
+      return res.status(400).json({ error: 'Informe pictureUrl com uma URL http(s) válida da imagem' });
+    }
+
+    const instanceResult = await pool.query('SELECT * FROM instances WHERE id = $1', [id]);
+    if (instanceResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Instância não encontrada' });
+    }
+    const instance = instanceResult.rows[0];
+    if (instance.status !== 'connected') {
+      return res.status(400).json({ error: 'Conecte a instância antes de alterar a foto de perfil' });
+    }
+
+    const evolutionUrl = `${instance.api_url}/chat/updateProfilePicture/${instance.instance_name}`;
+    const evolutionResponse = await axios.post(
+      evolutionUrl,
+      { picture: pictureUrl },
+      {
+        headers: {
+          apikey: instance.api_key,
+          'Content-Type': 'application/json',
+        },
+        validateStatus: () => true,
+      }
+    );
+
+    if (evolutionResponse.status < 200 || evolutionResponse.status >= 300) {
+      const msg =
+        evolutionResponse.data?.message ||
+        evolutionResponse.data?.error ||
+        `Evolution retornou ${evolutionResponse.status}`;
+      return res.status(502).json({ error: 'Falha ao atualizar foto na Evolution API', details: msg });
+    }
+
+    const n8nHook = process.env.N8N_WEBHOOK_PROFILE_PICTURE_URL?.trim();
+    if (n8nHook) {
+      try {
+        await axios.post(
+          n8nHook,
+          {
+            instanceId: Number(id),
+            instance_name: instance.instance_name,
+            pictureUrl,
+          },
+          { validateStatus: () => true, timeout: 15000 }
+        );
+      } catch (e) {
+        console.warn('⚠️ Webhook N8N (foto de perfil) ignorado:', (e as Error).message);
+      }
+    }
+
+    let profilePic: string | null = null;
+    if (instance.phone_number) {
+      profilePic = await evolutionFetchProfilePictureUrl({
+        api_url: instance.api_url,
+        api_key: instance.api_key,
+        instance_name: instance.instance_name,
+        phone_number: instance.phone_number,
+      });
+    }
+    if (profilePic) {
+      await pool.query(
+        `UPDATE instances SET profile_picture_url = $1, profile_picture_updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
+        [profilePic, id]
+      );
+    }
+
+    res.json({ message: 'Foto de perfil atualizada', profile_picture_url: profilePic });
+  } catch (error: any) {
+    console.error('Erro ao atualizar foto de perfil:', error);
+    res.status(500).json({ error: 'Erro ao atualizar foto de perfil', details: error.message });
+  }
+});
+
+/** Busca URL da foto na Evolution e grava em cache (instância conectada) */
+router.post('/:id/sync-profile-picture', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const instanceResult = await pool.query(
+      `SELECT id, status, phone_number, api_url, api_key, instance_name FROM instances WHERE id = $1`,
+      [id]
+    );
+    if (instanceResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Instância não encontrada' });
+    }
+    const row = instanceResult.rows[0];
+    if (row.status !== 'connected' || !row.phone_number) {
+      return res.status(400).json({ error: 'Instância precisa estar conectada com número sincronizado' });
+    }
+
+    const picUrl = await evolutionFetchProfilePictureUrl(row);
+    if (!picUrl) {
+      return res.status(502).json({ error: 'Não foi possível obter a foto de perfil na Evolution API' });
+    }
+
+    await pool.query(
+      `UPDATE instances SET profile_picture_url = $1, profile_picture_updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
+      [picUrl, id]
+    );
+    res.json({ profile_picture_url: picUrl });
+  } catch (error: any) {
+    console.error('Erro ao sincronizar foto de perfil:', error);
+    res.status(500).json({ error: 'Erro ao sincronizar foto de perfil', details: error.message });
   }
 });
 
