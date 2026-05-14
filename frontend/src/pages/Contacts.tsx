@@ -16,7 +16,7 @@ import {
   RefreshCw,
   AlertTriangle,
   Filter,
-  MoreVertical,
+  Info,
 } from 'lucide-react';
 
 interface Contact {
@@ -46,14 +46,21 @@ export default function Contacts() {
   const [showModal, setShowModal] = useState(false);
   const [editingContact, setEditingContact] = useState<Contact | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [filterWhatsapp, setFilterWhatsapp] = useState<string>('');
+  const [filterOptIn, setFilterOptIn] = useState<string>('');
+  const [filterOptOut, setFilterOptOut] = useState<string>('');
   const [selectedTags, setSelectedTags] = useState<number[]>([]);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' | 'warning' } | null>(null);
   const [formData, setFormData] = useState({
     phone_number: '',
     name: '',
     email: '',
+    opt_in: true,
+    opt_out: false,
   });
   const [contactTags, setContactTags] = useState<number[]>([]);
+  const [bulkTagSelection, setBulkTagSelection] = useState<number[]>([]);
   const [total, setTotal] = useState(0);
   const [limit] = useState(50);
   const [offset, setOffset] = useState(0);
@@ -63,31 +70,61 @@ export default function Contacts() {
   const [showBulkTagModal, setShowBulkTagModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
   const [importTags, setImportTags] = useState<number[]>([]);
+  const [selectingAllFiltered, setSelectingAllFiltered] = useState(false);
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(searchTerm.trim()), 450);
+    return () => clearTimeout(t);
+  }, [searchTerm]);
+
+  useEffect(() => {
+    loadTags();
+  }, []);
+
+  useEffect(() => {
+    setOffset(0);
+    setSelectedContacts([]);
+  }, [debouncedSearch, selectedTags, filterWhatsapp, filterOptIn, filterOptOut]);
 
   useEffect(() => {
     loadContacts();
-    loadTags();
-  }, [searchTerm, selectedTags, offset, showAll]);
+  }, [debouncedSearch, selectedTags, offset, showAll, filterWhatsapp, filterOptIn, filterOptOut]);
 
   useEffect(() => {
     if (toast) {
-      const timer = setTimeout(() => setToast(null), 4000);
+      const timer = setTimeout(() => setToast(null), 5000);
       return () => clearTimeout(timer);
     }
   }, [toast]);
 
+  const buildListQueryParams = () => {
+    const currentLimit = showAll ? 10000 : limit;
+    const params = new URLSearchParams({
+      limit: currentLimit.toString(),
+      offset: offset.toString(),
+    });
+    if (debouncedSearch) params.append('search', debouncedSearch);
+    if (selectedTags.length > 0) params.append('tags', selectedTags.join(','));
+    if (filterWhatsapp === 'true' || filterWhatsapp === 'false') params.append('whatsappValidated', filterWhatsapp);
+    if (filterOptIn === 'true' || filterOptIn === 'false') params.append('optIn', filterOptIn);
+    if (filterOptOut === 'true' || filterOptOut === 'false') params.append('optOut', filterOptOut);
+    return params;
+  };
+
+  const buildFilterIdsParams = () => {
+    const params = new URLSearchParams();
+    if (debouncedSearch) params.append('search', debouncedSearch);
+    if (selectedTags.length > 0) params.append('tags', selectedTags.join(','));
+    if (filterWhatsapp === 'true' || filterWhatsapp === 'false') params.append('whatsappValidated', filterWhatsapp);
+    if (filterOptIn === 'true' || filterOptIn === 'false') params.append('optIn', filterOptIn);
+    if (filterOptOut === 'true' || filterOptOut === 'false') params.append('optOut', filterOptOut);
+    return params;
+  };
+
   const loadContacts = async () => {
     try {
       setLoading(true);
-      const currentLimit = showAll ? 10000 : limit;
-      const params = new URLSearchParams({
-        limit: currentLimit.toString(),
-        offset: offset.toString(),
-      });
-      
-      if (searchTerm) params.append('search', searchTerm);
-      if (selectedTags.length > 0) params.append('tags', selectedTags.join(','));
-
+      const params = buildListQueryParams();
       const response = await api.get(`/contacts?${params.toString()}`);
       setContacts(response.data.contacts);
       setTotal(response.data.total);
@@ -110,6 +147,7 @@ export default function Contacts() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    const wasEditing = !!editingContact;
     try {
       let contactId: number;
       if (editingContact) {
@@ -132,9 +170,9 @@ export default function Contacts() {
       
       setShowModal(false);
       setEditingContact(null);
-      setFormData({ phone_number: '', name: '', email: '' });
+      setFormData({ phone_number: '', name: '', email: '', opt_in: true, opt_out: false });
       setContactTags([]);
-      setToast({ message: editingContact ? 'Contato atualizado!' : 'Contato criado!', type: 'success' });
+      setToast({ message: wasEditing ? 'Contato atualizado!' : 'Contato criado!', type: 'success' });
       loadContacts();
     } catch (error: any) {
       setToast({ message: error.response?.data?.error || 'Erro ao salvar contato', type: 'error' });
@@ -158,9 +196,54 @@ export default function Contacts() {
       phone_number: contact.phone_number,
       name: contact.name || '',
       email: contact.email || '',
+      opt_in: contact.opt_in !== false,
+      opt_out: contact.opt_out === true,
     });
     setContactTags(contact.tags?.map(t => t.id) || []);
     setShowModal(true);
+  };
+
+  const handleSelectAllFiltered = async () => {
+    try {
+      setSelectingAllFiltered(true);
+      const params = buildFilterIdsParams();
+      const res = await api.get(`/contacts/filter/ids?${params.toString()}`);
+      setSelectedContacts(res.data.ids);
+      if (res.data.capped) {
+        setToast({
+          message: `Selecionados os primeiros ${res.data.max} contatos do filtro. Afine a busca se precisar de todos.`,
+          type: 'warning',
+        });
+      } else {
+        setToast({ message: `${res.data.count} contato(s) selecionado(s) (filtro atual).`, type: 'info' });
+      }
+    } catch (error) {
+      console.error(error);
+      setToast({ message: 'Não foi possível selecionar todos do filtro', type: 'error' });
+    } finally {
+      setSelectingAllFiltered(false);
+    }
+  };
+
+  const handleBulkValidateWhatsApp = async () => {
+    if (selectedContacts.length === 0) return;
+    if (!confirm(`Revalidar WhatsApp na Evolution para ${selectedContacts.length} contato(s)? Requer instância conectada.`)) return;
+    try {
+      setLoading(true);
+      const res = await api.post('/contacts/bulk-update', {
+        contact_ids: selectedContacts,
+        validate_whatsapp: true,
+      });
+      setToast({
+        message: res.data?.message || `Validação: ${res.data?.validated ?? 0} ok, ${res.data?.invalid ?? 0} inválidos.`,
+        type: 'success',
+      });
+      loadContacts();
+    } catch (error: any) {
+      setToast({ message: error.response?.data?.error || 'Erro na validação em massa', type: 'error' });
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleRemoveTag = async (contactId: number, tagId: number) => {
@@ -181,6 +264,7 @@ export default function Contacts() {
       const lines = text.split('\n').filter(line => line.trim());
       if (lines.length === 0) {
         setToast({ message: 'Arquivo vazio', type: 'error' });
+        setLoading(false);
         return;
       }
 
@@ -199,6 +283,7 @@ export default function Contacts() {
 
       if (contactsToImport.length === 0) {
         setToast({ message: 'Nenhum contato válido encontrado', type: 'error' });
+        setLoading(false);
         return;
       }
 
@@ -225,12 +310,23 @@ export default function Contacts() {
           position: 'fixed', bottom: 24, right: 24, zIndex: 1000,
           display: 'flex', alignItems: 'center', gap: 10,
           padding: '14px 18px', borderRadius: 12, boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
-          background: toast.type === 'success' ? 'rgba(16,185,129,0.15)' : 'rgba(244,63,94,0.15)',
-          border: `1px solid ${toast.type === 'success' ? 'rgba(16,185,129,0.4)' : 'rgba(244,63,94,0.4)'}`,
-          color: toast.type === 'success' ? '#34d399' : '#fb7185',
+          background: toast.type === 'success' ? 'rgba(16,185,129,0.15)'
+            : toast.type === 'error' ? 'rgba(244,63,94,0.15)'
+            : toast.type === 'warning' ? 'rgba(245,158,11,0.15)'
+            : 'rgba(56,189,248,0.12)',
+          border: `1px solid ${
+            toast.type === 'success' ? 'rgba(16,185,129,0.4)'
+            : toast.type === 'error' ? 'rgba(244,63,94,0.4)'
+            : toast.type === 'warning' ? 'rgba(245,158,11,0.45)'
+            : 'rgba(56,189,248,0.35)'
+          }`,
+          color: toast.type === 'success' ? '#34d399'
+            : toast.type === 'error' ? '#fb7185'
+            : toast.type === 'warning' ? '#fbbf24'
+            : '#38bdf8',
           backdropFilter: 'blur(12px)',
         }}>
-          {toast.type === 'success' ? <CheckCircle2 size={18} /> : <AlertTriangle size={18} />}
+          {toast.type === 'success' ? <CheckCircle2 size={18} /> : toast.type === 'error' ? <AlertTriangle size={18} /> : <Info size={18} />}
           <span style={{ fontFamily: 'Inter, sans-serif', fontSize: '0.875rem', fontWeight: 500 }}>{toast.message}</span>
         </div>
       )}
@@ -285,7 +381,7 @@ export default function Contacts() {
             <button
               onClick={() => {
                 setEditingContact(null);
-                setFormData({ phone_number: '', name: '', email: '' });
+                setFormData({ phone_number: '', name: '', email: '', opt_in: true, opt_out: false });
                 setContactTags([]);
                 setShowModal(true);
               }}
@@ -299,41 +395,114 @@ export default function Contacts() {
         </div>
       </div>
 
+      <div className="glass-card" style={{ display: 'flex', gap: 12, padding: '14px 20px', marginBottom: 16, borderLeft: '3px solid #38bdf8', fontSize: '0.82rem', color: 'var(--text-secondary)', lineHeight: 1.55 }}>
+        <Info size={18} color="#38bdf8" style={{ flexShrink: 0, marginTop: 2 }} />
+        <div>
+        <strong style={{ color: 'var(--text-primary)' }}>Disparos</strong> usam só contatos com{' '}
+        <strong>WhatsApp validado</strong>, <strong>opt-in</strong> e <strong>sem opt-out</strong>. Se a lista mostra mais gente do que o disparo alcança, filtre aqui por validação/opt-in ou use <strong>Revalidar WhatsApp</strong> com uma instância conectada.
+        Contatos com etiqueta <strong>WhatsApp</strong> foram criados ao receber mensagem (webhook), não por importação manual.
+        </div>
+      </div>
+
       {/* Filters Area */}
       <div className="glass-card" style={{ padding: 24, marginBottom: 32 }}>
-        <div className="flex flex-col md:flex-row gap-6">
+        <div className="flex flex-col gap-5">
           <div style={{ flex: 1, position: 'relative' }}>
             <Search size={18} color="var(--text-muted)" style={{ position: 'absolute', left: 16, top: '50%', transform: 'translateY(-50%)' }} />
             <input
               type="text"
-              placeholder="Buscar por nome ou telefone..."
+              placeholder="Buscar por nome, telefone ou e-mail..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               style={{ width: '100%', padding: '14px 16px 14px 48px', border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-primary)', borderRadius: 12, outline: 'none' }}
             />
           </div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
-            <Filter size={18} color="var(--text-muted)" style={{ marginRight: 4 }} />
-            {tags.slice(0, 8).map(tag => (
+
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
+            <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', width: '100%' }}>WhatsApp</span>
+            {(['', 'true', 'false'] as const).map((v) => (
               <button
-                key={tag.id}
-                onClick={() => {
-                  setSelectedTags(selectedTags.includes(tag.id) ? selectedTags.filter(id => id !== tag.id) : [...selectedTags, tag.id]);
-                  setOffset(0);
-                }}
+                key={`wa-${v || 'all'}`}
+                type="button"
+                onClick={() => { setFilterWhatsapp(v); setOffset(0); }}
+                className="btn-outline"
                 style={{
-                  padding: '6px 14px', borderRadius: 100, fontSize: '0.8rem', fontWeight: 600,
-                  background: selectedTags.includes(tag.id) ? tag.color : 'rgba(255,255,255,0.05)',
-                  color: selectedTags.includes(tag.id) ? '#fff' : 'var(--text-secondary)',
-                  border: `1px solid ${selectedTags.includes(tag.id) ? 'transparent' : 'var(--border)'}`,
-                  cursor: 'pointer', transition: 'all 0.2s',
-                  display: 'flex', alignItems: 'center', gap: 6,
+                  padding: '6px 12px', borderRadius: 10, fontSize: '0.78rem',
+                  background: filterWhatsapp === v ? 'rgba(16,185,129,0.12)' : undefined,
+                  borderColor: filterWhatsapp === v ? 'rgba(16,185,129,0.35)' : undefined,
                 }}
               >
-                <div style={{ width: 6, height: 6, borderRadius: '50%', background: selectedTags.includes(tag.id) ? '#fff' : tag.color }} />
-                {tag.name}
+                {v === '' ? 'Todos' : v === 'true' ? 'Validado' : 'Não validado'}
               </button>
             ))}
+          </div>
+
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
+            <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', width: '100%' }}>Opt-in</span>
+            {(['', 'true', 'false'] as const).map((v) => (
+              <button
+                key={`optin-${v || 'all'}`}
+                type="button"
+                onClick={() => { setFilterOptIn(v); setOffset(0); }}
+                className="btn-outline"
+                style={{
+                  padding: '6px 12px', borderRadius: 10, fontSize: '0.78rem',
+                  background: filterOptIn === v ? 'rgba(245,158,11,0.12)' : undefined,
+                  borderColor: filterOptIn === v ? 'rgba(245,158,11,0.35)' : undefined,
+                }}
+              >
+                {v === '' ? 'Todos' : v === 'true' ? 'Com opt-in' : 'Sem opt-in'}
+              </button>
+            ))}
+          </div>
+
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
+            <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', width: '100%' }}>Opt-out</span>
+            {(['', 'false', 'true'] as const).map((v) => (
+              <button
+                key={`optout-${v || 'all'}`}
+                type="button"
+                onClick={() => { setFilterOptOut(v); setOffset(0); }}
+                className="btn-outline"
+                style={{
+                  padding: '6px 12px', borderRadius: 10, fontSize: '0.78rem',
+                  background: filterOptOut === v ? 'rgba(167,139,250,0.12)' : undefined,
+                  borderColor: filterOptOut === v ? 'rgba(167,139,250,0.35)' : undefined,
+                }}
+              >
+                {v === '' ? 'Todos' : v === 'false' ? 'Sem opt-out (ok p/ envio)' : 'Com opt-out'}
+              </button>
+            ))}
+          </div>
+
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+              <Filter size={18} color="var(--text-muted)" />
+              <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>Tags</span>
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', maxHeight: 120, overflowY: 'auto' }}>
+              {tags.map((tag) => (
+                <button
+                  key={tag.id}
+                  type="button"
+                  onClick={() => {
+                    setSelectedTags(selectedTags.includes(tag.id) ? selectedTags.filter((id) => id !== tag.id) : [...selectedTags, tag.id]);
+                    setOffset(0);
+                  }}
+                  style={{
+                    padding: '6px 14px', borderRadius: 100, fontSize: '0.8rem', fontWeight: 600,
+                    background: selectedTags.includes(tag.id) ? tag.color : 'rgba(255,255,255,0.05)',
+                    color: selectedTags.includes(tag.id) ? '#fff' : 'var(--text-secondary)',
+                    border: `1px solid ${selectedTags.includes(tag.id) ? 'transparent' : 'var(--border)'}`,
+                    cursor: 'pointer', transition: 'all 0.2s',
+                    display: 'flex', alignItems: 'center', gap: 6,
+                  }}
+                >
+                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: selectedTags.includes(tag.id) ? '#fff' : tag.color }} />
+                  {tag.name}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       </div>
@@ -353,22 +522,56 @@ export default function Contacts() {
       ) : (
         <>
           {/* Status Bar */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, padding: '0 8px' }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 16, padding: '0 8px' }}>
             <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
               Mostrando <strong style={{ color: 'var(--gold-primary)' }}>{contacts.length}</strong> de {total} contatos
+              {selectedContacts.length > 0 && (
+                <>
+                  {' '}
+                  · <strong style={{ color: 'var(--sky)' }}>{selectedContacts.length}</strong> selecionado(s)
+                </>
+              )}
             </span>
-            {selectedContacts.length > 0 && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--sky)' }}>{selectedContacts.length} selecionados</span>
-                <button
-                  onClick={() => setShowBulkTagModal(true)}
-                  className="badge badge-gold"
-                  style={{ border: 'none', cursor: 'pointer', padding: '4px 12px' }}
-                >
-                  Ações em Massa
-                </button>
-              </div>
-            )}
+            <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
+              <button
+                type="button"
+                onClick={() => setSelectedContacts(contacts.map((c) => c.id))}
+                className="btn-outline"
+                style={{ padding: '6px 12px', borderRadius: 10, fontSize: '0.78rem' }}
+              >
+                Página atual
+              </button>
+              <button
+                type="button"
+                onClick={handleSelectAllFiltered}
+                disabled={selectingAllFiltered || total === 0}
+                className="btn-outline"
+                style={{ padding: '6px 12px', borderRadius: 10, fontSize: '0.78rem', opacity: selectingAllFiltered ? 0.6 : 1 }}
+              >
+                {selectingAllFiltered ? '…' : `Todos do filtro (${total})`}
+              </button>
+              {selectedContacts.length > 0 && (
+                <>
+                  <button type="button" onClick={() => setSelectedContacts([])} className="btn-outline" style={{ padding: '6px 12px', borderRadius: 10, fontSize: '0.78rem' }}>
+                    Limpar seleção
+                  </button>
+                  <button type="button" onClick={handleBulkValidateWhatsApp} className="btn-outline" style={{ padding: '6px 12px', borderRadius: 10, fontSize: '0.78rem', color: '#38bdf8', borderColor: 'rgba(56,189,248,0.35)' }}>
+                    Revalidar WhatsApp ({selectedContacts.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setBulkTagSelection([]);
+                      setShowBulkTagModal(true);
+                    }}
+                    className="badge badge-gold"
+                    style={{ border: 'none', cursor: 'pointer', padding: '6px 14px', fontSize: '0.78rem' }}
+                  >
+                    Ações em massa
+                  </button>
+                </>
+              )}
+            </div>
           </div>
 
           {viewMode === 'cards' ? (
@@ -376,7 +579,7 @@ export default function Contacts() {
               {contacts.map(contact => (
                 <div key={contact.id} className="glass-card hover-glow" style={{ padding: 0, overflow: 'hidden', transition: 'all 0.3s' }}>
                   {/* Card Header */}
-                  <div style={{ padding: '20px 20px 16px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+                  <div style={{ padding: '20px 20px 16px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'flex-start', justifyContent: 'flex-start' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                       <div
                         onClick={(e) => {
@@ -396,20 +599,26 @@ export default function Contacts() {
                         <h4 style={{ margin: 0, fontSize: '1rem', fontWeight: 700, color: 'var(--text-primary)', letterSpacing: '-0.01em' }}>
                           {contact.name || 'Sem Nome'}
                         </h4>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginTop: 6 }}>
                           {contact.whatsapp_validated ? (
-                            <span style={{ fontSize: '0.7rem', color: 'var(--emerald)', display: 'flex', alignItems: 'center', gap: 3, fontWeight: 600 }}>
-                              <CheckCircle2 size={12} /> Validado
+                            <span style={{ fontSize: '0.65rem', color: 'var(--emerald)', display: 'flex', alignItems: 'center', gap: 3, fontWeight: 600 }}>
+                              <CheckCircle2 size={11} /> WA ok
                             </span>
                           ) : (
-                            <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Pendente</span>
+                            <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>WA pendente</span>
+                          )}
+                          {contact.opt_in ? (
+                            <span style={{ fontSize: '0.65rem', color: '#a78bfa' }}>Opt-in</span>
+                          ) : (
+                            <span style={{ fontSize: '0.65rem', color: '#fb7185' }}>Sem opt-in</span>
+                          )}
+                          {contact.opt_out && <span style={{ fontSize: '0.65rem', color: '#fb7185' }}>Opt-out</span>}
+                          {contact.source === 'webhook_inbound' && (
+                            <span style={{ fontSize: '0.6rem', padding: '2px 6px', borderRadius: 4, background: 'rgba(56,189,248,0.12)', color: '#38bdf8', fontWeight: 600 }}>WhatsApp</span>
                           )}
                         </div>
                       </div>
                     </div>
-                    <button style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}>
-                      <MoreVertical size={18} />
-                    </button>
                   </div>
 
                   {/* Card Body */}
@@ -506,6 +715,9 @@ export default function Contacts() {
                     </th>
                     <th style={{ padding: '16px 20px', textAlign: 'left', fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Nome</th>
                     <th style={{ padding: '16px 20px', textAlign: 'left', fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Telefone</th>
+                    <th style={{ padding: '16px 20px', textAlign: 'left', fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>WA</th>
+                    <th style={{ padding: '16px 20px', textAlign: 'left', fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Opt-in</th>
+                    <th style={{ padding: '16px 20px', textAlign: 'left', fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Origem</th>
                     <th style={{ padding: '16px 20px', textAlign: 'left', fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Tags</th>
                     <th style={{ padding: '16px 20px', textAlign: 'right', fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Ações</th>
                   </tr>
@@ -531,6 +743,16 @@ export default function Contacts() {
                         <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>{contact.email || ''}</div>
                       </td>
                       <td style={{ padding: '16px 20px', color: 'var(--text-secondary)', fontFamily: 'monospace' }}>{contact.phone_number}</td>
+                      <td style={{ padding: '16px 20px', fontSize: '0.75rem' }}>
+                        {contact.whatsapp_validated ? <span style={{ color: '#34d399' }}>Sim</span> : <span style={{ color: 'var(--text-muted)' }}>Não</span>}
+                      </td>
+                      <td style={{ padding: '16px 20px', fontSize: '0.75rem' }}>
+                        {contact.opt_in ? <span style={{ color: '#a78bfa' }}>Sim</span> : <span style={{ color: '#fb7185' }}>Não</span>}
+                        {contact.opt_out && <span style={{ color: '#fb7185', display: 'block', fontSize: '0.65rem' }}>opt-out</span>}
+                      </td>
+                      <td style={{ padding: '16px 20px', fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                        {contact.source === 'webhook_inbound' ? <span style={{ color: '#38bdf8', fontWeight: 600 }}>WhatsApp</span> : (contact.source || 'manual')}
+                      </td>
                       <td style={{ padding: '16px 20px' }}>
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
                           {contact.tags?.map(t => (
@@ -621,6 +843,24 @@ export default function Contacts() {
                     style={{ width: '100%', padding: '12px 16px', background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 12, color: 'var(--text-primary)', outline: 'none' }}
                   />
                 </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: 14, background: 'rgba(0,0,0,0.15)', borderRadius: 12, border: '1px solid var(--border)' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', fontSize: '0.88rem', color: 'var(--text-primary)' }}>
+                    <input
+                      type="checkbox"
+                      checked={formData.opt_in}
+                      onChange={(e) => setFormData({ ...formData, opt_in: e.target.checked })}
+                    />
+                    Opt-in ativo (recomendado para disparos)
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', fontSize: '0.88rem', color: 'var(--text-primary)' }}>
+                    <input
+                      type="checkbox"
+                      checked={formData.opt_out}
+                      onChange={(e) => setFormData({ ...formData, opt_out: e.target.checked })}
+                    />
+                    Opt-out (não recebe envios automáticos)
+                  </label>
+                </div>
                 <div>
                   <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Tags de Segmentação</label>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, padding: 12, background: 'rgba(0,0,0,0.2)', borderRadius: 12, border: '1px solid var(--border)' }}>
@@ -708,12 +948,13 @@ export default function Contacts() {
                 {tags.map(tag => (
                   <button
                     key={tag.id}
-                    onClick={() => setContactTags(contactTags.includes(tag.id) ? contactTags.filter(id => id !== tag.id) : [...contactTags, tag.id])}
+                    type="button"
+                    onClick={() => setBulkTagSelection(bulkTagSelection.includes(tag.id) ? bulkTagSelection.filter(id => id !== tag.id) : [...bulkTagSelection, tag.id])}
                     style={{
                       padding: '6px 14px', borderRadius: 10, fontSize: '0.8rem', fontWeight: 600,
-                      background: contactTags.includes(tag.id) ? tag.color : 'rgba(255,255,255,0.05)',
-                      color: contactTags.includes(tag.id) ? '#fff' : 'var(--text-secondary)',
-                      border: `1px solid ${contactTags.includes(tag.id) ? 'transparent' : 'var(--border)'}`,
+                      background: bulkTagSelection.includes(tag.id) ? tag.color : 'rgba(255,255,255,0.05)',
+                      color: bulkTagSelection.includes(tag.id) ? '#fff' : 'var(--text-secondary)',
+                      border: `1px solid ${bulkTagSelection.includes(tag.id) ? 'transparent' : 'var(--border)'}`,
                       cursor: 'pointer'
                     }}
                   >
@@ -725,45 +966,79 @@ export default function Contacts() {
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               <button
-                disabled={contactTags.length === 0}
+                type="button"
+                disabled={bulkTagSelection.length === 0}
                 onClick={async () => {
                   try {
                     setLoading(true);
+                    let ok = 0;
+                    let fail = 0;
                     for (const contactId of selectedContacts) {
-                      for (const tagId of contactTags) {
-                        try { await api.post(`/contacts/${contactId}/tags`, { tag_id: tagId }); } catch (e) {}
+                      for (const tagId of bulkTagSelection) {
+                        try {
+                          await api.post(`/contacts/${contactId}/tags`, { tag_id: tagId });
+                          ok++;
+                        } catch {
+                          fail++;
+                        }
                       }
                     }
-                    setToast({ message: 'Tags aplicadas com sucesso!', type: 'success' });
                     setShowBulkTagModal(false);
+                    setBulkTagSelection([]);
                     setSelectedContacts([]);
-                    setContactTags([]);
+                    if (fail > 0) {
+                      setToast({ message: `Tags: ${ok} vínculo(s) ok, ${fail} falha(s). Verifique duplicatas ou rede.`, type: fail >= ok ? 'error' : 'warning' });
+                    } else {
+                      setToast({ message: 'Tags aplicadas com sucesso!', type: 'success' });
+                    }
                     loadContacts();
-                  } catch (e) { setToast({ message: 'Erro na operação em massa', type: 'error' }); } finally { setLoading(false); }
+                  } catch (e) {
+                    setToast({ message: 'Erro na operação em massa', type: 'error' });
+                  } finally {
+                    setLoading(false);
+                  }
                 }}
-                className="btn-gold" style={{ padding: '14px 0', borderRadius: 12, opacity: contactTags.length === 0 ? 0.5 : 1 }}
+                className="btn-gold" style={{ padding: '14px 0', borderRadius: 12, opacity: bulkTagSelection.length === 0 ? 0.5 : 1 }}
               >
                 Aplicar Tags
               </button>
               
               <button
+                type="button"
                 onClick={async () => {
                   if (!confirm(`Excluir ${selectedContacts.length} contatos definitivamente?`)) return;
+                  const n = selectedContacts.length;
+                  const ids = [...selectedContacts];
                   try {
                     setLoading(true);
-                    for (const id of selectedContacts) await api.delete(`/contacts/${id}`);
-                    setToast({ message: 'Contatos excluídos!', type: 'success' });
+                    let delFail = 0;
+                    for (const id of ids) {
+                      try {
+                        await api.delete(`/contacts/${id}`);
+                      } catch {
+                        delFail++;
+                      }
+                    }
                     setShowBulkTagModal(false);
+                    setBulkTagSelection([]);
                     setSelectedContacts([]);
+                    setToast({
+                      message: delFail > 0 ? `${n - delFail} removidos, ${delFail} falha(s).` : 'Contatos excluídos!',
+                      type: delFail > 0 ? 'warning' : 'success',
+                    });
                     loadContacts();
-                  } catch (e) { setToast({ message: 'Erro ao excluir', type: 'error' }); } finally { setLoading(false); }
+                  } catch (e) {
+                    setToast({ message: 'Erro ao excluir', type: 'error' });
+                  } finally {
+                    setLoading(false);
+                  }
                 }}
                 style={{ padding: '14px 0', borderRadius: 12, background: 'rgba(244, 63, 94, 0.1)', color: 'var(--rose)', border: '1px solid rgba(244, 63, 94, 0.2)', cursor: 'pointer', fontWeight: 600 }}
               >
                 Excluir Todos Selecionados
               </button>
               
-              <button onClick={() => { setShowBulkTagModal(false); setContactTags([]); }} className="btn-outline" style={{ padding: '12px 0', borderRadius: 12 }}>Cancelar</button>
+              <button type="button" onClick={() => { setShowBulkTagModal(false); setBulkTagSelection([]); }} className="btn-outline" style={{ padding: '12px 0', borderRadius: 12 }}>Cancelar</button>
             </div>
           </div>
         </div>

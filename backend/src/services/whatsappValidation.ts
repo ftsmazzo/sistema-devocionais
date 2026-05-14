@@ -107,9 +107,6 @@ export async function checkWhatsAppNumber(
                  numberStatus?.isWhatsApp === true;
       } else if (checkResponse.data.exists !== undefined) {
         isValid = checkResponse.data.exists === true;
-      } else if (checkResponse.status === 200) {
-        // Se retornou 200, assumir que está válido
-        isValid = true;
       }
     }
 

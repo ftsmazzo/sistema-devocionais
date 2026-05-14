@@ -198,8 +198,13 @@ router.post('/', async (req: AuthRequest, res) => {
       name,
       email,
       source = 'manual',
-      metadata = {}
+      metadata = {},
+      opt_in: bodyOptIn,
+      opt_out: bodyOptOut,
     } = req.body;
+
+    const opt_in = bodyOptIn === undefined ? true : Boolean(bodyOptIn);
+    const opt_out = bodyOptOut === undefined ? false : Boolean(bodyOptOut);
 
     if (!phone_number) {
       return res.status(400).json({ error: 'phone_number é obrigatório' });
@@ -209,17 +214,21 @@ router.post('/', async (req: AuthRequest, res) => {
     const normalizedPhone = phone_number.replace(/[^\d+]/g, '');
 
     const result = await pool.query(
-      `INSERT INTO contacts (phone_number, name, email, source, metadata, opt_in_at)
-       VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)
+      `INSERT INTO contacts (phone_number, name, email, source, metadata, opt_in, opt_in_at, opt_out, opt_out_at)
+       VALUES ($1, $2, $3, $4, $5, $6, CASE WHEN $6 = true THEN CURRENT_TIMESTAMP ELSE NULL END, $7, CASE WHEN $7 = true THEN CURRENT_TIMESTAMP ELSE NULL END)
        ON CONFLICT (phone_number) 
        DO UPDATE SET
          name = COALESCE(EXCLUDED.name, contacts.name),
          email = COALESCE(EXCLUDED.email, contacts.email),
          source = COALESCE(EXCLUDED.source, contacts.source),
          metadata = contacts.metadata || EXCLUDED.metadata,
+         opt_in = EXCLUDED.opt_in,
+         opt_in_at = CASE WHEN EXCLUDED.opt_in = true THEN CURRENT_TIMESTAMP ELSE NULL END,
+         opt_out = EXCLUDED.opt_out,
+         opt_out_at = CASE WHEN EXCLUDED.opt_out = true THEN CURRENT_TIMESTAMP ELSE NULL END,
          updated_at = CURRENT_TIMESTAMP
        RETURNING *`,
-      [normalizedPhone, name || null, email || null, source, JSON.stringify(metadata)]
+      [normalizedPhone, name || null, email || null, source, JSON.stringify(metadata), opt_in, opt_out]
     );
 
     const contact = result.rows[0];
@@ -245,6 +254,86 @@ router.post('/', async (req: AuthRequest, res) => {
     res.status(500).json({ 
       error: 'Erro ao criar contato',
       message: error.message 
+    });
+  }
+});
+
+const MAX_SELECTION_IDS = 8000;
+
+/**
+ * IDs de contatos que batem com os mesmos filtros da listagem (seleção em massa).
+ * GET /api/contacts/filter/ids?search=&tags=&optIn=&optOut=&whatsappValidated=
+ */
+router.get('/filter/ids', async (req: AuthRequest, res) => {
+  try {
+    const search = req.query.search as string;
+    const optIn = req.query.optIn as string;
+    const optOut = req.query.optOut as string;
+    const whatsappValidated = req.query.whatsappValidated as string;
+    const tags = req.query.tags as string;
+
+    let idsQuery = `
+      SELECT c.id
+      FROM contacts c
+      WHERE 1=1
+    `;
+    const idsParams: any[] = [];
+    let p = 1;
+
+    if (search) {
+      idsQuery += ` AND (c.name ILIKE $${p} OR c.phone_number ILIKE $${p} OR c.email ILIKE $${p})`;
+      idsParams.push(`%${search}%`);
+      p++;
+    }
+
+    if (optIn === 'true') {
+      idsQuery += ` AND c.opt_in = TRUE`;
+    } else if (optIn === 'false') {
+      idsQuery += ` AND c.opt_in = FALSE`;
+    }
+
+    if (optOut === 'true') {
+      idsQuery += ` AND c.opt_out = TRUE`;
+    } else if (optOut === 'false') {
+      idsQuery += ` AND c.opt_out = FALSE`;
+    }
+
+    if (whatsappValidated === 'true') {
+      idsQuery += ` AND c.whatsapp_validated = TRUE`;
+    } else if (whatsappValidated === 'false') {
+      idsQuery += ` AND c.whatsapp_validated = FALSE`;
+    }
+
+    if (tags) {
+      const tagIds = tags.split(',').map((id) => parseInt(id.trim(), 10)).filter((id) => !isNaN(id));
+      if (tagIds.length > 0) {
+        idsQuery += ` AND EXISTS (
+          SELECT 1 FROM contact_tag_relations ctr2
+          WHERE ctr2.contact_id = c.id
+          AND ctr2.tag_id = ANY($${p}::int[])
+        )`;
+        idsParams.push(tagIds);
+        p++;
+      }
+    }
+
+    idsQuery += ` ORDER BY c.id ASC LIMIT $${p}`;
+    idsParams.push(MAX_SELECTION_IDS);
+
+    const result = await pool.query(idsQuery, idsParams);
+    const ids = result.rows.map((r: { id: number }) => r.id);
+
+    res.json({
+      ids,
+      count: ids.length,
+      capped: ids.length >= MAX_SELECTION_IDS,
+      max: MAX_SELECTION_IDS,
+    });
+  } catch (error: any) {
+    console.error('❌ Erro ao listar IDs de contatos:', error);
+    res.status(500).json({
+      error: 'Erro ao listar IDs de contatos',
+      message: error.message,
     });
   }
 });
@@ -303,6 +392,7 @@ router.put('/:id', async (req: AuthRequest, res) => {
     const {
       name,
       email,
+      phone_number,
       opt_in,
       opt_out,
       opt_out_reason,
@@ -313,6 +403,20 @@ router.put('/:id', async (req: AuthRequest, res) => {
     const updates: string[] = [];
     const params: any[] = [];
     let paramCount = 1;
+
+    if (phone_number !== undefined && phone_number !== null && String(phone_number).trim() !== '') {
+      const normalizedPhone = String(phone_number).replace(/[^\d+]/g, '');
+      const dup = await pool.query(
+        `SELECT id FROM contacts WHERE phone_number = $1 AND id <> $2`,
+        [normalizedPhone, id]
+      );
+      if (dup.rows.length > 0) {
+        return res.status(409).json({ error: 'Este telefone já está em uso por outro contato' });
+      }
+      updates.push(`phone_number = $${paramCount}`);
+      params.push(normalizedPhone);
+      paramCount++;
+    }
 
     if (name !== undefined) {
       updates.push(`name = $${paramCount}`);
@@ -611,19 +715,6 @@ router.post('/import', async (req: AuthRequest, res) => {
       errors: [] as any[],
       tagsApplied: 0
     };
-
-    // Buscar tags por nome se fornecido
-    const tagMap = new Map<number, string>();
-    if (Array.isArray(importTags) && importTags.length > 0) {
-      const tagNames = importTags.map((t: string) => t.trim().toLowerCase());
-      const tagsResult = await pool.query(
-        `SELECT id, LOWER(name) as name FROM contact_tags WHERE LOWER(name) = ANY($1)`,
-        [tagNames]
-      );
-      tagsResult.rows.forEach((tag: any) => {
-        tagMap.set(tag.id, tag.name);
-      });
-    }
 
     for (const contactData of contacts) {
       try {

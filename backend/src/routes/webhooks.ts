@@ -264,9 +264,12 @@ async function processMessageReceived(instanceId: number, eventData: any) {
       // Criar contato automaticamente se não existir
       try {
         const createResult = await pool.query(
-          `INSERT INTO contacts (phone_number, name, whatsapp_validated, whatsapp_validated_at, opt_in, opt_in_at, created_at, updated_at)
-           VALUES ($1, $2, true, CURRENT_TIMESTAMP, true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-           ON CONFLICT (phone_number) DO UPDATE SET whatsapp_validated = true, whatsapp_validated_at = CURRENT_TIMESTAMP
+          `INSERT INTO contacts (phone_number, name, source, whatsapp_validated, whatsapp_validated_at, opt_in, opt_in_at, created_at, updated_at)
+           VALUES ($1, $2, 'webhook_inbound', true, CURRENT_TIMESTAMP, true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+           ON CONFLICT (phone_number) DO UPDATE SET
+             whatsapp_validated = true,
+             whatsapp_validated_at = CURRENT_TIMESTAMP,
+             updated_at = CURRENT_TIMESTAMP
            RETURNING id`,
           [normalizedNumber, eventData.data?.pushName || eventData.pushName || 'Contato Automático']
         );
