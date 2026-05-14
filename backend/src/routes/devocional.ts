@@ -933,6 +933,129 @@ router.post('/generate-range', authenticateToken, async (req: AuthRequest, res) 
 });
 
 /**
+ * Limpeza agressiva para ambiente de teste: devocionais, disparos vinculados, refs em mensagens.
+ * Opcional: apagar jornadas e recriar uma inicial a partir do motor de IA; zerar campos de devocional nos contatos.
+ * POST /api/devocional/reset-test-data
+ * Body: { phrase: string (obrigatório), include_journeys?: boolean, reset_contact_stats?: boolean }
+ * Frase padrão: LIMPAR_DADOS_DEVOCIONAL (ou DEVOCIONAL_RESET_PHRASE no .env).
+ * Desabilitar: DISABLE_DEVOCIONAL_DATA_RESET=true
+ */
+router.post('/reset-test-data', authenticateToken, async (req: AuthRequest, res) => {
+  try {
+    if (process.env.DISABLE_DEVOCIONAL_DATA_RESET === 'true') {
+      return res.status(403).json({
+        error: 'Reset desabilitado no servidor (DISABLE_DEVOCIONAL_DATA_RESET).',
+      });
+    }
+
+    const expectedPhrase = (process.env.DEVOCIONAL_RESET_PHRASE || 'LIMPAR_DADOS_DEVOCIONAL').trim();
+    const phrase = String(req.body?.phrase ?? '').trim();
+    if (phrase !== expectedPhrase) {
+      return res.status(400).json({
+        error: 'Frase de confirmação incorreta ou ausente.',
+        expected: process.env.DEVOCIONAL_RESET_PHRASE ? '(definida em DEVOCIONAL_RESET_PHRASE)' : expectedPhrase,
+      });
+    }
+
+    const includeJourneys = req.body?.include_journeys === true;
+    const resetContactStats = req.body?.reset_contact_stats === true;
+
+    const client = await pool.connect();
+    let deletedDevocionais = 0;
+    let deletedDispatches = 0;
+    let deletedJourneys = 0;
+    try {
+      await client.query('BEGIN');
+
+      await client.query(`UPDATE messages SET devocional_id = NULL WHERE devocional_id IS NOT NULL`);
+
+      const delDisp = await client.query(
+        `DELETE FROM dispatches
+         WHERE dispatch_type = 'devocional' OR devocional_id IS NOT NULL
+         RETURNING id`
+      );
+      deletedDispatches = delDisp.rowCount ?? 0;
+
+      const delDev = await client.query(`DELETE FROM devocionais RETURNING id`);
+      deletedDevocionais = delDev.rowCount ?? 0;
+
+      if (includeJourneys) {
+        const delJr = await client.query(`DELETE FROM devocional_journeys RETURNING id`);
+        deletedJourneys = delJr.rowCount ?? 0;
+
+        await client.query(`
+          INSERT INTO devocional_journeys (
+            title, central_theme, journey_description, preaching_tone,
+            bible_version, signature, start_date, end_date, is_active
+          )
+          SELECT
+            COALESCE(NULLIF(TRIM(journey_title), ''), 'Jornada inicial'),
+            central_theme,
+            journey_description,
+            preaching_tone,
+            bible_version,
+            COALESCE(signature, ''),
+            CURRENT_DATE,
+            journey_end_date,
+            true
+          FROM devocional_ai_config
+          ORDER BY id DESC
+          LIMIT 1
+        `);
+      }
+
+      if (resetContactStats) {
+        await client.query(`
+          UPDATE contacts SET
+            last_devocional_sent_at = NULL,
+            last_devocional_read_at = NULL,
+            last_devocional_interaction_at = NULL,
+            consecutive_devocional_failures = 0,
+            devocional_score = 100,
+            updated_at = CURRENT_TIMESTAMP
+        `);
+      }
+
+      await client.query('COMMIT');
+
+      try {
+        const { addLog } = await import('../routes/logs');
+        addLog(
+          'warning',
+          `[Devocional] reset-test-data: user=${req.user?.email ?? req.user?.id ?? '—'} devocionais=${deletedDevocionais} dispatches=${deletedDispatches} journeys_cleared=${includeJourneys} contact_stats_reset=${resetContactStats}`
+        );
+      } catch {
+        /* log opcional */
+      }
+
+      res.json({
+        success: true,
+        deleted_devocionais: deletedDevocionais,
+        deleted_dispatches: deletedDispatches,
+        journeys_deleted: includeJourneys ? deletedJourneys : 0,
+        journeys_reseeded: includeJourneys,
+        contact_stats_reset: resetContactStats,
+      });
+    } catch (e) {
+      try {
+        await client.query('ROLLBACK');
+      } catch {
+        /* ignore */
+      }
+      throw e;
+    } finally {
+      client.release();
+    }
+  } catch (error: any) {
+    console.error('❌ Erro no reset de dados de devocional:', error);
+    res.status(500).json({
+      error: 'Falha ao limpar dados de devocional',
+      message: error.message,
+    });
+  }
+});
+
+/**
  * Buscar devocional por ID
  * GET /api/devocional/:id
  * IMPORTANTE: Esta rota deve vir DEPOIS das rotas específicas (/config, /date/:date, /ai-config, /generate)

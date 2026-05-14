@@ -11,7 +11,10 @@ import {
   RefreshCw,
   CheckCircle2,
   AlertCircle,
+  Trash2,
 } from 'lucide-react';
+
+const DEFAULT_RESET_PHRASE = 'LIMPAR_DADOS_DEVOCIONAL';
 
 interface DevocionalConfig {
   id?: number;
@@ -73,14 +76,19 @@ export default function DevocionalConfig() {
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
+  const [resetPhrase, setResetPhrase] = useState('');
+  const [resetIncludeJourneys, setResetIncludeJourneys] = useState(false);
+  const [resetContactStats, setResetContactStats] = useState(true);
+  const [resetting, setResetting] = useState(false);
+
   useEffect(() => {
     loadConfig();
     loadLists();
   }, []);
 
-  const loadConfig = async () => {
+  const loadConfig = async (opts?: { silent?: boolean }) => {
     try {
-      setLoading(true);
+      if (!opts?.silent) setLoading(true);
       const response = await api.get('/devocional/config');
       if (response.data.config) {
         setConfig(response.data.config);
@@ -95,7 +103,7 @@ export default function DevocionalConfig() {
         type: 'error'
       });
     } finally {
-      setLoading(false);
+      if (!opts?.silent) setLoading(false);
     }
   };
 
@@ -130,6 +138,38 @@ export default function DevocionalConfig() {
       });
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleResetTestData = async () => {
+    try {
+      setResetting(true);
+      const { data } = await api.post('/devocional/reset-test-data', {
+        phrase: resetPhrase.trim(),
+        include_journeys: resetIncludeJourneys,
+        reset_contact_stats: resetContactStats,
+      });
+      setToast({
+        type: 'success',
+        message:
+          `Limpeza concluída: ${data.deleted_devocionais ?? 0} devocionais, ${data.deleted_dispatches ?? 0} disparos.` +
+          (data.journeys_reseeded ? ` Jornadas recriadas a partir do motor de IA.` : '') +
+          (data.contact_stats_reset ? ` Estatísticas de contatos zeradas.` : ''),
+      });
+      setResetPhrase('');
+      await loadConfig({ silent: true });
+    } catch (error: any) {
+      const msg =
+        error.response?.data?.error ||
+        error.response?.data?.message ||
+        'Erro ao limpar dados';
+      const hint = error.response?.data?.expected;
+      setToast({
+        type: 'error',
+        message: hint && hint !== '(definida em DEVOCIONAL_RESET_PHRASE)' ? `${msg} (frase esperada: ${hint})` : msg,
+      });
+    } finally {
+      setResetting(false);
     }
   };
 
@@ -391,6 +431,85 @@ export default function DevocionalConfig() {
               </ul>
             </div>
           </div>
+        </div>
+
+        <div
+          style={{
+            borderRadius: 14,
+            padding: 20,
+            border: '1px solid rgba(239, 68, 68, 0.45)',
+            background: 'rgba(239, 68, 68, 0.06)',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+            <Trash2 size={20} style={{ color: '#f87171' }} />
+            <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 800, color: 'var(--text-primary)', fontFamily: 'Outfit, sans-serif' }}>
+              Limpeza para teste (ambiente de homologação)
+            </h3>
+          </div>
+          <p style={{ margin: '0 0 14px', fontSize: '0.82rem', color: 'var(--text-secondary)', lineHeight: 1.55 }}>
+            Remove todos os registros de <strong>devocionais</strong> e <strong>disparos</strong> vinculados (incluindo histórico de envio do devocional), e desassocia mensagens do devocional. Use antes de gerar vários dias na Jornada e validar o disparo automático. Em produção, defina{' '}
+            <code style={{ fontSize: '0.75rem' }}>DISABLE_DEVOCIONAL_DATA_RESET=true</code> no servidor para bloquear esta ação.
+          </p>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, fontSize: '0.85rem', cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={resetIncludeJourneys}
+              onChange={(e) => setResetIncludeJourneys(e.target.checked)}
+            />
+            Apagar jornadas e recriar uma jornada inicial a partir do motor de IA (devocional_ai_config)
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14, fontSize: '0.85rem', cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={resetContactStats}
+              onChange={(e) => setResetContactStats(e.target.checked)}
+            />
+            Zerar estatísticas de devocional nos contatos (último envio/leitura, falhas, score)
+          </label>
+          <label style={{ ...labelStyle, marginBottom: 6 }}>Confirmação (digite exatamente a frase)</label>
+          <input
+            type="text"
+            value={resetPhrase}
+            onChange={(e) => setResetPhrase(e.target.value)}
+            placeholder={DEFAULT_RESET_PHRASE}
+            autoComplete="off"
+            className="input-dark"
+            style={{ marginBottom: 8 }}
+          />
+          <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', margin: '0 0 14px' }}>
+            Frase padrão: <code>{DEFAULT_RESET_PHRASE}</code>. Se o backend usar <code>DEVOCIONAL_RESET_PHRASE</code>, use essa frase no lugar.
+          </p>
+          <button
+            type="button"
+            onClick={handleResetTestData}
+            disabled={resetting || !resetPhrase.trim()}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 8,
+              padding: '10px 18px',
+              borderRadius: 10,
+              border: '1px solid rgba(239, 68, 68, 0.5)',
+              background: resetting || !resetPhrase.trim() ? 'rgba(0,0,0,0.2)' : 'rgba(239, 68, 68, 0.15)',
+              color: '#fecaca',
+              fontWeight: 700,
+              fontSize: '0.85rem',
+              cursor: resetting || !resetPhrase.trim() ? 'not-allowed' : 'pointer',
+            }}
+          >
+            {resetting ? (
+              <>
+                <RefreshCw className="h-4 w-4 animate-spin" />
+                Limpando…
+              </>
+            ) : (
+              <>
+                <Trash2 className="h-4 w-4" />
+                Limpar dados de devocional
+              </>
+            )}
+          </button>
         </div>
 
         <div style={{ display: 'flex', justifyContent: 'flex-end', paddingTop: 8, borderTop: '1px solid var(--border)' }}>
