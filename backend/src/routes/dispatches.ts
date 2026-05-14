@@ -9,6 +9,11 @@ import { applyBlindage } from '../services/blindage';
 import { withGlobalOutboundGate } from '../services/globalOutboundGate';
 import { processMarketingDispatch } from '../services/marketingDispatch';
 import { executeDevocionalDispatch } from '../services/devocionalScheduler';
+import {
+  loadDispatchPacingRuntime,
+  maybeDispatchPacingPause,
+  preferredInstanceIndexForDispatch,
+} from '../services/dispatchPacing';
 import { personalizeDevocionalMessage, formatDevocionalMessage } from '../services/devocionalPersonalization';
 import { canReceiveDevocional, updateDevocionalScore } from '../services/devocionalScoring';
 import { addLog } from './logs';
@@ -788,6 +793,8 @@ async function processDevocionalDispatchManually(dispatchId: number): Promise<vo
 
     console.log(`   📱 ${instances.length} instância(s) disponível(is)`);
 
+    const pacing = await loadDispatchPacingRuntime();
+
     // Buscar configuração para timezone
     const configResult = await pool.query(
       `SELECT timezone FROM devocional_config ORDER BY id DESC LIMIT 1`
@@ -802,6 +809,14 @@ async function processDevocionalDispatchManually(dispatchId: number): Promise<vo
     for (const contact of eligibleContacts) {
       try {
         const contactStartTime = Date.now();
+        const preferredIdx = preferredInstanceIndexForDispatch(
+          pacing,
+          successCount,
+          instanceIndex,
+          instances.length
+        );
+        const preferredInstanceId = instances[preferredIdx]?.id;
+
         const formattedDevocional = formatDevocionalMessage(devocional);
         const personalizedMessage = personalizeDevocionalMessage(
           formattedDevocional,
@@ -815,7 +830,7 @@ async function processDevocionalDispatchManually(dispatchId: number): Promise<vo
           const blindageResult = await applyBlindage({
             to: contact.phone_number,
             message: personalizedMessage,
-            instanceId: instances[instanceIndex % instances.length]?.id,
+            instanceId: preferredInstanceId,
             messageType: 'devocional',
           });
           const blindageTime = Date.now() - blindageStartTime;
@@ -828,7 +843,9 @@ async function processDevocionalDispatchManually(dispatchId: number): Promise<vo
               `[Devocional Manual ${dispatchId}] ⛔ Bloqueado pela blindagem: ${blindageResult.reason} — ${contact.phone_number}`
             );
             failedCount++;
-            instanceIndex++;
+            if (pacing.rotateEveryN <= 0) {
+              instanceIndex++;
+            }
             abortContact = true;
             return;
           }
@@ -836,7 +853,9 @@ async function processDevocionalDispatchManually(dispatchId: number): Promise<vo
           const instance = blindageResult.selectedInstanceId != null
             ? instances.find((i: any) => i.id === blindageResult.selectedInstanceId) || instances[instanceIndex % instances.length]
             : instances[instanceIndex % instances.length];
-          instanceIndex++;
+          if (pacing.rotateEveryN <= 0) {
+            instanceIndex++;
+          }
 
           if (blindageResult.delay && blindageResult.delay > 0) {
             const delaySeconds = Math.ceil(blindageResult.delay / 1000);
@@ -946,6 +965,8 @@ async function processDevocionalDispatchManually(dispatchId: number): Promise<vo
         if (abortContact) {
           continue;
         }
+
+        await maybeDispatchPacingPause(pacing, successCount, `Devocional Manual ${dispatchId}`);
 
       } catch (error: any) {
         console.error(`   ❌ Erro ao enviar para ${contact.phone_number}:`, error.message);

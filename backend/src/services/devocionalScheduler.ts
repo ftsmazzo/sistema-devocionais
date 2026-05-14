@@ -2,6 +2,11 @@ import { pool } from '../database';
 import axios from 'axios';
 import { applyBlindage } from './blindage';
 import { withGlobalOutboundGate } from './globalOutboundGate';
+import {
+  loadDispatchPacingRuntime,
+  maybeDispatchPacingPause,
+  preferredInstanceIndexForDispatch,
+} from './dispatchPacing';
 import { personalizeDevocionalMessage, formatDevocionalMessage } from './devocionalPersonalization';
 import { canReceiveDevocional, updateDevocionalScore } from './devocionalScoring';
 import { addLog } from '../routes/logs';
@@ -355,9 +360,19 @@ export async function executeDevocionalDispatch(): Promise<void> {
     let failedCount = 0;
     let instanceIndex = 0;
 
+    const pacing = await loadDispatchPacingRuntime();
+
     for (const contact of eligibleContacts) {
-      const instance = instances[instanceIndex % instances.length];
-      instanceIndex++;
+      const preferredIdx = preferredInstanceIndexForDispatch(
+        pacing,
+        successCount,
+        instanceIndex,
+        instances.length
+      );
+      const instance = instances[preferredIdx];
+      if (pacing.rotateEveryN <= 0) {
+        instanceIndex++;
+      }
       try {
 
         // Formatar mensagem personalizada
@@ -512,6 +527,8 @@ export async function executeDevocionalDispatch(): Promise<void> {
         if (aborted) {
           continue;
         }
+
+        await maybeDispatchPacingPause(pacing, successCount, `Devocional ${dispatchId}`);
 
       } catch (error: any) {
         const isInstanceError =

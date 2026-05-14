@@ -2,6 +2,11 @@ import { pool } from '../database';
 import axios from 'axios';
 import { applyBlindage } from './blindage';
 import { withGlobalOutboundGate } from './globalOutboundGate';
+import {
+  loadDispatchPacingRuntime,
+  maybeDispatchPacingPause,
+  preferredInstanceIndexForDispatch,
+} from './dispatchPacing';
 import { addLog } from '../routes/logs';
 import { pingInstanceHealth } from './retryQueue';
 
@@ -157,6 +162,8 @@ export async function processMarketingDispatch(params: MarketingDispatchParams):
     instances = verifiedInstances;
     console.log(`   📱 ${instances.length} instância(s) verificada(s) e disponível(is)`);
 
+    const pacing = await loadDispatchPacingRuntime();
+
     // Parse metadata
     const metadata = typeof dispatch.metadata === 'string' 
       ? JSON.parse(dispatch.metadata) 
@@ -177,7 +184,13 @@ export async function processMarketingDispatch(params: MarketingDispatchParams):
       contactIndex++;
       const contactStartTime = Date.now();
       
-      let instance = instances[instanceIndex % instances.length];
+      const preferredIdx = preferredInstanceIndexForDispatch(
+        pacing,
+        successCount,
+        instanceIndex,
+        instances.length
+      );
+      let instance = instances[preferredIdx];
       try {
         console.log(`\n   📤 [${contactIndex}/${contacts.length}] Processando contato: ${contact.phone_number} (${contact.name || 'Sem nome'})`);
 
@@ -208,7 +221,9 @@ export async function processMarketingDispatch(params: MarketingDispatchParams):
                 [dispatchId, instance.id, contact.phone_number, contact.name, `Blindagem: ${blindageResult.reason || 'bloqueado'}`.slice(0, 500)]
               );
             } catch (e) { /* ignore */ }
-            instanceIndex++;
+            if (pacing.rotateEveryN <= 0) {
+              instanceIndex++;
+            }
             abortContact = true;
             return;
           }
@@ -216,7 +231,9 @@ export async function processMarketingDispatch(params: MarketingDispatchParams):
           instance = blindageResult.selectedInstanceId != null
             ? instances.find((i: any) => i.id === blindageResult.selectedInstanceId) || instances[instanceIndex % instances.length]
             : instances[instanceIndex % instances.length];
-          instanceIndex++;
+          if (pacing.rotateEveryN <= 0) {
+            instanceIndex++;
+          }
           console.log(`      🔄 Usando instância: ${instance.instance_name} (ID: ${instance.id})`);
 
           // Aplicar delay
@@ -342,6 +359,8 @@ export async function processMarketingDispatch(params: MarketingDispatchParams):
         if (abortContact) {
           continue;
         }
+
+        await maybeDispatchPacingPause(pacing, successCount, `Marketing ${dispatchId}`);
 
       } catch (error: any) {
         const isInstanceError =

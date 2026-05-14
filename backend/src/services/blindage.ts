@@ -84,6 +84,13 @@ export const BLINDAGE_CANONICAL_CONFIGS: Record<string, Record<string, any>> = {
     auto_switch_on_failure: true,
     retry_after_pause: true,
   },
+  dispatch_pacing: {
+    enabled: true,
+    messages_per_batch: 20,
+    pause_between_batches_minutes: 15,
+    long_pause_every_n_messages: 30,
+    long_pause_minutes: 60,
+  },
 };
 
 function mergeMissingDeep(
@@ -1337,6 +1344,7 @@ export async function createGlobalDefaultRules(): Promise<void> {
       { instance_id: null, rule_name: 'Validação de Conteúdo', rule_type: 'content_validation', enabled: true },
       { instance_id: null, rule_name: 'Validação de Número', rule_type: 'number_validation', enabled: true },
       { instance_id: null, rule_name: 'Seleção de Instâncias', rule_type: 'instance_selection', enabled: true },
+      { instance_id: null, rule_name: 'Pacing de disparos (lotes)', rule_type: 'dispatch_pacing', enabled: true },
     ];
 
     for (const rule of defaultRules) {

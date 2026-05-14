@@ -106,6 +106,13 @@ const PACKAGES: Record<BlindageProfileId, BlindageProfilePackage> = {
       auto_switch_on_failure: true,
       retry_after_pause: true,
     },
+    dispatch_pacing: {
+      enabled: true,
+      messages_per_batch: 15,
+      pause_between_batches_minutes: 20,
+      long_pause_every_n_messages: 25,
+      long_pause_minutes: 90,
+    },
   },
 
   moderate: {
@@ -159,6 +166,13 @@ const PACKAGES: Record<BlindageProfileId, BlindageProfilePackage> = {
       auto_switch_on_failure: true,
       retry_after_pause: true,
     },
+    dispatch_pacing: {
+      enabled: true,
+      messages_per_batch: 20,
+      pause_between_batches_minutes: 15,
+      long_pause_every_n_messages: 30,
+      long_pause_minutes: 60,
+    },
   },
 
   aggressive: {
@@ -211,6 +225,13 @@ const PACKAGES: Record<BlindageProfileId, BlindageProfilePackage> = {
       max_simultaneous: 1,
       auto_switch_on_failure: true,
       retry_after_pause: true,
+    },
+    dispatch_pacing: {
+      enabled: true,
+      messages_per_batch: 35,
+      pause_between_batches_minutes: 10,
+      long_pause_every_n_messages: 45,
+      long_pause_minutes: 45,
     },
   },
 };
