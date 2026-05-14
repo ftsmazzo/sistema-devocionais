@@ -89,7 +89,7 @@ const PACKAGES: Record<BlindageProfileId, BlindageProfilePackage> = {
       blocked_words: [...OPT_OUT_WORDS],
       repetition_enabled: false,
       repetition_window: 20,
-      repetition_alert_percent: 85,
+      repetition_alert_percent: 100,
     },
     health_check: {
       pause_if_degraded: true,
@@ -156,7 +156,7 @@ const PACKAGES: Record<BlindageProfileId, BlindageProfilePackage> = {
       blocked_words: [...OPT_OUT_WORDS],
       repetition_enabled: false,
       repetition_window: 20,
-      repetition_alert_percent: 85,
+      repetition_alert_percent: 100,
     },
     health_check: {
       pause_if_degraded: true,
@@ -220,7 +220,7 @@ const PACKAGES: Record<BlindageProfileId, BlindageProfilePackage> = {
       blocked_words: [...OPT_OUT_WORDS],
       repetition_enabled: false,
       repetition_window: 20,
-      repetition_alert_percent: 85,
+      repetition_alert_percent: 100,
     },
     health_check: {
       pause_if_degraded: true,

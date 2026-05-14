@@ -770,7 +770,9 @@ export default function Blindage() {
                 </div>
                 <div>
                   <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 700, color: 'var(--text-primary)' }}>Conteúdo</h3>
-                  <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-muted)' }}>Anti-repetição por tipo de envio</p>
+                  <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                    Anti-repetição (opcional, <strong>desligada por padrão</strong>)
+                  </p>
                 </div>
               </div>
               <label className="toggle">
@@ -783,6 +785,10 @@ export default function Blindage() {
               </label>
             </div>
             <div style={{ padding: 24, flex: 1 }}>
+              <p style={{ margin: '0 0 16px', fontSize: '0.78rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                O envio <strong>devocional</strong> usa o mesmo texto base (só muda o nome): a anti-repetição <strong>nunca</strong> é aplicada a ele, mesmo com esta opção ligada.
+                Para <strong>marketing</strong> ou avulsas com spintax no futuro, pode ajudar; com mídia sem legenda variada, prefira manter desligado ou 100% só duplicata exata.
+              </p>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', borderRadius: 12, background: 'var(--bg-elevated)', marginBottom: 16 }}>
                 <span style={{ fontSize: '0.85rem', color: 'var(--text-primary)' }}>Bloquear texto repetido / muito parecido</span>
                 <label className="toggle">
@@ -812,13 +818,13 @@ export default function Blindage() {
               <div style={{ marginBottom: 8, opacity: groupedRules.content.config.repetition_enabled === true ? 1 : 0.45 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
                   <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Similaridade mínima para bloquear (%)</span>
-                  <span style={{ fontWeight: 700, color: '#34d399' }}>{groupedRules.content.config.repetition_alert_percent ?? 85}%</span>
+                  <span style={{ fontWeight: 700, color: '#34d399' }}>{groupedRules.content.config.repetition_alert_percent ?? 100}%</span>
                 </div>
                 <input
                   type="range"
                   min={50}
                   max={100}
-                  value={Math.min(100, Math.max(50, Number(groupedRules.content.config.repetition_alert_percent) || 85))}
+                  value={Math.min(100, Math.max(50, Number(groupedRules.content.config.repetition_alert_percent) || 100))}
                   onChange={(e) => updateRuleConfig(groupedRules.content!.id, 'repetition_alert_percent', parseInt(e.target.value, 10))}
                   disabled={groupedRules.content.config.repetition_enabled !== true}
                   style={{ width: '100%', accentColor: '#34d399' }}

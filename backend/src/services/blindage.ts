@@ -79,8 +79,8 @@ export const BLINDAGE_CANONICAL_CONFIGS: Record<string, Record<string, any>> = {
     /** Anti-repetição de texto (usa histórico recente por tipo de envio). Desligado por padrão. */
     repetition_enabled: false,
     repetition_window: 20,
-    /** 100 = apenas duplicata exata (hash); menor que 100 também compara similaridade de vocabulário (Jaccard). */
-    repetition_alert_percent: 85,
+    /** Com anti-repetição ligada: 100 = só bloqueia cópia exata (mais seguro sem spintax). */
+    repetition_alert_percent: 100,
   },
   number_validation: {
     validate_format: true,
@@ -869,11 +869,11 @@ async function validateContent(
     }
   }
 
-  if (config.repetition_enabled === true) {
+  if (config.repetition_enabled === true && messageCategory !== 'devocional') {
     const scope = String(messageCategory || 'avulsa').trim().slice(0, 48) || 'avulsa';
     const window = Math.min(80, Math.max(5, Number(config.repetition_window) || 20));
     let pct = Number(config.repetition_alert_percent);
-    if (!Number.isFinite(pct)) pct = 85;
+    if (!Number.isFinite(pct)) pct = 100;
     pct = Math.min(100, Math.max(50, pct));
 
     const normalized = normalizeBodyForFingerprint(message);
@@ -1468,7 +1468,13 @@ export async function recordBlindageSuccessfulSend(input: {
       return;
     }
 
-    const scope = (input.messageType?.trim() || 'avulsa').slice(0, 48) || 'avulsa';
+    const cat = (input.messageType?.trim() || 'avulsa').slice(0, 48) || 'avulsa';
+    /** Devocional: um texto base com só o nome variando — nunca grava nem compara anti-repetição. */
+    if (cat === 'devocional') {
+      return;
+    }
+
+    const scope = cat;
     const normalized = normalizeBodyForFingerprint(input.message);
     if (normalized.length < 8) {
       return;
