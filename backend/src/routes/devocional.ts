@@ -1,6 +1,11 @@
 import express from 'express';
 import { pool } from '../database';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
+import {
+  reconcileActiveJourneyForDate,
+  todaySaoPauloYmd,
+  eachDateInclusiveYmd,
+} from '../services/journeyReconcile';
 
 const router = express.Router();
 
@@ -610,6 +615,7 @@ function normJourneyDate(v: unknown): string | null {
  */
 router.get('/journeys', authenticateToken, async (req: AuthRequest, res) => {
   try {
+    await reconcileActiveJourneyForDate(pool, todaySaoPauloYmd());
     const result = await pool.query(
       `SELECT id, title, central_theme, journey_description, preaching_tone,
               bible_version, signature, start_date, end_date, is_active,
@@ -856,15 +862,73 @@ router.post('/generate', authenticateToken, async (req: AuthRequest, res) => {
   try {
     const { date } = req.body;
     if (!date) return res.status(400).json({ error: 'Data é obrigatória' });
+    const dateStr = String(date).trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+      return res.status(400).json({ error: 'Data inválida (use AAAA-MM-DD).' });
+    }
+
+    await reconcileActiveJourneyForDate(pool, dateStr);
 
     const { DevocionalGenerator } = await import('../services/DevocionalGenerator');
     const generator = new DevocionalGenerator();
-    const result = await generator.generate(date);
+    const result = await generator.generate(dateStr);
 
     res.json({ success: true, devocional: result });
   } catch (error: any) {
     console.error('❌ Erro na geração manual:', error);
     res.status(500).json({ error: 'Falha na geração do devocional', message: error.message });
+  }
+});
+
+/**
+ * Gerar devocionais em sequência (datas sem registro são geradas; existentes são ignoradas).
+ * POST /api/devocional/generate-range
+ * Body: { start_date, end_date } — no máximo 31 dias.
+ */
+router.post('/generate-range', authenticateToken, async (req: AuthRequest, res) => {
+  try {
+    const { start_date, end_date } = req.body;
+    const start = normJourneyDate(start_date);
+    const end = normJourneyDate(end_date);
+    if (!start || !end) {
+      return res.status(400).json({ error: 'start_date e end_date são obrigatórios (AAAA-MM-DD).' });
+    }
+    if (end < start) {
+      return res.status(400).json({ error: 'end_date deve ser maior ou igual a start_date.' });
+    }
+    let n = 0;
+    for (const _ of eachDateInclusiveYmd(start, end)) {
+      n++;
+      if (n > 31) {
+        return res.status(400).json({ error: 'Intervalo máximo: 31 dias por requisição.' });
+      }
+    }
+
+    const { DevocionalGenerator } = await import('../services/DevocionalGenerator');
+    const generator = new DevocionalGenerator();
+    const generated: string[] = [];
+    const skipped: string[] = [];
+    const errors: { date: string; message: string }[] = [];
+
+    for (const ymd of eachDateInclusiveYmd(start, end)) {
+      const ex = await pool.query('SELECT id FROM devocionais WHERE date = $1', [ymd]);
+      if (ex.rows.length > 0) {
+        skipped.push(ymd);
+        continue;
+      }
+      try {
+        await reconcileActiveJourneyForDate(pool, ymd);
+        await generator.generate(ymd);
+        generated.push(ymd);
+      } catch (e: any) {
+        errors.push({ date: ymd, message: e?.message || String(e) });
+      }
+    }
+
+    res.json({ success: true, generated, skipped, errors });
+  } catch (error: any) {
+    console.error('❌ Erro na geração em lote:', error);
+    res.status(500).json({ error: 'Falha na geração em lote', message: error.message });
   }
 });
 

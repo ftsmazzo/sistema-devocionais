@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import type { CSSProperties } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '@/lib/api';
 import { useAuthStore } from '@/store/authStore';
@@ -15,7 +16,10 @@ import {
   Plus,
   Trash2,
   Star,
-  Cpu
+  Cpu,
+  ChevronDown,
+  ChevronUp,
+  CalendarRange,
 } from 'lucide-react';
 
 /** Só o que é realmente global para o motor de IA (Gemini). */
@@ -82,6 +86,18 @@ function ymd(v: string | Date | null | undefined): string {
   return '';
 }
 
+function addDaysYmd(ymd: string, delta: number): string {
+  const [y, m, d] = ymd.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d + delta));
+  return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}`;
+}
+
+function trunc(s: string, max: number): string {
+  const t = (s ?? '').trim();
+  if (t.length <= max) return t;
+  return `${t.slice(0, max)}…`;
+}
+
 export default function SessaoDevocional() {
   const [globalCfg, setGlobalCfg] = useState<GlobalAIConfig>({
     gemini_api_key: '',
@@ -93,6 +109,10 @@ export default function SessaoDevocional() {
   const [savingGlobal, setSavingGlobal] = useState(false);
   const [savingJourneyId, setSavingJourneyId] = useState<number | null>(null);
   const [generating, setGenerating] = useState(false);
+  const [generatingRange, setGeneratingRange] = useState(false);
+  const [rangeStart, setRangeStart] = useState(todaySaoPauloYmd());
+  const [rangeDays, setRangeDays] = useState(7);
+  const [expandedJourneyId, setExpandedJourneyId] = useState<number | null>(null);
   const [testResult, setTestResult] = useState<any>(null);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [showNewJourney, setShowNewJourney] = useState(false);
@@ -285,6 +305,34 @@ export default function SessaoDevocional() {
     }
   };
 
+  const handleGenerateRange = async () => {
+    const start = rangeStart.trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(start)) {
+      setToast({ message: 'Data inicial inválida.', type: 'error' });
+      return;
+    }
+    const days = Math.min(31, Math.max(1, Math.floor(Number(rangeDays)) || 1));
+    const end = addDaysYmd(start, days - 1);
+    if (!confirm(`Gerar devocionais de ${start} até ${end} (${days} dias)? Dias já existentes serão ignorados.`)) return;
+
+    setGeneratingRange(true);
+    setTestResult(null);
+    try {
+      const res = await api.post('/devocional/generate-range', { start_date: start, end_date: end });
+      const g: string[] = res.data.generated || [];
+      const sk: string[] = res.data.skipped || [];
+      const err: { date: string; message: string }[] = res.data.errors || [];
+      let msg = `Gerados: ${g.length}. Ignorados (já existiam): ${sk.length}.`;
+      if (err.length) msg += ` Erros: ${err.length} (${err.map((e) => e.date).join(', ')}).`;
+      setToast({ message: msg, type: err.length && g.length === 0 ? 'error' : 'success' });
+      await loadAll();
+    } catch (error: any) {
+      setToast({ message: error.response?.data?.message || error.response?.data?.error || 'Erro na geração em lote.', type: 'error' });
+    } finally {
+      setGeneratingRange(false);
+    }
+  };
+
   if (loading) {
     return (
       <div style={{ minHeight: '60vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -320,7 +368,7 @@ export default function SessaoDevocional() {
           <div>
             <h1 style={{ fontSize: '2rem', fontWeight: 800, color: 'var(--text-primary)', margin: 0, fontFamily: 'Outfit' }}>Jornada Bíblica</h1>
             <p style={{ margin: '6px 0 0', fontSize: '0.88rem', color: 'var(--text-secondary)', maxWidth: 640, lineHeight: 1.45 }}>
-              Motor Gemini (global) e jornadas com tema, tom e período. A IA usa sempre a jornada marcada como <strong>ativa</strong>.
+              Motor global (Gemini) e jornadas por período. A jornada <strong>ativa</strong> segue o calendário: ao abrir esta página, ao gerar texto ou no horário do disparo, o sistema escolhe a jornada cujo intervalo contém aquela data.
             </p>
           </div>
         </div>
@@ -409,8 +457,8 @@ export default function SessaoDevocional() {
             <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap', marginBottom: 12 }}>
               <div style={{ flex: 1, minWidth: 220 }}>
                 <h2 style={{ margin: '0 0 8px', fontSize: '1.15rem', fontWeight: 800, color: 'var(--text-primary)' }}>Suas jornadas</h2>
-                <p style={{ margin: 0, fontSize: '0.92rem', color: 'var(--text-secondary)', lineHeight: 1.55 }}>
-                  Crie sua Jornada da Palavra de Deus e compartilhe com seus irmãos.
+                <p style={{ margin: 0, fontSize: '0.88rem', color: 'var(--text-secondary)', lineHeight: 1.45 }}>
+                  Períodos com tema e tom. A que vale <strong>hoje</strong> vira ativa sozinha ao recarregar, ao gerar ou no disparo.
                 </p>
               </div>
               <button
@@ -429,8 +477,8 @@ export default function SessaoDevocional() {
                 {showNewJourney ? 'Fechar' : 'Nova jornada'}
               </button>
             </div>
-            <p style={{ fontSize: '0.76rem', color: 'var(--text-muted)', margin: '0 0 20px', lineHeight: 1.5 }}>
-              Cada jornada é um <strong>novo início</strong> (período, tema e tom). Só a <strong>ativa</strong> entra na geração. O primeiro dia da jornada recebe instruções especiais na IA.
+            <p style={{ fontSize: '0.74rem', color: 'var(--text-muted)', margin: '0 0 18px', lineHeight: 1.45 }}>
+              Monte a próxima com datas em sequência (ex.: jornada A termina dia 31; jornada B começa dia 1). Use <strong>Gerar vários dias</strong> à direita para adiantar textos.
             </p>
 
             {showNewJourney && (
@@ -492,96 +540,205 @@ export default function SessaoDevocional() {
               </div>
             )}
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-              {journeys.map(j => (
-                <div
-                  key={j.id}
-                  style={{
-                    padding: 20, borderRadius: 16,
-                    border: j.is_active ? '1px solid rgba(245, 158, 11, 0.45)' : '1px solid var(--border)',
-                    background: j.is_active ? 'rgba(245, 158, 11, 0.06)' : 'rgba(0,0,0,0.12)'
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, flexWrap: 'wrap', gap: 8 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      {j.is_active && (
-                        <span style={{
-                          fontSize: '0.62rem', fontWeight: 800, letterSpacing: '0.06em',
-                          padding: '4px 10px', borderRadius: 20, background: 'rgba(245,158,11,0.2)', color: '#fbbf24'
-                        }}>
-                          ATIVA NA IA
-                        </span>
-                      )}
-                      <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>#{j.id}</span>
-                    </div>
-                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                      {!j.is_active && (
-                        <button type="button" onClick={() => activateJourney(j.id)} className="btn-outline" style={{ padding: '6px 12px', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: 6 }}>
-                          <Star size={14} /> Ativar
-                        </button>
-                      )}
-                      <button type="button" onClick={() => deleteJourney(j)} className="btn-outline" style={{ padding: '6px 12px', fontSize: '0.75rem', color: '#fb7185', borderColor: 'rgba(251,113,133,0.35)', display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <Trash2 size={14} /> Excluir
-                      </button>
-                    </div>
-                  </div>
-
-                  <div style={{ marginBottom: 12 }}>
-                    <label className="label-premium" style={{ fontSize: '0.68rem' }}>Nome</label>
-                    <input className="input-dark" value={j.title} onChange={(e) => updateJourneyLocal(j.id, { title: e.target.value })} />
-                  </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
-                    <div>
-                      <label className="label-premium" style={{ fontSize: '0.68rem' }}>Início</label>
-                      <input type="date" className="input-dark" style={{ colorScheme: 'dark' }} value={j.start_date} onChange={(e) => updateJourneyLocal(j.id, { start_date: e.target.value })} />
-                    </div>
-                    <div>
-                      <label className="label-premium" style={{ fontSize: '0.68rem' }}>Fim (opcional)</label>
-                      <input type="date" className="input-dark" style={{ colorScheme: 'dark' }} value={j.end_date ?? ''} onChange={(e) => updateJourneyLocal(j.id, { end_date: e.target.value || null })} />
-                    </div>
-                  </div>
-                  <div style={{ marginBottom: 12 }}>
-                    <label className="label-premium" style={{ fontSize: '0.68rem' }}>Tema central</label>
-                    <input className="input-dark" value={j.central_theme} onChange={(e) => updateJourneyLocal(j.id, { central_theme: e.target.value })} />
-                  </div>
-                  <div style={{ marginBottom: 12 }}>
-                    <label className="label-premium" style={{ fontSize: '0.68rem' }}>Descrição da jornada</label>
-                    <textarea className="input-dark" style={{ minHeight: 72, resize: 'vertical' }} value={j.journey_description} onChange={(e) => updateJourneyLocal(j.id, { journey_description: e.target.value })} />
-                  </div>
-                  <div style={{ marginBottom: 12 }}>
-                    <label className="label-premium" style={{ fontSize: '0.68rem' }}>Tom da pregação</label>
-                    <textarea className="input-dark" style={{ minHeight: 56, resize: 'vertical' }} value={j.preaching_tone} onChange={(e) => updateJourneyLocal(j.id, { preaching_tone: e.target.value })} />
-                  </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
-                    <div>
-                      <label className="label-premium" style={{ fontSize: '0.68rem' }}>Bíblia</label>
-                      <select className="input-dark" value={j.bible_version} onChange={(e) => updateJourneyLocal(j.id, { bible_version: e.target.value })}>
-                        <option value="ACF">ACF</option>
-                        <option value="NVI">NVI</option>
-                        <option value="ARA">ARA</option>
-                        <option value="NTLH">NTLH</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="label-premium" style={{ fontSize: '0.68rem' }}>Assinatura</label>
-                      <input className="input-dark" value={j.signature} onChange={(e) => updateJourneyLocal(j.id, { signature: e.target.value })} />
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    disabled={savingJourneyId === j.id}
-                    onClick={() => saveJourney(j)}
-                    className="btn-gold"
-                    style={{ width: '100%', padding: '12px', border: 'none', borderRadius: 10, marginTop: 4 }}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              {journeys.map((j) => {
+                const open = expandedJourneyId === j.id;
+                const periodo = `${ymd(j.start_date)} → ${j.end_date ? ymd(j.end_date) : '—'}`;
+                const cellLabel: CSSProperties = {
+                  textAlign: 'left',
+                  padding: '7px 10px',
+                  color: 'var(--text-muted)',
+                  fontWeight: 600,
+                  fontSize: '0.72rem',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.04em',
+                  width: '30%',
+                  borderBottom: '1px solid var(--border)',
+                  verticalAlign: 'top',
+                };
+                const cellVal: CSSProperties = {
+                  padding: '7px 10px',
+                  borderBottom: '1px solid var(--border)',
+                  color: 'var(--text-secondary)',
+                  fontSize: '0.82rem',
+                  lineHeight: 1.45,
+                  wordBreak: 'break-word',
+                };
+                return (
+                  <div
+                    key={j.id}
+                    style={{
+                      padding: 16,
+                      borderRadius: 14,
+                      border: j.is_active ? '1px solid rgba(245, 158, 11, 0.45)' : '1px solid var(--border)',
+                      background: j.is_active ? 'rgba(245, 158, 11, 0.06)' : 'rgba(0,0,0,0.12)',
+                    }}
                   >
-                    {savingJourneyId === j.id ? <RefreshCw size={18} className="animate-spin" /> : (
-                      <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-                        <Save size={18} /> Salvar esta jornada
-                      </span>
+                    <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', marginBottom: 10 }}>
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 4 }}>
+                          {j.is_active && (
+                            <span
+                              style={{
+                                fontSize: '0.6rem',
+                                fontWeight: 800,
+                                letterSpacing: '0.06em',
+                                padding: '3px 8px',
+                                borderRadius: 20,
+                                background: 'rgba(245,158,11,0.2)',
+                                color: '#fbbf24',
+                              }}
+                            >
+                              ATIVA
+                            </span>
+                          )}
+                          <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>#{j.id}</span>
+                        </div>
+                        <div style={{ fontWeight: 800, fontSize: '1rem', color: 'var(--text-primary)', fontFamily: 'Outfit, sans-serif' }}>{j.title}</div>
+                        <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: 4 }}>{periodo}</div>
+                      </div>
+                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', flexShrink: 0 }}>
+                        <button
+                          type="button"
+                          onClick={() => setExpandedJourneyId(open ? null : j.id)}
+                          className="btn-outline"
+                          style={{ padding: '6px 10px', fontSize: '0.72rem', display: 'flex', alignItems: 'center', gap: 6 }}
+                        >
+                          {open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                          {open ? 'Fechar' : 'Editar'}
+                        </button>
+                        {!j.is_active && (
+                          <button
+                            type="button"
+                            onClick={() => activateJourney(j.id)}
+                            className="btn-outline"
+                            style={{ padding: '6px 10px', fontSize: '0.72rem', display: 'flex', alignItems: 'center', gap: 6 }}
+                          >
+                            <Star size={14} /> Ativar
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => deleteJourney(j)}
+                          className="btn-outline"
+                          style={{
+                            padding: '6px 10px',
+                            fontSize: '0.72rem',
+                            color: '#fb7185',
+                            borderColor: 'rgba(251,113,133,0.35)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 6,
+                          }}
+                        >
+                          <Trash2 size={14} /> Excluir
+                        </button>
+                      </div>
+                    </div>
+
+                    <div style={{ overflowX: 'auto', borderRadius: 10, border: '1px solid var(--border)', marginBottom: open ? 14 : 0 }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 280 }}>
+                        <tbody>
+                          <tr>
+                            <td style={cellLabel}>Período</td>
+                            <td style={cellVal}>{periodo}</td>
+                          </tr>
+                          <tr>
+                            <td style={cellLabel}>Tema central</td>
+                            <td style={cellVal} title={j.central_theme}>
+                              {trunc(j.central_theme, 180)}
+                            </td>
+                          </tr>
+                          <tr>
+                            <td style={cellLabel}>Descrição</td>
+                            <td style={cellVal} title={j.journey_description}>
+                              {trunc(j.journey_description, 260)}
+                            </td>
+                          </tr>
+                          <tr>
+                            <td style={cellLabel}>Tom</td>
+                            <td style={cellVal} title={j.preaching_tone}>
+                              {trunc(j.preaching_tone, 180)}
+                            </td>
+                          </tr>
+                          <tr>
+                            <td style={cellLabel}>Bíblia</td>
+                            <td style={cellVal}>{j.bible_version}</td>
+                          </tr>
+                          <tr>
+                            <td style={cellLabel}>Assinatura</td>
+                            <td style={cellVal} title={j.signature}>
+                              {j.signature ? trunc(j.signature, 120) : '—'}
+                            </td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {open && (
+                      <div style={{ paddingTop: 4, borderTop: '1px dashed var(--border)' }}>
+                        <p style={{ margin: '0 0 12px', fontSize: '0.72rem', color: 'var(--text-muted)' }}>Edição — salve ao terminar.</p>
+                        <div style={{ marginBottom: 10 }}>
+                          <label className="label-premium" style={{ fontSize: '0.68rem' }}>Nome</label>
+                          <input className="input-dark" value={j.title} onChange={(e) => updateJourneyLocal(j.id, { title: e.target.value })} />
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+                          <div>
+                            <label className="label-premium" style={{ fontSize: '0.68rem' }}>Início</label>
+                            <input type="date" className="input-dark" style={{ colorScheme: 'dark' }} value={j.start_date} onChange={(e) => updateJourneyLocal(j.id, { start_date: e.target.value })} />
+                          </div>
+                          <div>
+                            <label className="label-premium" style={{ fontSize: '0.68rem' }}>Fim (opcional)</label>
+                            <input type="date" className="input-dark" style={{ colorScheme: 'dark' }} value={j.end_date ?? ''} onChange={(e) => updateJourneyLocal(j.id, { end_date: e.target.value || null })} />
+                          </div>
+                        </div>
+                        <div style={{ marginBottom: 10 }}>
+                          <label className="label-premium" style={{ fontSize: '0.68rem' }}>Tema central</label>
+                          <input className="input-dark" value={j.central_theme} onChange={(e) => updateJourneyLocal(j.id, { central_theme: e.target.value })} />
+                        </div>
+                        <div style={{ marginBottom: 10 }}>
+                          <label className="label-premium" style={{ fontSize: '0.68rem' }}>Descrição da jornada</label>
+                          <textarea className="input-dark" style={{ minHeight: 72, resize: 'vertical' }} value={j.journey_description} onChange={(e) => updateJourneyLocal(j.id, { journey_description: e.target.value })} />
+                        </div>
+                        <div style={{ marginBottom: 10 }}>
+                          <label className="label-premium" style={{ fontSize: '0.68rem' }}>Tom da pregação</label>
+                          <textarea className="input-dark" style={{ minHeight: 56, resize: 'vertical' }} value={j.preaching_tone} onChange={(e) => updateJourneyLocal(j.id, { preaching_tone: e.target.value })} />
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
+                          <div>
+                            <label className="label-premium" style={{ fontSize: '0.68rem' }}>Bíblia</label>
+                            <select className="input-dark" value={j.bible_version} onChange={(e) => updateJourneyLocal(j.id, { bible_version: e.target.value })}>
+                              <option value="ACF">ACF</option>
+                              <option value="NVI">NVI</option>
+                              <option value="ARA">ARA</option>
+                              <option value="NTLH">NTLH</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label className="label-premium" style={{ fontSize: '0.68rem' }}>Assinatura</label>
+                            <input className="input-dark" value={j.signature} onChange={(e) => updateJourneyLocal(j.id, { signature: e.target.value })} />
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          disabled={savingJourneyId === j.id}
+                          onClick={() => saveJourney(j)}
+                          className="btn-gold"
+                          style={{ width: '100%', padding: '11px', border: 'none', borderRadius: 10 }}
+                        >
+                          {savingJourneyId === j.id ? (
+                            <RefreshCw size={18} className="animate-spin" />
+                          ) : (
+                            <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+                              <Save size={18} /> Salvar jornada
+                            </span>
+                          )}
+                        </button>
+                      </div>
                     )}
-                  </button>
-                </div>
-              ))}
+                  </div>
+                );
+              })}
               {journeys.length === 0 && !showNewJourney && (
                 <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Nenhuma jornada. Clique em <strong>+ Nova jornada</strong> para começar.</p>
               )}
@@ -629,6 +786,45 @@ export default function SessaoDevocional() {
                     <span>Gerar agora</span>
                   </>
                 )}
+              </button>
+
+              <div style={{ height: 1, background: 'var(--border)', margin: '4px 0' }} />
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                <CalendarRange size={16} color="var(--gold-primary)" />
+                <span style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-primary)' }}>Gerar vários dias</span>
+              </div>
+              <p style={{ fontSize: '0.65rem', color: 'var(--text-muted)', margin: '0 0 10px', lineHeight: 1.45 }}>
+                Só cria datas que ainda não existem. Máx. 31 dias. A jornada ativa é ajustada por cada data.
+              </p>
+              <div style={{ marginBottom: 10 }}>
+                <label className="label-premium" style={{ fontSize: '0.68rem' }}>Primeira data</label>
+                <input
+                  type="date"
+                  className="input-dark"
+                  style={{ colorScheme: 'dark', width: '100%' }}
+                  value={rangeStart}
+                  onChange={(e) => setRangeStart(e.target.value)}
+                />
+              </div>
+              <div style={{ marginBottom: 12 }}>
+                <label className="label-premium" style={{ fontSize: '0.68rem' }}>Quantidade de dias</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={31}
+                  className="input-dark"
+                  value={rangeDays}
+                  onChange={(e) => setRangeDays(Math.min(31, Math.max(1, parseInt(e.target.value, 10) || 1)))}
+                />
+              </div>
+              <button
+                type="button"
+                onClick={handleGenerateRange}
+                disabled={generatingRange || generating}
+                className="btn-gold"
+                style={{ width: '100%', padding: '11px', border: 'none', borderRadius: 10, fontSize: '0.85rem', fontWeight: 700, opacity: generatingRange ? 0.85 : 1 }}
+              >
+                {generatingRange ? <RefreshCw size={18} className="animate-spin" /> : 'Gerar intervalo'}
               </button>
             </div>
           </div>

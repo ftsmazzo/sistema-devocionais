@@ -11,6 +11,7 @@ import { personalizeDevocionalMessage, formatDevocionalMessage } from './devocio
 import { canReceiveDevocional, updateDevocionalScore } from './devocionalScoring';
 import { addLog } from '../routes/logs';
 import { pingInstanceHealth } from './retryQueue';
+import { reconcileActiveJourneyForDate } from './journeyReconcile';
 
 /**
  * Serviço de agendamento para disparo automático de devocionais
@@ -90,6 +91,8 @@ export async function executeDevocionalDispatch(): Promise<void> {
     const utcDate = new Date().toISOString().split('T')[0];
     console.log(`   📅 Data no timezone ${timezone}: ${finalDate} (UTC seria: ${utcDate})`);
     addLog('info', `[Devocional] Buscando devocional para data: ${finalDate} (timezone: ${timezone}, UTC: ${utcDate})`);
+
+    await reconcileActiveJourneyForDate(pool, finalDate);
     
     let devocionalResult = await pool.query(
       `SELECT id, title, text, versiculo_principal, versiculo_apoio, metadata
