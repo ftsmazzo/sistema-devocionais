@@ -3,6 +3,7 @@ import axios from 'axios';
 import { pool } from '../database';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { applyBlindage } from '../services/blindage';
+import { withGlobalOutboundGate } from '../services/globalOutboundGate';
 
 const router = express.Router();
 
@@ -31,120 +32,138 @@ router.post('/send', async (req: AuthRequest, res) => {
       });
     }
 
-    // Aplicar blindagem
-    const blindageResult = await applyBlindage({
-      to,
-      message,
-      instanceId,
-      messageType: messageType || 'avulsa',
+    type SendOutcome =
+      | { kind: 'blocked'; reason?: string; blockedBy?: string }
+      | { kind: 'ok'; payload: Record<string, unknown> };
+
+    const outcome = await withGlobalOutboundGate(async (): Promise<SendOutcome> => {
+      const blindageResult = await applyBlindage({
+        to,
+        message,
+        instanceId,
+        messageType: messageType || 'avulsa',
+      });
+
+      if (!blindageResult.canSend) {
+        return {
+          kind: 'blocked',
+          reason: blindageResult.reason,
+          blockedBy: blindageResult.blockedBy,
+        };
+      }
+
+      if (blindageResult.delay && blindageResult.delay > 0) {
+        await new Promise(resolve => setTimeout(resolve, blindageResult.delay));
+      }
+
+      const instanceResult = await pool.query(
+        `SELECT id, instance_name, api_url, api_key, status 
+         FROM instances 
+         WHERE id = $1`,
+        [blindageResult.selectedInstanceId]
+      );
+
+      if (instanceResult.rows.length === 0) {
+        throw Object.assign(new Error('Instância não encontrada'), { statusCode: 404 });
+      }
+
+      const instance = instanceResult.rows[0];
+
+      if (instance.status !== 'connected') {
+        throw Object.assign(new Error('Instância não está conectada'), { statusCode: 400 });
+      }
+
+      const evolutionApiUrl = process.env.EVOLUTION_API_URL || instance.api_url;
+      const evolutionApiKey = process.env.EVOLUTION_API_KEY || instance.api_key;
+
+      const sendMessageUrl = `${evolutionApiUrl}/message/sendText/${instance.instance_name}`;
+
+      const response = await axios.post(
+        sendMessageUrl,
+        {
+          number: to,
+          text: message,
+        },
+        {
+          headers: {
+            'apikey': evolutionApiKey,
+            'Content-Type': 'application/json',
+          },
+        }
+      );
+
+      const messageResult = await pool.query(
+        `INSERT INTO messages (
+          instance_id, 
+          message_id, 
+          from_number, 
+          to_number, 
+          message_text, 
+          message_type,
+          from_me, 
+          status, 
+          timestamp
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        RETURNING id`,
+        [
+          instance.id,
+          response.data?.key?.id || `temp-${Date.now()}`,
+          instance.phone_number || 'unknown',
+          to,
+          message,
+          messageType || 'avulsa',
+          true,
+          'sent',
+          new Date(),
+        ]
+      );
+
+      await pool.query(
+        `UPDATE instances 
+         SET last_message_sent_at = CURRENT_TIMESTAMP,
+             last_activity_at = CURRENT_TIMESTAMP
+         WHERE id = $1`,
+        [instance.id]
+      );
+
+      return {
+        kind: 'ok',
+        payload: {
+          success: true,
+          message: {
+            id: messageResult.rows[0].id,
+            instanceId: instance.id,
+            to,
+            message,
+            status: 'sent',
+            evolutionResponse: response.data,
+          },
+          blindage: {
+            delayApplied: blindageResult.delay || 0,
+            instanceSelected: blindageResult.selectedInstanceId,
+          },
+        },
+      };
     });
 
-    if (!blindageResult.canSend) {
+    if (outcome.kind === 'blocked') {
       return res.status(403).json({
         error: 'Mensagem bloqueada pela blindagem',
-        reason: blindageResult.reason,
-        blockedBy: blindageResult.blockedBy,
+        reason: outcome.reason,
+        blockedBy: outcome.blockedBy,
       });
     }
 
-    // Aplicar delay se necessário
-    if (blindageResult.delay && blindageResult.delay > 0) {
-      await new Promise(resolve => setTimeout(resolve, blindageResult.delay));
-    }
-
-    // Buscar dados da instância selecionada
-    const instanceResult = await pool.query(
-      `SELECT id, instance_name, api_url, api_key, status 
-       FROM instances 
-       WHERE id = $1`,
-      [blindageResult.selectedInstanceId]
-    );
-
-    if (instanceResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Instância não encontrada' });
-    }
-
-    const instance = instanceResult.rows[0];
-
-    if (instance.status !== 'connected') {
-      return res.status(400).json({ 
-        error: 'Instância não está conectada' 
-      });
-    }
-
-    // Enviar mensagem via Evolution API
-    const evolutionApiUrl = process.env.EVOLUTION_API_URL || instance.api_url;
-    const evolutionApiKey = process.env.EVOLUTION_API_KEY || instance.api_key;
-
-    const sendMessageUrl = `${evolutionApiUrl}/message/sendText/${instance.instance_name}`;
-
-    const response = await axios.post(
-      sendMessageUrl,
-      {
-        number: to,
-        text: message,
-      },
-      {
-        headers: {
-          'apikey': evolutionApiKey,
-          'Content-Type': 'application/json',
-        },
-      }
-    );
-
-    // Registrar mensagem no banco
-    const messageResult = await pool.query(
-      `INSERT INTO messages (
-        instance_id, 
-        message_id, 
-        from_number, 
-        to_number, 
-        message_text, 
-        message_type,
-        from_me, 
-        status, 
-        timestamp
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-      RETURNING id`,
-      [
-        instance.id,
-        response.data?.key?.id || `temp-${Date.now()}`,
-        instance.phone_number || 'unknown',
-        to,
-        message,
-        messageType || 'avulsa',
-        true, // from_me
-        'sent', // status inicial
-        new Date(),
-      ]
-    );
-
-    // Atualizar última mensagem enviada da instância
-    await pool.query(
-      `UPDATE instances 
-       SET last_message_sent_at = CURRENT_TIMESTAMP,
-           last_activity_at = CURRENT_TIMESTAMP
-       WHERE id = $1`,
-      [instance.id]
-    );
-
-    res.json({
-      success: true,
-      message: {
-        id: messageResult.rows[0].id,
-        instanceId: instance.id,
-        to,
-        message,
-        status: 'sent',
-        evolutionResponse: response.data,
-      },
-      blindage: {
-        delayApplied: blindageResult.delay || 0,
-        instanceSelected: blindageResult.selectedInstanceId,
-      },
-    });
+    return res.json(outcome.payload);
   } catch (error: any) {
     console.error('Erro ao enviar mensagem:', error);
+
+    if (error.statusCode === 404) {
+      return res.status(404).json({ error: error.message || 'Instância não encontrada' });
+    }
+    if (error.statusCode === 400) {
+      return res.status(400).json({ error: error.message || 'Requisição inválida' });
+    }
 
     // Se a mensagem foi bloqueada pela blindagem, não é erro do sistema
     if (error.response?.status === 403 && error.response?.data?.error?.includes('bloqueada')) {

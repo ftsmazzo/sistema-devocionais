@@ -1,6 +1,7 @@
 import { pool } from '../database';
 import axios from 'axios';
 import { applyBlindage } from './blindage';
+import { withGlobalOutboundGate } from './globalOutboundGate';
 import { addLog } from '../routes/logs';
 import { pingInstanceHealth } from './retryQueue';
 
@@ -180,159 +181,167 @@ export async function processMarketingDispatch(params: MarketingDispatchParams):
       try {
         console.log(`\n   📤 [${contactIndex}/${contacts.length}] Processando contato: ${contact.phone_number} (${contact.name || 'Sem nome'})`);
 
-        // Aplicar blindagem (define instância e delay; usar instância retornada pela blindagem)
-        const blindageStartTime = Date.now();
-        const blindageResult = await applyBlindage({
-          to: contact.phone_number,
-          message: dispatch.message_template,
-          instanceId: instance?.id,
-          messageType: 'marketing',
-        });
-        const blindageTime = Date.now() - blindageStartTime;
-        const blindageLog = `🛡️ Blindagem aplicada em ${blindageTime}ms`;
-        console.log(`      ${blindageLog}`);
-        addLog('info', `[Marketing ${dispatchId}] ${blindageLog}`);
+        let abortContact = false;
+        await withGlobalOutboundGate(async () => {
+          // Aplicar blindagem (define instância e delay; usar instância retornada pela blindagem)
+          const blindageStartTime = Date.now();
+          const blindageResult = await applyBlindage({
+            to: contact.phone_number,
+            message: dispatch.message_template,
+            instanceId: instance?.id,
+            messageType: 'marketing',
+          });
+          const blindageTime = Date.now() - blindageStartTime;
+          const blindageLog = `🛡️ Blindagem aplicada em ${blindageTime}ms`;
+          console.log(`      ${blindageLog}`);
+          addLog('info', `[Marketing ${dispatchId}] ${blindageLog}`);
 
-        if (!blindageResult.canSend) {
-          const blockLog = `⛔ BLOQUEADO pela blindagem: ${blindageResult.reason}`;
-          console.log(`      ${blockLog}`);
-          addLog('warning', `[Marketing ${dispatchId}] ${blockLog} - Contato: ${contact.phone_number}`);
-          failedCount++;
-          try {
-            await pool.query(
-              `INSERT INTO dispatch_contacts (dispatch_id, instance_id, contact_number, contact_name, status, failed_reason)
-               VALUES ($1, $2, $3, $4, 'failed', $5)`,
-              [dispatchId, instance.id, contact.phone_number, contact.name, `Blindagem: ${blindageResult.reason || 'bloqueado'}`.slice(0, 500)]
-            );
-          } catch (e) { /* ignore */ }
+          if (!blindageResult.canSend) {
+            const blockLog = `⛔ BLOQUEADO pela blindagem: ${blindageResult.reason}`;
+            console.log(`      ${blockLog}`);
+            addLog('warning', `[Marketing ${dispatchId}] ${blockLog} - Contato: ${contact.phone_number}`);
+            failedCount++;
+            try {
+              await pool.query(
+                `INSERT INTO dispatch_contacts (dispatch_id, instance_id, contact_number, contact_name, status, failed_reason)
+                 VALUES ($1, $2, $3, $4, 'failed', $5)`,
+                [dispatchId, instance.id, contact.phone_number, contact.name, `Blindagem: ${blindageResult.reason || 'bloqueado'}`.slice(0, 500)]
+              );
+            } catch (e) { /* ignore */ }
+            instanceIndex++;
+            abortContact = true;
+            return;
+          }
+
+          instance = blindageResult.selectedInstanceId != null
+            ? instances.find((i: any) => i.id === blindageResult.selectedInstanceId) || instances[instanceIndex % instances.length]
+            : instances[instanceIndex % instances.length];
           instanceIndex++;
+          console.log(`      🔄 Usando instância: ${instance.instance_name} (ID: ${instance.id})`);
+
+          // Aplicar delay
+          if (blindageResult.delay && blindageResult.delay > 0) {
+            const delaySeconds = Math.ceil(blindageResult.delay / 1000);
+            const delayStartTime = Date.now();
+            const delayLog = `⏳ [DELAY] Aguardando ${delaySeconds}s (${blindageResult.delay}ms) antes de enviar...`;
+            console.log(`      ${delayLog}`);
+            addLog('info', `[Marketing ${dispatchId}] ${delayLog} - Contato: ${contact.phone_number}`);
+            await new Promise(resolve => setTimeout(resolve, blindageResult.delay));
+            const actualDelay = Date.now() - delayStartTime;
+            const delayDiff = actualDelay - blindageResult.delay;
+            if (Math.abs(delayDiff) > 100) {
+              const delayWarn = `⚠️ [DELAY] ATENÇÃO: Esperado ${blindageResult.delay}ms, mas levou ${actualDelay}ms (diferença: ${delayDiff > 0 ? '+' : ''}${delayDiff}ms)`;
+              console.log(`      ${delayWarn}`);
+              addLog('warning', `[Marketing ${dispatchId}] ${delayWarn}`);
+            } else {
+              const delayOk = `✅ [DELAY] Concluído corretamente: ${actualDelay}ms`;
+              console.log(`      ${delayOk}`);
+              addLog('success', `[Marketing ${dispatchId}] ${delayOk}`);
+            }
+          } else {
+            const noDelayWarn = `⚠️ [DELAY] NENHUM DELAY CONFIGURADO - Enviando imediatamente!`;
+            console.log(`      ${noDelayWarn}`);
+            addLog('warning', `[Marketing ${dispatchId}] ${noDelayWarn}`);
+          }
+
+          // CRÍTICO: Atualizar last_message_sent_at ANTES de enviar para que o próximo cálculo de delay seja correto
+          // Isso garante que o delay global seja respeitado mesmo com rotação de instâncias
+          await pool.query(
+            `UPDATE instances 
+             SET last_message_sent_at = CURRENT_TIMESTAMP 
+             WHERE id = $1`,
+            [instance.id]
+          );
+
+          // Enviar mensagem
+          const sendStartTime = Date.now();
+          if (mediaUrl && mediaType) {
+            // Enviar com mídia
+            console.log(`      📎 Enviando mensagem com mídia (${mediaType}): ${mediaUrl.substring(0, 50)}...`);
+            await sendMessageWithMedia(
+              instance,
+              contact.phone_number,
+              dispatch.message_template,
+              mediaUrl,
+              mediaType
+            );
+          } else {
+            // Enviar apenas texto
+            console.log(`      💬 Enviando mensagem de texto (${dispatch.message_template.length} caracteres)`);
+            await sendTextMessage(
+              instance,
+              contact.phone_number,
+              dispatch.message_template
+            );
+          }
+          const sendTime = Date.now() - sendStartTime;
+          console.log(`      ✅ Mensagem enviada em ${sendTime}ms`);
+
+          // Registrar mensagem
+          const messageResult = await pool.query(
+            `INSERT INTO messages (
+              instance_id, message_id, remote_jid, from_me,
+              message_type, message_body, timestamp, status,
+              dispatch_id, dispatch_type, contact_id
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            RETURNING id`,
+            [
+              instance.id,
+              `temp-${Date.now()}-${contact.id}`,
+              `${contact.phone_number}@s.whatsapp.net`,
+              true,
+              mediaType || 'text',
+              dispatch.message_template,
+              new Date(),
+              'sent',
+              dispatchId,
+              'marketing',
+              contact.id,
+            ]
+          );
+
+          // Registrar no dispatch_contacts
+          await pool.query(
+            `INSERT INTO dispatch_contacts (
+              dispatch_id, instance_id, contact_number, contact_name,
+              message_sent_id, status, sent_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)`,
+            [
+              dispatchId,
+              instance.id,
+              contact.phone_number,
+              contact.name,
+              messageResult.rows[0].id,
+              'sent',
+            ]
+          );
+
+          successCount++;
+          const contactTotalTime = Date.now() - contactStartTime;
+          const totalElapsed = Date.now() - startTime;
+          const avgTimePerContact = totalElapsed / contactIndex;
+          const estimatedRemaining = Math.ceil((avgTimePerContact * (contacts.length - contactIndex)) / 1000);
+
+          const successLog = `✅ SUCESSO! Tempo total: ${contactTotalTime}ms`;
+          const progressLog = `📊 Progresso: ${successCount}/${contacts.length} enviados | Tempo médio: ${Math.ceil(avgTimePerContact)}ms | Estimativa restante: ~${estimatedRemaining}s`;
+          console.log(`      ${successLog}`);
+          console.log(`      ${progressLog}`);
+          addLog('success', `[Marketing ${dispatchId}] ${successLog} - Contato: ${contact.phone_number}`);
+          addLog('info', `[Marketing ${dispatchId}] ${progressLog}`);
+
+          // Atualizar última mensagem enviada da instância
+          await pool.query(
+            `UPDATE instances
+             SET last_message_sent_at = CURRENT_TIMESTAMP,
+                 last_activity_at = CURRENT_TIMESTAMP
+             WHERE id = $1`,
+            [instance.id]
+          );
+        });
+
+        if (abortContact) {
           continue;
         }
-
-        instance = blindageResult.selectedInstanceId != null
-          ? instances.find((i: any) => i.id === blindageResult.selectedInstanceId) || instances[instanceIndex % instances.length]
-          : instances[instanceIndex % instances.length];
-        instanceIndex++;
-        console.log(`      🔄 Usando instância: ${instance.instance_name} (ID: ${instance.id})`);
-
-        // Aplicar delay
-        if (blindageResult.delay && blindageResult.delay > 0) {
-          const delaySeconds = Math.ceil(blindageResult.delay / 1000);
-          const delayStartTime = Date.now();
-          const delayLog = `⏳ [DELAY] Aguardando ${delaySeconds}s (${blindageResult.delay}ms) antes de enviar...`;
-          console.log(`      ${delayLog}`);
-          addLog('info', `[Marketing ${dispatchId}] ${delayLog} - Contato: ${contact.phone_number}`);
-          await new Promise(resolve => setTimeout(resolve, blindageResult.delay));
-          const actualDelay = Date.now() - delayStartTime;
-          const delayDiff = actualDelay - blindageResult.delay;
-          if (Math.abs(delayDiff) > 100) {
-            const delayWarn = `⚠️ [DELAY] ATENÇÃO: Esperado ${blindageResult.delay}ms, mas levou ${actualDelay}ms (diferença: ${delayDiff > 0 ? '+' : ''}${delayDiff}ms)`;
-            console.log(`      ${delayWarn}`);
-            addLog('warning', `[Marketing ${dispatchId}] ${delayWarn}`);
-          } else {
-            const delayOk = `✅ [DELAY] Concluído corretamente: ${actualDelay}ms`;
-            console.log(`      ${delayOk}`);
-            addLog('success', `[Marketing ${dispatchId}] ${delayOk}`);
-          }
-        } else {
-          const noDelayWarn = `⚠️ [DELAY] NENHUM DELAY CONFIGURADO - Enviando imediatamente!`;
-          console.log(`      ${noDelayWarn}`);
-          addLog('warning', `[Marketing ${dispatchId}] ${noDelayWarn}`);
-        }
-
-        // CRÍTICO: Atualizar last_message_sent_at ANTES de enviar para que o próximo cálculo de delay seja correto
-        // Isso garante que o delay global seja respeitado mesmo com rotação de instâncias
-        await pool.query(
-          `UPDATE instances 
-           SET last_message_sent_at = CURRENT_TIMESTAMP 
-           WHERE id = $1`,
-          [instance.id]
-        );
-
-        // Enviar mensagem
-        const sendStartTime = Date.now();
-        if (mediaUrl && mediaType) {
-          // Enviar com mídia
-          console.log(`      📎 Enviando mensagem com mídia (${mediaType}): ${mediaUrl.substring(0, 50)}...`);
-          await sendMessageWithMedia(
-            instance,
-            contact.phone_number,
-            dispatch.message_template,
-            mediaUrl,
-            mediaType
-          );
-        } else {
-          // Enviar apenas texto
-          console.log(`      💬 Enviando mensagem de texto (${dispatch.message_template.length} caracteres)`);
-          await sendTextMessage(
-            instance,
-            contact.phone_number,
-            dispatch.message_template
-          );
-        }
-        const sendTime = Date.now() - sendStartTime;
-        console.log(`      ✅ Mensagem enviada em ${sendTime}ms`);
-
-        // Registrar mensagem
-        const messageResult = await pool.query(
-          `INSERT INTO messages (
-            instance_id, message_id, remote_jid, from_me,
-            message_type, message_body, timestamp, status,
-            dispatch_id, dispatch_type, contact_id
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-          RETURNING id`,
-          [
-            instance.id,
-            `temp-${Date.now()}-${contact.id}`,
-            `${contact.phone_number}@s.whatsapp.net`,
-            true,
-            mediaType || 'text',
-            dispatch.message_template,
-            new Date(),
-            'sent',
-            dispatchId,
-            'marketing',
-            contact.id,
-          ]
-        );
-
-        // Registrar no dispatch_contacts
-        await pool.query(
-          `INSERT INTO dispatch_contacts (
-            dispatch_id, instance_id, contact_number, contact_name,
-            message_sent_id, status, sent_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)`,
-          [
-            dispatchId,
-            instance.id,
-            contact.phone_number,
-            contact.name,
-            messageResult.rows[0].id,
-            'sent',
-          ]
-        );
-
-        successCount++;
-        const contactTotalTime = Date.now() - contactStartTime;
-        const totalElapsed = Date.now() - startTime;
-        const avgTimePerContact = totalElapsed / contactIndex;
-        const estimatedRemaining = Math.ceil((avgTimePerContact * (contacts.length - contactIndex)) / 1000);
-        
-        const successLog = `✅ SUCESSO! Tempo total: ${contactTotalTime}ms`;
-        const progressLog = `📊 Progresso: ${successCount}/${contacts.length} enviados | Tempo médio: ${Math.ceil(avgTimePerContact)}ms | Estimativa restante: ~${estimatedRemaining}s`;
-        console.log(`      ${successLog}`);
-        console.log(`      ${progressLog}`);
-        addLog('success', `[Marketing ${dispatchId}] ${successLog} - Contato: ${contact.phone_number}`);
-        addLog('info', `[Marketing ${dispatchId}] ${progressLog}`);
-
-        // Atualizar última mensagem enviada da instância
-        await pool.query(
-          `UPDATE instances
-           SET last_message_sent_at = CURRENT_TIMESTAMP,
-               last_activity_at = CURRENT_TIMESTAMP
-           WHERE id = $1`,
-          [instance.id]
-        );
 
       } catch (error: any) {
         const isInstanceError =

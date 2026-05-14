@@ -1,6 +1,7 @@
 import { pool } from '../database';
 import axios from 'axios';
 import { applyBlindage } from './blindage';
+import { withGlobalOutboundGate } from './globalOutboundGate';
 import { personalizeDevocionalMessage, formatDevocionalMessage } from './devocionalPersonalization';
 import { canReceiveDevocional, updateDevocionalScore } from './devocionalScoring';
 import { addLog } from '../routes/logs';
@@ -367,142 +368,150 @@ export async function executeDevocionalDispatch(): Promise<void> {
           config.timezone
         );
 
-        // Aplicar blindagem
-        const blindageResult = await applyBlindage({
-          to: contact.phone_number,
-          message: personalizedMessage,
-          instanceId: instance.id,
-          messageType: 'devocional',
+        let aborted = false;
+        await withGlobalOutboundGate(async () => {
+          // Aplicar blindagem
+          const blindageResult = await applyBlindage({
+            to: contact.phone_number,
+            message: personalizedMessage,
+            instanceId: instance.id,
+            messageType: 'devocional',
+          });
+
+          if (!blindageResult.canSend) {
+            console.log(`   ⛔ Contato ${contact.phone_number} bloqueado pela blindagem: ${blindageResult.reason}`);
+            failedCount++;
+            try {
+              await pool.query(
+                `INSERT INTO dispatch_contacts (
+                  dispatch_id, instance_id, contact_number, contact_name,
+                  status, failed_reason
+                ) VALUES ($1, $2, $3, $4, 'failed', $5)`,
+                [
+                  dispatchId,
+                  instance.id,
+                  contact.phone_number,
+                  contact.name,
+                  `Blindagem: ${blindageResult.reason || 'bloqueado'}`.slice(0, 500)
+                ]
+              );
+              console.log(`   📝 Falha (blindagem) registrada em dispatch_contacts: ${contact.phone_number}`);
+            } catch (insertErr: any) {
+              console.error(`   ⚠️ Erro ao registrar bloqueio em dispatch_contacts:`, insertErr.message);
+            }
+            aborted = true;
+            return;
+          }
+
+          // Aplicar delay
+          if (blindageResult.delay && blindageResult.delay > 0) {
+            const delaySeconds = Math.ceil(blindageResult.delay / 1000);
+            const delayStartTime = Date.now();
+            const delayLog = `⏳ [DELAY] Aguardando ${delaySeconds}s (${blindageResult.delay}ms) antes de enviar para ${contact.phone_number}`;
+            console.log(`   ${delayLog}`);
+            addLog('info', `[Devocional] ${delayLog}`);
+            await new Promise(resolve => setTimeout(resolve, blindageResult.delay));
+            const actualDelay = Date.now() - delayStartTime;
+            const delayDiff = actualDelay - blindageResult.delay;
+            if (Math.abs(delayDiff) > 100) {
+              const delayWarn = `⚠️ [DELAY] ATENÇÃO: Esperado ${blindageResult.delay}ms, mas levou ${actualDelay}ms (diferença: ${delayDiff > 0 ? '+' : ''}${delayDiff}ms)`;
+              console.log(`   ${delayWarn}`);
+              addLog('warning', `[Devocional] ${delayWarn}`);
+            } else {
+              const delayOk = `✅ [DELAY] Concluído corretamente: ${actualDelay}ms`;
+              console.log(`   ${delayOk}`);
+              addLog('success', `[Devocional] ${delayOk}`);
+            }
+          } else {
+            const noDelayWarn = `⚠️ [DELAY] NENHUM DELAY CONFIGURADO - Enviando imediatamente para ${contact.phone_number}!`;
+            console.log(`   ${noDelayWarn}`);
+            addLog('warning', `[Devocional] ${noDelayWarn}`);
+          }
+
+          // CRÍTICO: Atualizar last_message_sent_at ANTES de enviar para que o próximo cálculo de delay seja correto
+          // Isso garante que o delay global seja respeitado mesmo com rotação de instâncias
+          await pool.query(
+            `UPDATE instances 
+             SET last_message_sent_at = CURRENT_TIMESTAMP 
+             WHERE id = $1`,
+            [instance.id]
+          );
+
+          // Enviar mensagem
+          const sendMessageUrl = `${instance.api_url}/message/sendText/${instance.instance_name}`;
+          const response = await axios.post(
+            sendMessageUrl,
+            {
+              number: contact.phone_number,
+              text: personalizedMessage,
+            },
+            {
+              headers: {
+                'apikey': instance.api_key,
+                'Content-Type': 'application/json',
+              },
+            }
+          );
+
+          // Registrar mensagem
+          const messageResult = await pool.query(
+            `INSERT INTO messages (
+              instance_id, message_id, remote_jid, from_me,
+              message_type, message_body, timestamp, status,
+              dispatch_id, dispatch_type, contact_id, devocional_id
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+            RETURNING id`,
+            [
+              instance.id,
+              response.data?.key?.id || `temp-${Date.now()}`,
+              `${contact.phone_number}@s.whatsapp.net`,
+              true,
+              'text',
+              personalizedMessage,
+              new Date(),
+              'sent',
+              dispatchId,
+              'devocional',
+              contact.id,
+              devocionalId,
+            ]
+          );
+
+          // Atualizar pontuação (enviado)
+          await updateDevocionalScore(contact.id, 'sent');
+
+          // Registrar no dispatch_contacts
+          await pool.query(
+            `INSERT INTO dispatch_contacts (
+              dispatch_id, instance_id, contact_number, contact_name,
+              message_sent_id, status, sent_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)`,
+            [
+              dispatchId,
+              instance.id,
+              contact.phone_number,
+              contact.name,
+              messageResult.rows[0].id,
+              'sent',
+            ]
+          );
+
+          successCount++;
+          console.log(`   ✅ Enviado para ${contact.phone_number} (${successCount}/${eligibleContacts.length})`);
+
+          // Atualizar última mensagem enviada da instância
+          await pool.query(
+            `UPDATE instances
+             SET last_message_sent_at = CURRENT_TIMESTAMP,
+                 last_activity_at = CURRENT_TIMESTAMP
+             WHERE id = $1`,
+            [instance.id]
+          );
         });
 
-        if (!blindageResult.canSend) {
-          console.log(`   ⛔ Contato ${contact.phone_number} bloqueado pela blindagem: ${blindageResult.reason}`);
-          failedCount++;
-          try {
-            await pool.query(
-              `INSERT INTO dispatch_contacts (
-                dispatch_id, instance_id, contact_number, contact_name,
-                status, failed_reason
-              ) VALUES ($1, $2, $3, $4, 'failed', $5)`,
-              [
-                dispatchId,
-                instance.id,
-                contact.phone_number,
-                contact.name,
-                `Blindagem: ${blindageResult.reason || 'bloqueado'}`.slice(0, 500)
-              ]
-            );
-            console.log(`   📝 Falha (blindagem) registrada em dispatch_contacts: ${contact.phone_number}`);
-          } catch (insertErr: any) {
-            console.error(`   ⚠️ Erro ao registrar bloqueio em dispatch_contacts:`, insertErr.message);
-          }
+        if (aborted) {
           continue;
         }
-
-        // Aplicar delay
-        if (blindageResult.delay && blindageResult.delay > 0) {
-          const delaySeconds = Math.ceil(blindageResult.delay / 1000);
-          const delayStartTime = Date.now();
-          const delayLog = `⏳ [DELAY] Aguardando ${delaySeconds}s (${blindageResult.delay}ms) antes de enviar para ${contact.phone_number}`;
-          console.log(`   ${delayLog}`);
-          addLog('info', `[Devocional] ${delayLog}`);
-          await new Promise(resolve => setTimeout(resolve, blindageResult.delay));
-          const actualDelay = Date.now() - delayStartTime;
-          const delayDiff = actualDelay - blindageResult.delay;
-          if (Math.abs(delayDiff) > 100) {
-            const delayWarn = `⚠️ [DELAY] ATENÇÃO: Esperado ${blindageResult.delay}ms, mas levou ${actualDelay}ms (diferença: ${delayDiff > 0 ? '+' : ''}${delayDiff}ms)`;
-            console.log(`   ${delayWarn}`);
-            addLog('warning', `[Devocional] ${delayWarn}`);
-          } else {
-            const delayOk = `✅ [DELAY] Concluído corretamente: ${actualDelay}ms`;
-            console.log(`   ${delayOk}`);
-            addLog('success', `[Devocional] ${delayOk}`);
-          }
-        } else {
-          const noDelayWarn = `⚠️ [DELAY] NENHUM DELAY CONFIGURADO - Enviando imediatamente para ${contact.phone_number}!`;
-          console.log(`   ${noDelayWarn}`);
-          addLog('warning', `[Devocional] ${noDelayWarn}`);
-        }
-
-        // CRÍTICO: Atualizar last_message_sent_at ANTES de enviar para que o próximo cálculo de delay seja correto
-        // Isso garante que o delay global seja respeitado mesmo com rotação de instâncias
-        await pool.query(
-          `UPDATE instances 
-           SET last_message_sent_at = CURRENT_TIMESTAMP 
-           WHERE id = $1`,
-          [instance.id]
-        );
-
-        // Enviar mensagem
-        const sendMessageUrl = `${instance.api_url}/message/sendText/${instance.instance_name}`;
-        const response = await axios.post(
-          sendMessageUrl,
-          {
-            number: contact.phone_number,
-            text: personalizedMessage,
-          },
-          {
-            headers: {
-              'apikey': instance.api_key,
-              'Content-Type': 'application/json',
-            },
-          }
-        );
-
-        // Registrar mensagem
-        const messageResult = await pool.query(
-          `INSERT INTO messages (
-            instance_id, message_id, remote_jid, from_me,
-            message_type, message_body, timestamp, status,
-            dispatch_id, dispatch_type, contact_id, devocional_id
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-          RETURNING id`,
-          [
-            instance.id,
-            response.data?.key?.id || `temp-${Date.now()}`,
-            `${contact.phone_number}@s.whatsapp.net`,
-            true,
-            'text',
-            personalizedMessage,
-            new Date(),
-            'sent',
-            dispatchId,
-            'devocional',
-            contact.id,
-            devocionalId,
-          ]
-        );
-
-        // Atualizar pontuação (enviado)
-        await updateDevocionalScore(contact.id, 'sent');
-
-        // Registrar no dispatch_contacts
-        await pool.query(
-          `INSERT INTO dispatch_contacts (
-            dispatch_id, instance_id, contact_number, contact_name,
-            message_sent_id, status, sent_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)`,
-          [
-            dispatchId,
-            instance.id,
-            contact.phone_number,
-            contact.name,
-            messageResult.rows[0].id,
-            'sent',
-          ]
-        );
-
-        successCount++;
-        console.log(`   ✅ Enviado para ${contact.phone_number} (${successCount}/${eligibleContacts.length})`);
-
-        // Atualizar última mensagem enviada da instância
-        await pool.query(
-          `UPDATE instances
-           SET last_message_sent_at = CURRENT_TIMESTAMP,
-               last_activity_at = CURRENT_TIMESTAMP
-           WHERE id = $1`,
-          [instance.id]
-        );
 
       } catch (error: any) {
         const isInstanceError =

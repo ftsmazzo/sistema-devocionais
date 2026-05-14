@@ -1,6 +1,7 @@
 import { pool } from '../database';
 import axios from 'axios';
 import { applyBlindage } from './blindage';
+import { withGlobalOutboundGate } from './globalOutboundGate';
 import { personalizeDevocionalMessage, formatDevocionalMessage } from './devocionalPersonalization';
 import { addLog } from '../routes/logs';
 
@@ -152,102 +153,102 @@ export async function processRetryQueue(): Promise<void> {
           }
         }
 
-        // Aplicar blindagem
-        const blindageResult = await applyBlindage({
-          to: item.contact_number,
-          message,
-          instanceId: selectedInstance.id,
-          messageType: item.dispatch_type,
-        });
+        let skipLead = false;
+        await withGlobalOutboundGate(async () => {
+          const blindageResult = await applyBlindage({
+            to: item.contact_number,
+            message,
+            instanceId: selectedInstance.id,
+            messageType: item.dispatch_type,
+          });
 
-        if (!blindageResult.canSend) {
-          // Blindagem bloqueou (não é erro de instância), marcar como failed definitivo
+          if (!blindageResult.canSend) {
+            await pool.query(
+              `UPDATE dispatch_contacts 
+               SET status = 'failed', 
+                   failed_reason = $1,
+                   retry_count = retry_count + 1,
+                   last_retry_at = CURRENT_TIMESTAMP
+               WHERE id = $2`,
+              [`Blindagem (retry): ${blindageResult.reason}`, item.id]
+            );
+            skipLead = true;
+            return;
+          }
+
+          if (blindageResult.delay && blindageResult.delay > 0) {
+            await new Promise((resolve) => setTimeout(resolve, blindageResult.delay));
+          }
+
+          await pool.query(
+            `UPDATE instances SET last_message_sent_at = CURRENT_TIMESTAMP WHERE id = $1`,
+            [selectedInstance.id]
+          );
+
+          const sendUrl = `${selectedInstance.api_url}/message/sendText/${selectedInstance.instance_name}`;
+          const sendResponse = await axios.post(
+            sendUrl,
+            { number: item.contact_number, text: message },
+            {
+              headers: { apikey: selectedInstance.api_key, 'Content-Type': 'application/json' },
+              timeout: 15000,
+            }
+          );
+
+          const msgResult = await pool.query(
+            `INSERT INTO messages (
+              instance_id, message_id, remote_jid, from_me,
+              message_type, message_body, timestamp, status,
+              dispatch_id, dispatch_type
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            RETURNING id`,
+            [
+              selectedInstance.id,
+              sendResponse.data?.key?.id || `retry-${Date.now()}`,
+              `${item.contact_number}@s.whatsapp.net`,
+              true,
+              'text',
+              message,
+              new Date(),
+              'sent',
+              item.dispatch_id,
+              item.dispatch_type,
+            ]
+          );
+
           await pool.query(
             `UPDATE dispatch_contacts 
-             SET status = 'failed', 
-                 failed_reason = $1,
+             SET status = 'sent',
+                 sent_at = CURRENT_TIMESTAMP,
+                 message_sent_id = $1,
+                 retry_instance_id = $2,
                  retry_count = retry_count + 1,
                  last_retry_at = CURRENT_TIMESTAMP
-             WHERE id = $2`,
-            [`Blindagem (retry): ${blindageResult.reason}`, item.id]
+             WHERE id = $3`,
+            [msgResult.rows[0].id, selectedInstance.id, item.id]
           );
+
+          await pool.query(
+            `UPDATE instances SET last_message_sent_at = CURRENT_TIMESTAMP, last_activity_at = CURRENT_TIMESTAMP WHERE id = $1`,
+            [selectedInstance.id]
+          );
+
+          await pool.query(
+            `UPDATE dispatches 
+             SET contacts_success = contacts_success + 1,
+                 contacts_failed = GREATEST(0, contacts_failed - 1)
+             WHERE id = $1`,
+            [item.dispatch_id]
+          );
+
+          addLog('success', `[RetryQueue] ✅ Retry bem-sucedido: ${item.contact_number} via instância ${selectedInstance.id}`);
+          console.log(`   ✅ Retry enviado: ${item.contact_number} via instância ${selectedInstance.instance_name}`);
+        });
+
+        if (skipLead) {
           continue;
         }
 
-        // Aplicar delay
-        if (blindageResult.delay && blindageResult.delay > 0) {
-          await new Promise((resolve) => setTimeout(resolve, blindageResult.delay));
-        }
-
-        // Atualizar last_message_sent_at antes de enviar
-        await pool.query(
-          `UPDATE instances SET last_message_sent_at = CURRENT_TIMESTAMP WHERE id = $1`,
-          [selectedInstance.id]
-        );
-
-        // Enviar mensagem
-        const sendUrl = `${selectedInstance.api_url}/message/sendText/${selectedInstance.instance_name}`;
-        const sendResponse = await axios.post(
-          sendUrl,
-          { number: item.contact_number, text: message },
-          {
-            headers: { apikey: selectedInstance.api_key, 'Content-Type': 'application/json' },
-            timeout: 15000,
-          }
-        );
-
-        // Registrar mensagem enviada
-        const msgResult = await pool.query(
-          `INSERT INTO messages (
-            instance_id, message_id, remote_jid, from_me,
-            message_type, message_body, timestamp, status,
-            dispatch_id, dispatch_type
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-          RETURNING id`,
-          [
-            selectedInstance.id,
-            sendResponse.data?.key?.id || `retry-${Date.now()}`,
-            `${item.contact_number}@s.whatsapp.net`,
-            true,
-            'text',
-            message,
-            new Date(),
-            'sent',
-            item.dispatch_id,
-            item.dispatch_type,
-          ]
-        );
-
-        // Atualizar dispatch_contact como enviado
-        await pool.query(
-          `UPDATE dispatch_contacts 
-           SET status = 'sent',
-               sent_at = CURRENT_TIMESTAMP,
-               message_sent_id = $1,
-               retry_instance_id = $2,
-               retry_count = retry_count + 1,
-               last_retry_at = CURRENT_TIMESTAMP
-           WHERE id = $3`,
-          [msgResult.rows[0].id, selectedInstance.id, item.id]
-        );
-
-        // Atualizar instância
-        await pool.query(
-          `UPDATE instances SET last_message_sent_at = CURRENT_TIMESTAMP, last_activity_at = CURRENT_TIMESTAMP WHERE id = $1`,
-          [selectedInstance.id]
-        );
-
-        // Atualizar contador de sucesso do disparo
-        await pool.query(
-          `UPDATE dispatches 
-           SET contacts_success = contacts_success + 1,
-               contacts_failed = GREATEST(0, contacts_failed - 1)
-           WHERE id = $1`,
-          [item.dispatch_id]
-        );
-
-        addLog('success', `[RetryQueue] ✅ Retry bem-sucedido: ${item.contact_number} via instância ${selectedInstance.id}`);
-        console.log(`   ✅ Retry enviado: ${item.contact_number} via instância ${selectedInstance.instance_name}`);
       } catch (error: any) {
         console.error(`   ❌ Retry falhou para ${item.contact_number}:`, error.message);
 
