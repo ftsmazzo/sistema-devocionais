@@ -271,7 +271,8 @@ router.post('/devocional', async (req: AuthRequest, res) => {
         userId,
         JSON.stringify({
           devocional_title: devocional.title,
-          devocional_date: devocional.date
+          devocional_date: devocional.date,
+          devocional_trigger: 'manual',
         })
       ]
     );
@@ -373,6 +374,268 @@ router.post('/marketing', async (req: AuthRequest, res) => {
     res.status(500).json({ 
       error: 'Erro ao criar disparo',
       message: error.message 
+    });
+  }
+});
+
+/**
+ * Atualizar disparo pendente (ajustar texto/lista antes de iniciar)
+ * PUT /api/dispatches/:id
+ */
+router.put('/:id', async (req: AuthRequest, res) => {
+  try {
+    const { id } = req.params;
+    const dispatchId = parseInt(id, 10);
+    if (Number.isNaN(dispatchId)) {
+      return res.status(400).json({ error: 'ID inválido' });
+    }
+
+    const existing = await pool.query(`SELECT * FROM dispatches WHERE id = $1`, [dispatchId]);
+    if (existing.rows.length === 0) {
+      return res.status(404).json({ error: 'Disparo não encontrado' });
+    }
+
+    const d = existing.rows[0];
+    if (d.status !== 'pending') {
+      return res.status(400).json({ error: 'Só é possível editar disparos com status pendente' });
+    }
+
+    const userId = req.user?.id;
+
+    if (d.dispatch_type === 'marketing') {
+      const { name, message_template, list_id, instance_ids, media_url, media_type } = req.body;
+
+      const nextName = name !== undefined && name !== null ? String(name).trim() : d.name;
+      const nextMsg =
+        message_template !== undefined && message_template !== null
+          ? String(message_template)
+          : d.message_template;
+      const nextListId =
+        list_id !== undefined && list_id !== null && list_id !== ''
+          ? parseInt(String(list_id), 10)
+          : d.list_id;
+      const nextInstances =
+        instance_ids !== undefined && Array.isArray(instance_ids) ? instance_ids : d.instance_ids || [];
+
+      if (!nextName || !nextMsg) {
+        return res.status(400).json({ error: 'Nome e mensagem são obrigatórios' });
+      }
+
+      let totalContacts = d.total_contacts || 0;
+      if (nextListId) {
+        const lr = await pool.query(`SELECT total_contacts FROM contact_lists WHERE id = $1`, [nextListId]);
+        if (lr.rows.length === 0) {
+          return res.status(404).json({ error: 'Lista não encontrada' });
+        }
+        totalContacts = lr.rows[0].total_contacts || 0;
+      }
+
+      const meta =
+        typeof d.metadata === 'string'
+          ? JSON.parse(d.metadata || '{}')
+          : { ...(d.metadata || {}) };
+      if (media_url !== undefined) {
+        if (media_url === null || media_url === '') {
+          delete meta.media_url;
+          delete meta.media_type;
+        } else {
+          meta.media_url = media_url;
+        }
+      }
+      if (media_type !== undefined) {
+        if (media_type === null || media_type === '') {
+          delete meta.media_type;
+        } else {
+          meta.media_type = media_type;
+        }
+      }
+
+      const upd = await pool.query(
+        `UPDATE dispatches SET
+          name = $1,
+          message_template = $2,
+          list_id = $3,
+          instance_ids = $4,
+          metadata = $5::jsonb,
+          total_contacts = $6,
+          updated_at = CURRENT_TIMESTAMP,
+          created_by = COALESCE(created_by, $7)
+        WHERE id = $8 AND status = 'pending'
+        RETURNING *`,
+        [nextName, nextMsg, nextListId || null, nextInstances, JSON.stringify(meta), totalContacts, userId, dispatchId]
+      );
+
+      if (upd.rows.length === 0) {
+        return res.status(400).json({ error: 'Não foi possível atualizar (disparo não está mais pendente)' });
+      }
+
+      return res.json({ success: true, dispatch: upd.rows[0] });
+    }
+
+    if (d.dispatch_type === 'devocional') {
+      const { name, list_id, instance_ids, devocional_id } = req.body;
+
+      const nextName = name !== undefined && name !== null ? String(name).trim() : d.name;
+      const nextListId =
+        list_id !== undefined && list_id !== null && list_id !== ''
+          ? parseInt(String(list_id), 10)
+          : d.list_id;
+      const nextInstances =
+        instance_ids !== undefined && Array.isArray(instance_ids) ? instance_ids : d.instance_ids || [];
+
+      let devId =
+        devocional_id !== undefined && devocional_id !== null && devocional_id !== ''
+          ? parseInt(String(devocional_id), 10)
+          : d.devocional_id;
+
+      if (!nextName || !nextListId || !devId) {
+        return res.status(400).json({ error: 'Nome, lista e devocional são obrigatórios' });
+      }
+
+      const listCheck = await pool.query(`SELECT id, total_contacts FROM contact_lists WHERE id = $1`, [nextListId]);
+      if (listCheck.rows.length === 0) {
+        return res.status(404).json({ error: 'Lista não encontrada' });
+      }
+
+      const devRes = await pool.query(`SELECT id, text, title, date FROM devocionais WHERE id = $1`, [devId]);
+      if (devRes.rows.length === 0) {
+        return res.status(404).json({ error: 'Devocional não encontrado' });
+      }
+      const dev = devRes.rows[0];
+
+      const meta = {
+        ...(typeof d.metadata === 'string' ? JSON.parse(d.metadata || '{}') : d.metadata || {}),
+        devocional_title: dev.title,
+        devocional_date: dev.date,
+        devocional_trigger: 'manual',
+      };
+
+      const upd = await pool.query(
+        `UPDATE dispatches SET
+          name = $1,
+          list_id = $2,
+          instance_ids = $3,
+          devocional_id = $4,
+          message_template = $5,
+          metadata = $6::jsonb,
+          total_contacts = $7,
+          updated_at = CURRENT_TIMESTAMP,
+          created_by = COALESCE(created_by, $8)
+        WHERE id = $9 AND status = 'pending'
+        RETURNING *`,
+        [
+          nextName,
+          nextListId,
+          nextInstances,
+          devId,
+          dev.text,
+          JSON.stringify(meta),
+          listCheck.rows[0].total_contacts || 0,
+          userId,
+          dispatchId,
+        ]
+      );
+
+      if (upd.rows.length === 0) {
+        return res.status(400).json({ error: 'Não foi possível atualizar (disparo não está mais pendente)' });
+      }
+
+      return res.json({ success: true, dispatch: upd.rows[0] });
+    }
+
+    return res.status(400).json({ error: 'Tipo de disparo não suportado para edição' });
+  } catch (error: any) {
+    console.error('❌ Erro ao atualizar disparo:', error);
+    res.status(500).json({
+      error: 'Erro ao atualizar disparo',
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * Duplicar disparo (novo pendente) para reaproveitar lista/texto com outro nome
+ * POST /api/dispatches/:id/clone
+ */
+router.post('/:id/clone', async (req: AuthRequest, res) => {
+  try {
+    const { id } = req.params;
+    const sourceId = parseInt(id, 10);
+    if (Number.isNaN(sourceId)) {
+      return res.status(400).json({ error: 'ID inválido' });
+    }
+
+    const { name } = req.body;
+    if (!name || !String(name).trim()) {
+      return res.status(400).json({ error: 'Informe o nome do novo disparo' });
+    }
+
+    const srcRes = await pool.query(`SELECT * FROM dispatches WHERE id = $1`, [sourceId]);
+    if (srcRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Disparo não encontrado' });
+    }
+
+    const d = srcRes.rows[0];
+    if (d.status === 'running') {
+      return res.status(400).json({ error: 'Não é possível duplicar um disparo em execução' });
+    }
+
+    const userId = req.user?.id;
+
+    let totalContacts = d.total_contacts || 0;
+    if (d.list_id) {
+      const lr = await pool.query(`SELECT total_contacts FROM contact_lists WHERE id = $1`, [d.list_id]);
+      if (lr.rows.length > 0) {
+        totalContacts = lr.rows[0].total_contacts || 0;
+      }
+    }
+
+    const prevMeta =
+      typeof d.metadata === 'string' ? JSON.parse(d.metadata || '{}') : { ...(d.metadata || {}) };
+    const nextMeta =
+      d.dispatch_type === 'devocional'
+        ? { ...prevMeta, devocional_trigger: 'manual' }
+        : { ...prevMeta };
+
+    const blindage =
+      d.blindage_config == null
+        ? '{}'
+        : typeof d.blindage_config === 'string'
+          ? d.blindage_config
+          : JSON.stringify(d.blindage_config);
+
+    const ins = await pool.query(
+      `INSERT INTO dispatches (
+        name, message_template, dispatch_type, list_id, contact_ids,
+        devocional_id, instance_ids, total_contacts, status, created_by,
+        blindage_config, metadata
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending', $9, $10::jsonb, $11::jsonb)
+      RETURNING *`,
+      [
+        String(name).trim(),
+        d.message_template,
+        d.dispatch_type,
+        d.list_id,
+        d.contact_ids,
+        d.devocional_id,
+        d.instance_ids || [],
+        totalContacts,
+        userId,
+        blindage,
+        JSON.stringify(nextMeta),
+      ]
+    );
+
+    res.json({
+      success: true,
+      dispatch: ins.rows[0],
+      message: 'Novo disparo criado como pendente. Revise e clique em Iniciar.',
+    });
+  } catch (error: any) {
+    console.error('❌ Erro ao duplicar disparo:', error);
+    res.status(500).json({
+      error: 'Erro ao duplicar disparo',
+      message: error.message,
     });
   }
 });

@@ -15,19 +15,26 @@ import {
   AlertCircle,
   Users,
   ExternalLink,
+  Pencil,
+  Copy,
+  CalendarClock,
 } from 'lucide-react';
 
 interface Dispatch {
   id: number;
   name: string;
+  message_template?: string;
   dispatch_type: 'devocional' | 'marketing' | 'individual';
   status: 'pending' | 'running' | 'completed' | 'stopped' | 'failed';
   total_contacts: number;
   contacts_processed: number;
   contacts_success: number;
   contacts_failed: number;
+  list_id?: number;
   list_name?: string;
   list_type?: string;
+  devocional_id?: number;
+  metadata?: Record<string, unknown> | string | null;
   started_at?: string;
   completed_at?: string;
   created_at: string;
@@ -40,6 +47,55 @@ interface FormData {
   instance_ids: number[];
   media_url?: string;
   media_type?: 'image' | 'video' | 'audio' | 'pdf' | 'document';
+}
+
+function parseDispatchMetadata(d: Dispatch): Record<string, unknown> {
+  const m = d.metadata;
+  if (!m) return {};
+  if (typeof m === 'string') {
+    try {
+      return JSON.parse(m) as Record<string, unknown>;
+    } catch {
+      return {};
+    }
+  }
+  return m as Record<string, unknown>;
+}
+
+function isScheduledDevocional(dispatch: Dispatch): boolean {
+  if (dispatch.dispatch_type !== 'devocional') return false;
+  const meta = parseDispatchMetadata(dispatch);
+  const t = meta.devocional_trigger;
+  if (t === 'scheduled') return true;
+  if (t === 'manual') return false;
+  const n = (dispatch.name || '').trim();
+  return /^Devocional\s+\d{1,2}\/\d{1,2}\/\d{4}$/i.test(n);
+}
+
+function dispatchKind(dispatch: Dispatch): {
+  label: string;
+  sub: string;
+  icon: 'marketing' | 'dev-auto' | 'dev-manual';
+} {
+  if (dispatch.dispatch_type === 'marketing') {
+    return {
+      label: 'Mensagem personalizada',
+      sub: 'Texto e mídia definidos por você',
+      icon: 'marketing',
+    };
+  }
+  if (isScheduledDevocional(dispatch)) {
+    return {
+      label: 'Devocional automático',
+      sub: 'Agendamento diário (Config. Devocional)',
+      icon: 'dev-auto',
+    };
+  }
+  return {
+    label: 'Devocional manual',
+    sub: 'Teste ou envio avulso criado nesta tela',
+    icon: 'dev-manual',
+  };
 }
 
 export default function Dispatches() {
@@ -66,6 +122,21 @@ export default function Dispatches() {
   const [detailContacts, setDetailContacts] = useState<any[]>([]);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [loadingUpload, setLoadingUpload] = useState(false);
+  const [editModal, setEditModal] = useState<Dispatch | null>(null);
+  const [editForm, setEditForm] = useState<FormData>({
+    name: '',
+    list_id: '',
+    message_template: '',
+    instance_ids: [],
+    media_url: '',
+    media_type: undefined,
+  });
+  const [editDevocionalId, setEditDevocionalId] = useState('');
+  const [editSaving, setEditSaving] = useState(false);
+  const [devOptions, setDevOptions] = useState<Array<{ id: number; title: string; date: string }>>([]);
+  const [cloneModal, setCloneModal] = useState<Dispatch | null>(null);
+  const [cloneNameInput, setCloneNameInput] = useState('');
+  const [cloneLoading, setCloneLoading] = useState(false);
 
   useEffect(() => {
     if (toast) {
@@ -225,6 +296,94 @@ export default function Dispatches() {
     }
   };
 
+  const openEditPending = async (d: Dispatch) => {
+    const meta = parseDispatchMetadata(d);
+    setEditModal(d);
+    setEditForm({
+      name: d.name,
+      list_id: d.list_id != null ? String(d.list_id) : '',
+      message_template: d.message_template || '',
+      instance_ids: [],
+      media_url: (meta.media_url as string) || '',
+      media_type: (meta.media_type as FormData['media_type']) || undefined,
+    });
+    setEditDevocionalId(d.devocional_id != null ? String(d.devocional_id) : '');
+    setDevOptions([]);
+    if (d.dispatch_type === 'devocional') {
+      try {
+        const r = await api.get('/devocional', { params: { limit: 30, offset: 0 } });
+        const rows = (r.data.devocionais || []).map((x: { id: number; title: string; date: string }) => ({
+          id: x.id,
+          title: x.title,
+          date: x.date,
+        }));
+        setDevOptions(rows);
+      } catch {
+        setDevOptions([]);
+      }
+    }
+  };
+
+  const handleSaveEditPending = async () => {
+    if (!editModal) return;
+    setEditSaving(true);
+    try {
+      if (editModal.dispatch_type === 'marketing') {
+        if (!editForm.name?.trim() || !editForm.message_template?.trim() || !editForm.list_id) {
+          setToast({ message: 'Preencha nome, lista e mensagem', type: 'error' });
+          setEditSaving(false);
+          return;
+        }
+        await api.put(`/dispatches/${editModal.id}`, {
+          name: editForm.name.trim(),
+          message_template: editForm.message_template,
+          list_id: parseInt(editForm.list_id, 10),
+          media_url: editForm.media_url || null,
+          media_type: editForm.media_type || null,
+        });
+      } else {
+        if (!editForm.name?.trim() || !editForm.list_id || !editDevocionalId) {
+          setToast({ message: 'Preencha nome, lista e devocional', type: 'error' });
+          setEditSaving(false);
+          return;
+        }
+        await api.put(`/dispatches/${editModal.id}`, {
+          name: editForm.name.trim(),
+          list_id: parseInt(editForm.list_id, 10),
+          devocional_id: parseInt(editDevocionalId, 10),
+        });
+      }
+      setToast({ message: 'Disparo atualizado. Revise e clique em Iniciar.', type: 'success' });
+      setEditModal(null);
+      await loadDispatches();
+    } catch (error: any) {
+      setToast({ message: error.response?.data?.error || 'Erro ao salvar alterações', type: 'error' });
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
+  const openCloneModal = (d: Dispatch) => {
+    setCloneModal(d);
+    setCloneNameInput(`${d.name} (cópia)`);
+  };
+
+  const handleCloneDispatch = async () => {
+    if (!cloneModal || !cloneNameInput.trim()) return;
+    setCloneLoading(true);
+    try {
+      await api.post(`/dispatches/${cloneModal.id}/clone`, { name: cloneNameInput.trim() });
+      setToast({ message: 'Novo disparo pendente criado. Você pode editar antes de iniciar.', type: 'success' });
+      setCloneModal(null);
+      setCloneNameInput('');
+      await loadDispatches();
+    } catch (error: any) {
+      setToast({ message: error.response?.data?.error || 'Erro ao duplicar disparo', type: 'error' });
+    } finally {
+      setCloneLoading(false);
+    }
+  };
+
   const getStatusBadge = (status: string) => {
     switch (status) {
       case 'running': return <span className="badge badge-sky animate-pulse">Processando</span>;
@@ -296,8 +455,8 @@ export default function Dispatches() {
       }}>
         <Info size={20} color="#38bdf8" style={{ marginTop: 2, flexShrink: 0 }} />
         <p style={{ margin: 0, fontSize: '0.85rem', color: '#7dd3fc', lineHeight: 1.5 }}>
-          <strong>Nota sobre Devocionais:</strong> O envio diário é <strong>automático</strong> e configurado em <em>"Config. Devocional"</em>.
-          Esta tela serve para disparos manuais de teste ou mensagens personalizadas.
+          <strong>Nota:</strong> o devocional <strong>automático do dia</strong> é disparado pelo agendamento em <em>Config. Devocional</em> e aparece aqui como &quot;Devocional automático&quot;.
+          Use esta página para <strong>mensagens personalizadas</strong> ou <strong>testes manuais</strong> de devocional; antes de iniciar você pode <strong>Editar</strong> o pendente; depois de concluído use <strong>Duplicar</strong> para reaproveitar com outro nome.
         </p>
       </div>
 
@@ -310,25 +469,51 @@ export default function Dispatches() {
         </div>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 16 }}>
-          {dispatches.map(dispatch => (
+          {dispatches.map((dispatch) => {
+            const kind = dispatchKind(dispatch);
+            let iconBg = 'rgba(56, 189, 248, 0.1)';
+            let iconFg = '#0ea5e9';
+            if (kind.icon === 'dev-auto') {
+              iconBg = 'rgba(245, 158, 11, 0.14)';
+              iconFg = '#fbbf24';
+            } else if (kind.icon === 'dev-manual') {
+              iconBg = 'rgba(16, 185, 129, 0.1)';
+              iconFg = '#10b981';
+            }
+
+            const canEditPending = dispatch.status === 'pending';
+            const canClone =
+              dispatch.status !== 'running' &&
+              dispatch.status !== 'pending';
+
+            return (
             <div key={dispatch.id} className="glass-card hover-glow" style={{ padding: '24px 32px' }}>
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
                 <div style={{ flex: 1 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
                     <div style={{
-                      width: 40, height: 40, borderRadius: 10, background: dispatch.dispatch_type === 'devocional' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(56, 189, 248, 0.1)',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center', color: dispatch.dispatch_type === 'devocional' ? '#10b981' : '#0ea5e9'
+                      width: 40, height: 40, borderRadius: 10, background: iconBg,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', color: iconFg,
                     }}>
-                      {dispatch.dispatch_type === 'devocional' ? <BookOpen size={20} /> : <MessageCircle size={20} />}
+                      {kind.icon === 'marketing' && <MessageCircle size={20} />}
+                      {kind.icon === 'dev-auto' && <CalendarClock size={20} />}
+                      {kind.icon === 'dev-manual' && <BookOpen size={20} />}
                     </div>
                     <div>
                       <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 700, color: 'var(--text-primary)' }}>{dispatch.name}</h3>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 2 }}>
-                        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                          {dispatch.dispatch_type === 'marketing' ? 'Mensagem Personalizada' : 'Devocional Manual'}
+                      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginTop: 6 }}>
+                        <span style={{
+                          fontSize: '0.68rem', fontWeight: 800, letterSpacing: '0.08em', textTransform: 'uppercase',
+                          padding: '4px 10px', borderRadius: 8,
+                          background: kind.icon === 'dev-auto' ? 'rgba(245, 158, 11, 0.15)' : kind.icon === 'dev-manual' ? 'rgba(16, 185, 129, 0.12)' : 'rgba(56, 189, 248, 0.12)',
+                          color: kind.icon === 'dev-auto' ? '#fbbf24' : kind.icon === 'dev-manual' ? '#34d399' : '#7dd3fc',
+                          border: `1px solid ${kind.icon === 'dev-auto' ? 'rgba(245,158,11,0.35)' : kind.icon === 'dev-manual' ? 'rgba(16,185,129,0.25)' : 'rgba(56,189,248,0.25)'}`,
+                        }}>
+                          {kind.label}
                         </span>
+                        <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>{kind.sub}</span>
                         <span style={{ color: 'var(--border)' }}>•</span>
-                        <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{dispatch.list_name || 'Individual'}</span>
+                        <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{dispatch.list_name || 'Sem lista'}</span>
                       </div>
                     </div>
                   </div>
@@ -347,9 +532,22 @@ export default function Dispatches() {
                   </div>
                 </div>
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'flex-end', gap: 10 }}>
+                  {canEditPending && (
+                    <button
+                      type="button"
+                      onClick={() => openEditPending(dispatch)}
+                      className="btn-outline"
+                      style={{ padding: '8px 14px', borderRadius: 10, display: 'flex', alignItems: 'center', gap: 8 }}
+                      title="Ajustar nome, lista ou texto antes de iniciar"
+                    >
+                      <Pencil size={16} />
+                      Editar
+                    </button>
+                  )}
                   {dispatch.status === 'pending' && (
                     <button
+                      type="button"
                       onClick={() => handleStart(dispatch.id)}
                       className="btn-outline"
                       style={{ color: '#34d399', borderColor: 'rgba(52, 211, 153, 0.2)', padding: '8px 16px', borderRadius: 10, display: 'flex', alignItems: 'center', gap: 8 }}
@@ -360,6 +558,7 @@ export default function Dispatches() {
                   )}
                   {dispatch.status === 'running' && (
                     <button
+                      type="button"
                       onClick={() => handleStop(dispatch.id)}
                       className="btn-outline"
                       style={{ color: '#fb7185', borderColor: 'rgba(251, 113, 133, 0.2)', padding: '8px 16px', borderRadius: 10, display: 'flex', alignItems: 'center', gap: 8 }}
@@ -367,18 +566,31 @@ export default function Dispatches() {
                       <Square size={16} fill="currentColor" /> Parar
                     </button>
                   )}
-                  <button onClick={() => openDetail(dispatch)} className="btn-outline" style={{ padding: '10px', borderRadius: 10 }} title="Ver Detalhes">
+                  {canClone && (
+                    <button
+                      type="button"
+                      onClick={() => openCloneModal(dispatch)}
+                      className="btn-outline"
+                      style={{ padding: '8px 14px', borderRadius: 10, display: 'flex', alignItems: 'center', gap: 8 }}
+                      title="Criar novo disparo pendente com os mesmos dados"
+                    >
+                      <Copy size={16} />
+                      Duplicar
+                    </button>
+                  )}
+                  <button type="button" onClick={() => openDetail(dispatch)} className="btn-outline" style={{ padding: '10px', borderRadius: 10 }} title="Ver detalhes">
                     <ExternalLink size={18} />
                   </button>
                   {dispatch.status !== 'running' && (
-                    <button onClick={() => handleDelete(dispatch.id)} style={{ padding: '10px', borderRadius: 10, background: 'rgba(244, 63, 94, 0.05)', color: '#fb7185', border: '1px solid rgba(244, 63, 94, 0.1)', cursor: 'pointer' }}>
+                    <button type="button" onClick={() => handleDelete(dispatch.id)} style={{ padding: '10px', borderRadius: 10, background: 'rgba(244, 63, 94, 0.05)', color: '#fb7185', border: '1px solid rgba(244, 63, 94, 0.1)', cursor: 'pointer' }}>
                       <Trash2 size={18} />
                     </button>
                   )}
                 </div>
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -388,6 +600,165 @@ export default function Dispatches() {
           <button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0} className="btn-outline" style={{ padding: '10px 20px', borderRadius: 12, opacity: page === 0 ? 0.5 : 1 }}>Anterior</button>
           <span style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Página {page + 1} de {Math.ceil(totalDispatches / limit)}</span>
           <button onClick={() => setPage(p => p + 1)} disabled={(page + 1) * limit >= totalDispatches} className="btn-outline" style={{ padding: '10px 20px', borderRadius: 12, opacity: (page + 1) * limit >= totalDispatches ? 0.5 : 1 }}>Próxima</button>
+        </div>
+      )}
+
+      {/* Modal: editar disparo pendente */}
+      {editModal && (
+        <div className="modal-overlay">
+          <div className="glass-card modal-overlay-panel" style={{ width: '100%', maxWidth: 640, padding: 0, overflow: 'hidden' }}>
+            <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <h2 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 800, color: 'var(--text-primary)', fontFamily: 'Outfit' }}>
+                Ajustar antes de enviar
+              </h2>
+              <button type="button" onClick={() => setEditModal(null)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}>
+                <X size={24} />
+              </button>
+            </div>
+            <div style={{ padding: 24, maxHeight: 'min(72vh, 640px)', overflowY: 'auto' }}>
+              {editModal.dispatch_type === 'marketing' ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+                  <div>
+                    <label className="label-premium">Nome</label>
+                    <input className="input-dark" value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} />
+                  </div>
+                  <div>
+                    <label className="label-premium">Lista</label>
+                    <select
+                      className="input-dark"
+                      value={editForm.list_id}
+                      onChange={(e) => setEditForm({ ...editForm, list_id: e.target.value })}
+                    >
+                      <option value="">Selecione...</option>
+                      {lists.map((list) => (
+                        <option key={list.id} value={list.id}>
+                          {list.name} ({list.total_contacts})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="label-premium">Mensagem</label>
+                    <textarea
+                      className="input-dark"
+                      style={{ minHeight: 140, resize: 'vertical' }}
+                      value={editForm.message_template}
+                      onChange={(e) => setEditForm({ ...editForm, message_template: e.target.value })}
+                    />
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="label-premium">Tipo de anexo</label>
+                      <select
+                        className="input-dark"
+                        value={editForm.media_type || ''}
+                        onChange={(e) =>
+                          setEditForm({ ...editForm, media_type: (e.target.value || undefined) as FormData['media_type'] })
+                        }
+                      >
+                        <option value="">Apenas texto</option>
+                        <option value="image">Imagem</option>
+                        <option value="video">Vídeo</option>
+                        <option value="audio">Áudio</option>
+                        <option value="pdf">PDF</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="label-premium">URL da mídia</label>
+                      <input
+                        className="input-dark"
+                        value={editForm.media_url || ''}
+                        onChange={(e) => setEditForm({ ...editForm, media_url: e.target.value })}
+                        placeholder="https://..."
+                      />
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+                  <div>
+                    <label className="label-premium">Nome</label>
+                    <input className="input-dark" value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} />
+                  </div>
+                  <div>
+                    <label className="label-premium">Lista</label>
+                    <select
+                      className="input-dark"
+                      value={editForm.list_id}
+                      onChange={(e) => setEditForm({ ...editForm, list_id: e.target.value })}
+                    >
+                      <option value="">Selecione...</option>
+                      {lists.map((list) => (
+                        <option key={list.id} value={list.id}>
+                          {list.name} ({list.total_contacts})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="label-premium">Conteúdo (devocional)</label>
+                    <select
+                      className="input-dark"
+                      value={editDevocionalId}
+                      onChange={(e) => setEditDevocionalId(e.target.value)}
+                    >
+                      <option value="">Selecione o devocional...</option>
+                      {devOptions.map((d) => (
+                        <option key={d.id} value={d.id}>
+                          {d.date} — {d.title}
+                        </option>
+                      ))}
+                    </select>
+                    <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: 8 }}>
+                      O texto enviado será o deste registro; a personalização por contato ocorre no envio.
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+            <div style={{ padding: '16px 24px', borderTop: '1px solid var(--border)', display: 'flex', gap: 12 }}>
+              <button type="button" className="btn-outline" style={{ flex: 1, padding: '12px 0', borderRadius: 12 }} onClick={() => setEditModal(null)}>
+                Cancelar
+              </button>
+              <button
+                type="button"
+                className="btn-gold"
+                style={{ flex: 1, padding: '12px 0', borderRadius: 12, border: 'none', opacity: editSaving ? 0.7 : 1 }}
+                disabled={editSaving}
+                onClick={() => handleSaveEditPending()}
+              >
+                {editSaving ? 'Salvando…' : 'Salvar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: duplicar disparo */}
+      {cloneModal && (
+        <div className="modal-overlay">
+          <div className="glass-card modal-overlay-panel" style={{ width: '100%', maxWidth: 440, padding: 24 }}>
+            <h3 style={{ margin: '0 0 8px', fontSize: '1.1rem', fontWeight: 800, color: 'var(--text-primary)', fontFamily: 'Outfit' }}>Duplicar como novo disparo</h3>
+            <p style={{ margin: '0 0 16px', fontSize: '0.82rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+              Será criado um disparo <strong>pendente</strong> com a mesma mensagem, lista e configurações. Depois você pode editar e iniciar quando quiser.
+            </p>
+            <label className="label-premium">Nome do novo disparo</label>
+            <input className="input-dark" value={cloneNameInput} onChange={(e) => setCloneNameInput(e.target.value)} style={{ marginBottom: 20 }} />
+            <div style={{ display: 'flex', gap: 12 }}>
+              <button type="button" className="btn-outline" style={{ flex: 1, padding: '12px 0', borderRadius: 12 }} onClick={() => { setCloneModal(null); setCloneNameInput(''); }}>
+                Cancelar
+              </button>
+              <button
+                type="button"
+                className="btn-gold"
+                style={{ flex: 1, padding: '12px 0', borderRadius: 12, border: 'none', opacity: cloneLoading ? 0.7 : 1 }}
+                disabled={cloneLoading || !cloneNameInput.trim()}
+                onClick={() => handleCloneDispatch()}
+              >
+                {cloneLoading ? 'Criando…' : 'Criar cópia'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -536,9 +907,12 @@ export default function Dispatches() {
                   onClick={handleCreate} disabled={creatingDispatch}
                   className="btn-gold" style={{ flex: 1, padding: '14px 0', borderRadius: 12, border: 'none' }}
                 >
-                  {creatingDispatch ? 'Criando...' : 'Criar Disparo AGORA'}
+                  {creatingDispatch ? 'Salvando...' : 'Salvar como pendente'}
                 </button>
               </div>
+              <p style={{ marginTop: 16, fontSize: '0.75rem', color: 'var(--text-muted)', textAlign: 'center' }}>
+                O disparo fica pendente até você clicar em <strong>Iniciar</strong> na lista. Use <strong>Editar</strong> para ajustar texto ou lista antes do envio.
+              </p>
             </div>
           </div>
         </div>

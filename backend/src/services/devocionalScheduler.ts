@@ -335,8 +335,8 @@ export async function executeDevocionalDispatch(): Promise<void> {
     const dispatchResult = await pool.query(
       `INSERT INTO dispatches (
         name, message_template, dispatch_type, list_id,
-        devocional_id, total_contacts, status, started_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP)
+        devocional_id, total_contacts, status, started_at, metadata
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP, $8::jsonb)
       RETURNING id`,
       [
         `Devocional ${new Date().toLocaleDateString('pt-BR', { timeZone: timezone })}`,
@@ -345,7 +345,12 @@ export async function executeDevocionalDispatch(): Promise<void> {
         config.list_id,
         devocionalId,
         eligibleContacts.length,
-        'running'
+        'running',
+        JSON.stringify({
+          devocional_trigger: 'scheduled',
+          devocional_title: devocional.title,
+          devocional_date: devocional.date,
+        }),
       ]
     );
 
