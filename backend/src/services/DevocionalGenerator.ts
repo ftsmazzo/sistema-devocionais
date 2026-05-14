@@ -41,6 +41,14 @@ export class DevocionalGenerator {
 
       const gemini = new GeminiService(apiKey, config.model_name);
 
+      // --- Formatar a data corretamente antes de enviar para a IA ---
+      const [year, month, day] = date.split('-').map(Number);
+      const dateObj = new Date(year, month - 1, day); // sem conversão de timezone
+      const diasSemana = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
+      const meses = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+      const dataFormatada = `${diasSemana[dateObj.getDay()]}, ${day} de ${meses[month - 1]} de ${year}`;
+      addLog('info', `[AI Generator] Data formatada para o prompt: ${dataFormatada}`);
+
       // 2. Buscar contexto histórico (últimos 30 dias)
       const contextResult = await pool.query(
         `SELECT date, title, metadata FROM devocionais 
@@ -108,7 +116,7 @@ export class DevocionalGenerator {
         "${analysis.sugestao.conceito_central}"
         
         ESTRUTURA DO DEVOCIONAL (WhatsApp):
-        1. Data formatada (Ex: Terça-feira, 12 de Maio de 2026)
+        1. OBRIGATÓRIO - Use EXATAMENTE esta data no início: ${dataFormatada}
         2. Título Inspirador (🌟 *Título*)
         3. Dois Versículos Inéditos (📖 *Versículo Principal* e 📖 *Versículo de Apoio*) - use ${config.bible_version}
         4. Reflexão (💬) - 3 a 4 parágrafos envolventes
@@ -117,6 +125,7 @@ export class DevocionalGenerator {
         7. Assinatura: ${config.signature}
         
         REGRAS CRÍTICAS:
+        - A DATA no início deve ser EXATAMENTE: "${dataFormatada}". Não invente outra data.
         - NUNCA use negrito (**). Use *itálico* apenas em títulos de seções.
         - Limite máximo de ${config.character_limit} caracteres.
         - Não inclua saudações personalizadas (Bom dia, etc).

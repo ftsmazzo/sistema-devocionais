@@ -36,7 +36,7 @@ export default function SessaoDevocional() {
     bible_version: 'ACF',
     signature: '',
     gemini_api_key: '',
-    model_name: 'gemini-1.5-flash',
+    model_name: 'gemini-2.5-flash',
     character_limit: 4000
   });
   const [loading, setLoading] = useState(true);
@@ -293,14 +293,32 @@ export default function SessaoDevocional() {
               <div style={{ height: 1, background: 'var(--border)', margin: '4px 0' }} />
               
               <div>
-                <label className="label-premium" style={{ fontSize: '0.7rem' }}>Data para Teste</label>
-                <input
-                  type="date"
-                  value={testDate}
-                  onChange={(e) => setTestDate(e.target.value)}
-                  className="input-dark"
-                  style={{ padding: '8px 12px', fontSize: '0.85rem', marginBottom: 12 }}
-                />
+                <label className="label-premium" style={{ fontSize: '0.7rem' }}>📅 Data para Gerar</label>
+                <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                  <input
+                    type="date"
+                    id="test-date-input"
+                    value={testDate}
+                    onChange={(e) => setTestDate(e.target.value)}
+                    className="input-dark"
+                    style={{ padding: '10px 44px 10px 14px', fontSize: '0.9rem', marginBottom: 0, width: '100%', cursor: 'pointer', colorScheme: 'dark' }}
+                  />
+                  <label
+                    htmlFor="test-date-input"
+                    style={{
+                      position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)',
+                      cursor: 'pointer', color: 'var(--gold-primary)', pointerEvents: 'none'
+                    }}
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <rect width="18" height="18" x="3" y="4" rx="2" ry="2"/>
+                      <line x1="16" x2="16" y1="2" y2="6"/>
+                      <line x1="8" x2="8" y1="2" y2="6"/>
+                      <line x1="3" x2="21" y1="10" y2="10"/>
+                    </svg>
+                  </label>
+                </div>
+                <p style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: 6 }}>Datas futuras são seguras — não afetam o disparo de hoje.</p>
               </div>
 
               <button
