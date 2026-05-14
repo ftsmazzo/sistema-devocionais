@@ -6,12 +6,44 @@ import { checkWhatsAppNumber } from '../services/whatsappValidation';
 const router = express.Router();
 
 const bodySchema = z.object({
-  phone_number: z.string().min(8).max(32),
-  name: z.string().max(200).optional(),
+  /** DDD (2 dígitos), sem 55 */
+  ddd: z.string().min(1).max(4),
+  /** Apenas o número após o DDD (8 ou 9 dígitos) */
+  telefone: z.string().min(1).max(12),
+  name: z.string().min(2).max(200),
   email: z.string().max(255).optional(),
   /** Honeypot: deve ficar vazio */
   website: z.string().max(500).optional(),
 });
+
+/**
+ * Monta E.164 Brasil (55 + DDD + número) a partir de DDD e telefone nacionais.
+ */
+function buildBrazilWhatsapp55(dddRaw: string, telefoneRaw: string): { ok: true; e164: string } | { ok: false; error: string } {
+  const ddd = dddRaw.replace(/\D/g, '');
+  const tel = telefoneRaw.replace(/\D/g, '');
+
+  if (ddd.length !== 2) {
+    return { ok: false, error: 'Informe o DDD com 2 dígitos (ex.: 11).' };
+  }
+  if (ddd.startsWith('0')) {
+    return { ok: false, error: 'DDD inválido: não use zero à esquerda.' };
+  }
+
+  if (tel.length < 8 || tel.length > 9) {
+    return {
+      ok: false,
+      error: 'Informe o telefone com 8 dígitos (fixo) ou 9 (celular), sem o DDD.',
+    };
+  }
+
+  const national = ddd + tel;
+  if (national.length !== 10 && national.length !== 11) {
+    return { ok: false, error: 'Combinação DDD + telefone inválida.' };
+  }
+
+  return { ok: true, e164: `55${national}` };
+}
 
 const RATE_WINDOW_MS = 15 * 60 * 1000;
 const RATE_MAX = 20;
@@ -50,7 +82,7 @@ router.post('/inscricao-devocional', async (req, res) => {
       return res.status(400).json({ error: 'Dados inválidos.' });
     }
 
-    const { phone_number, name, email, website } = parsed.data;
+    const { ddd, telefone, name, email, website } = parsed.data;
     if (website && String(website).trim().length > 0) {
       return res.json({ success: true, message: 'Obrigado!' });
     }
@@ -60,14 +92,12 @@ router.post('/inscricao-devocional', async (req, res) => {
       return res.status(429).json({ error: 'Muitas tentativas. Aguarde alguns minutos e tente de novo.' });
     }
 
-    const normalizedPhone = phone_number.replace(/[^\d+]/g, '');
-    if (normalizedPhone.length < 10) {
-      return res.status(400).json({
-        error: 'Informe um número válido com DDD e código do país (ex.: 5511999998888).',
-      });
+    const built = buildBrazilWhatsapp55(ddd, telefone);
+    if (!built.ok) {
+      return res.status(400).json({ error: built.error });
     }
-
-    let nameTrim = name?.trim() || null;
+    const normalizedPhone = built.e164;
+    const nameTrim = name.trim();
     let emailTrim = email?.trim() || null;
     if (emailTrim && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailTrim)) {
       emailTrim = null;

@@ -1,9 +1,13 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
 import { BookOpen, CheckCircle2, AlertCircle, Loader2, Sparkles, Phone, User, Mail } from 'lucide-react';
 
+function onlyDigits(s: string): string {
+  return s.replace(/\D/g, '');
+}
+
 export default function LandingDevocional() {
-  const [phone_number, setPhoneNumber] = useState('');
+  const [ddd, setDdd] = useState('');
+  const [telefone, setTelefone] = useState('');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [website, setWebsite] = useState('');
@@ -14,6 +18,21 @@ export default function LandingDevocional() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setMessage(null);
+    const nameTrim = name.trim();
+    if (nameTrim.length < 2) {
+      setMessage({ text: 'Informe seu nome (pelo menos 2 caracteres).', type: 'err' });
+      return;
+    }
+    const dddDigits = onlyDigits(ddd).slice(0, 2);
+    const telDigits = onlyDigits(telefone);
+    if (dddDigits.length !== 2) {
+      setMessage({ text: 'Informe o DDD com 2 dígitos.', type: 'err' });
+      return;
+    }
+    if (telDigits.length < 8 || telDigits.length > 9) {
+      setMessage({ text: 'Informe o telefone com 8 ou 9 dígitos (só o número, sem DDD).', type: 'err' });
+      return;
+    }
     if (!consent) {
       setMessage({ text: 'Marque que deseja receber o devocional para continuar.', type: 'err' });
       return;
@@ -24,8 +43,9 @@ export default function LandingDevocional() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          phone_number: phone_number.trim(),
-          name: name.trim() || undefined,
+          ddd: dddDigits,
+          telefone: telDigits,
+          name: nameTrim,
           email: email.trim() || undefined,
           website: website.trim() || undefined,
         }),
@@ -36,7 +56,8 @@ export default function LandingDevocional() {
         return;
       }
       setMessage({ text: data.message || 'Obrigado pela inscrição!', type: 'ok' });
-      setPhoneNumber('');
+      setDdd('');
+      setTelefone('');
       setName('');
       setEmail('');
       setConsent(false);
@@ -135,9 +156,10 @@ export default function LandingDevocional() {
 
         <div className="glass-card" style={{ padding: '28px 26px', position: 'relative' }}>
           <p style={{ margin: '0 0 20px', fontSize: '0.86rem', color: 'var(--text-secondary)', lineHeight: 1.55 }}>
-            Preencha seus dados. Você será cadastrado com <strong style={{ color: 'var(--text-primary)' }}>opt-in</strong>{' '}
-            e a etiqueta <strong style={{ color: 'var(--emerald)' }}>devocional</strong> no sistema. Quem administra o
-            disparo deve incluir pessoas com essa etiqueta (ou este número) na lista configurada no painel.
+            Preencha seus dados. O país <strong style={{ color: 'var(--text-primary)' }}>+55</strong> é aplicado
+            automaticamente ao número. Você será cadastrado com <strong style={{ color: 'var(--text-primary)' }}>opt-in</strong>{' '}
+            e a etiqueta <strong style={{ color: 'var(--emerald)' }}>devocional</strong>. Quem administra o disparo
+            deve incluir pessoas com essa etiqueta (ou este número) na lista configurada no painel.
           </p>
 
           {message && (
@@ -163,35 +185,72 @@ export default function LandingDevocional() {
 
           <form onSubmit={handleSubmit}>
             <label className="label-premium" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Phone size={14} /> WhatsApp (com DDD e país)
-            </label>
-            <input
-              className="input-dark"
-              type="tel"
-              inputMode="tel"
-              autoComplete="tel"
-              placeholder="ex.: 5511999998888"
-              required
-              value={phone_number}
-              onChange={(e) => setPhoneNumber(e.target.value)}
-              style={{ width: '100%', marginBottom: 16 }}
-            />
-
-            <label className="label-premium" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <User size={14} /> Nome (opcional)
+              <User size={14} /> Nome
             </label>
             <input
               className="input-dark"
               type="text"
               autoComplete="name"
               placeholder="Como podemos te chamar"
+              required
+              minLength={2}
               value={name}
               onChange={(e) => setName(e.target.value)}
               style={{ width: '100%', marginBottom: 16 }}
             />
 
             <label className="label-premium" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Mail size={14} /> E-mail (opcional)
+              <Phone size={14} /> WhatsApp (Brasil)
+            </label>
+            <p style={{ margin: '0 0 8px', fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+              Digite só o DDD e o número; o código do país <strong>55</strong> é adicionado no cadastro.
+            </p>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'stretch', marginBottom: 16 }}>
+              <div
+                style={{
+                  flexShrink: 0,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  padding: '0 12px',
+                  borderRadius: 12,
+                  border: '1px solid var(--border)',
+                  background: 'var(--bg-elevated)',
+                  color: 'var(--text-secondary)',
+                  fontSize: '0.85rem',
+                  fontWeight: 600,
+                }}
+              >
+                +55
+              </div>
+              <input
+                className="input-dark"
+                type="text"
+                inputMode="numeric"
+                autoComplete="tel-area-code"
+                placeholder="DDD"
+                aria-label="DDD"
+                maxLength={2}
+                value={ddd}
+                onChange={(e) => setDdd(onlyDigits(e.target.value).slice(0, 2))}
+                style={{ width: 72, textAlign: 'center' }}
+              />
+              <input
+                className="input-dark"
+                type="tel"
+                inputMode="numeric"
+                autoComplete="tel-national"
+                placeholder="9xxxxxxxx ou xxxxxxxx"
+                aria-label="Telefone sem DDD"
+                maxLength={9}
+                value={telefone}
+                onChange={(e) => setTelefone(onlyDigits(e.target.value).slice(0, 9))}
+                style={{ flex: 1, minWidth: 0 }}
+              />
+            </div>
+
+            <label className="label-premium" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Mail size={14} /> E-mail <span style={{ fontWeight: 500, color: 'var(--text-muted)' }}>(opcional)</span>
             </label>
             <input
               className="input-dark"
@@ -253,12 +312,6 @@ export default function LandingDevocional() {
               {loading ? <Loader2 size={22} className="animate-spin" /> : 'Quero receber'}
             </button>
           </form>
-
-          <p style={{ margin: '20px 0 0', textAlign: 'center', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-            <Link to="/login" style={{ color: 'var(--sky)', textDecoration: 'none' }}>
-              Acesso administrativo
-            </Link>
-          </p>
         </div>
       </div>
     </div>
