@@ -130,10 +130,10 @@ export async function initializeDatabase() {
         delivered_at TIMESTAMP,
         failed_at TIMESTAMP,
         failed_reason TEXT,
-        dispatch_id INTEGER REFERENCES dispatches(id),
+        dispatch_id INTEGER,
         dispatch_type VARCHAR(50),
-        contact_id INTEGER REFERENCES contacts(id),
-        devocional_id INTEGER REFERENCES devocionais(id),
+        contact_id INTEGER,
+        devocional_id INTEGER,
         message_category VARCHAR(50),
         tags TEXT[],
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -141,41 +141,7 @@ export async function initializeDatabase() {
       )
     `);
 
-    // Adicionar colunas de disparo se não existirem (migração)
-    await client.query(`
-      DO $$ 
-      BEGIN 
-        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
-                       WHERE table_name = 'messages' AND column_name = 'dispatch_id') THEN
-          ALTER TABLE messages ADD COLUMN dispatch_id INTEGER REFERENCES dispatches(id) ON DELETE SET NULL;
-        ELSE
-          -- Se a coluna já existe, atualizar a constraint para permitir DELETE
-          ALTER TABLE messages DROP CONSTRAINT IF EXISTS messages_dispatch_id_fkey;
-          ALTER TABLE messages ADD CONSTRAINT messages_dispatch_id_fkey 
-            FOREIGN KEY (dispatch_id) REFERENCES dispatches(id) ON DELETE SET NULL;
-        END IF;
-        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
-                       WHERE table_name = 'messages' AND column_name = 'dispatch_type') THEN
-          ALTER TABLE messages ADD COLUMN dispatch_type VARCHAR(50);
-        END IF;
-        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
-                       WHERE table_name = 'messages' AND column_name = 'contact_id') THEN
-          ALTER TABLE messages ADD COLUMN contact_id INTEGER REFERENCES contacts(id);
-        END IF;
-        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
-                       WHERE table_name = 'messages' AND column_name = 'devocional_id') THEN
-          ALTER TABLE messages ADD COLUMN devocional_id INTEGER REFERENCES devocionais(id);
-        END IF;
-        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
-                       WHERE table_name = 'messages' AND column_name = 'message_category') THEN
-          ALTER TABLE messages ADD COLUMN message_category VARCHAR(50);
-        END IF;
-        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
-                       WHERE table_name = 'messages' AND column_name = 'tags') THEN
-          ALTER TABLE messages ADD COLUMN tags TEXT[];
-        END IF;
-      END $$;
-    `);
+    // Colunas/FKs de messages, dispatches etc. são aplicadas após todas as tabelas (bloco no fim)
 
     // Índices para messages
     await client.query(`
@@ -243,6 +209,21 @@ export async function initializeDatabase() {
       CREATE INDEX IF NOT EXISTS idx_health_log_status ON instance_health_log(status);
     `);
 
+    // Devocionais antes de dispatches/messages (FKs aplicadas no fim do init)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS devocionais (
+        id SERIAL PRIMARY KEY,
+        text TEXT NOT NULL,
+        title VARCHAR(255) NOT NULL,
+        date DATE UNIQUE NOT NULL,
+        versiculo_principal JSONB,
+        versiculo_apoio JSONB,
+        metadata JSONB,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
     // Criar tabela de dispatches
     await client.query(`
       CREATE TABLE IF NOT EXISTS dispatches (
@@ -251,9 +232,9 @@ export async function initializeDatabase() {
         message_template TEXT NOT NULL,
         instance_ids INTEGER[],
         dispatch_type VARCHAR(50) NOT NULL DEFAULT 'marketing',
-        list_id INTEGER REFERENCES contact_lists(id),
+        list_id INTEGER,
         contact_ids INTEGER[],
-        devocional_id INTEGER REFERENCES devocionais(id),
+        devocional_id INTEGER,
         template_id INTEGER,
         blindage_config JSONB DEFAULT '{}',
         schedule_config JSONB DEFAULT '{}',
@@ -283,7 +264,7 @@ export async function initializeDatabase() {
         END IF;
         IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
                        WHERE table_name = 'dispatches' AND column_name = 'list_id') THEN
-          ALTER TABLE dispatches ADD COLUMN list_id INTEGER REFERENCES contact_lists(id);
+          ALTER TABLE dispatches ADD COLUMN list_id INTEGER;
         END IF;
         IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
                        WHERE table_name = 'dispatches' AND column_name = 'contact_ids') THEN
@@ -291,7 +272,7 @@ export async function initializeDatabase() {
         END IF;
         IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
                        WHERE table_name = 'dispatches' AND column_name = 'devocional_id') THEN
-          ALTER TABLE dispatches ADD COLUMN devocional_id INTEGER REFERENCES devocionais(id);
+          ALTER TABLE dispatches ADD COLUMN devocional_id INTEGER;
         END IF;
         IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
                        WHERE table_name = 'dispatches' AND column_name = 'blindage_config') THEN
@@ -441,26 +422,11 @@ export async function initializeDatabase() {
       ON number_validation_cache(checked_at);
     `);
 
-    // Criar tabela de devocionais
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS devocionais (
-        id SERIAL PRIMARY KEY,
-        text TEXT NOT NULL,
-        title VARCHAR(255) NOT NULL,
-        date DATE UNIQUE NOT NULL,
-        versiculo_principal JSONB,
-        versiculo_apoio JSONB,
-        metadata JSONB,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
-
     // Criar tabela de configuração do devocional
     await client.query(`
       CREATE TABLE IF NOT EXISTS devocional_config (
         id SERIAL PRIMARY KEY,
-        list_id INTEGER REFERENCES contact_lists(id),
+        list_id INTEGER,
         dispatch_hour INTEGER DEFAULT 6,
         dispatch_minute INTEGER DEFAULT 0,
         timezone VARCHAR(50) DEFAULT 'America/Sao_Paulo',
@@ -567,8 +533,8 @@ export async function initializeDatabase() {
     await client.query(`
       CREATE TABLE IF NOT EXISTS ai_detections (
         id SERIAL PRIMARY KEY,
-        contact_id INTEGER REFERENCES contacts(id) ON DELETE CASCADE,
-        dispatch_id INTEGER REFERENCES dispatches(id) ON DELETE CASCADE,
+        contact_id INTEGER,
+        dispatch_id INTEGER,
         message TEXT NOT NULL,
         is_positive BOOLEAN NOT NULL,
         confidence DECIMAL(3,2) NOT NULL,
@@ -589,8 +555,8 @@ export async function initializeDatabase() {
     await client.query(`
       CREATE TABLE IF NOT EXISTS ai_interactions (
         id SERIAL PRIMARY KEY,
-        dispatch_id INTEGER REFERENCES dispatches(id) ON DELETE CASCADE,
-        contact_id INTEGER REFERENCES contacts(id) ON DELETE CASCADE,
+        dispatch_id INTEGER,
+        contact_id INTEGER,
         user_message TEXT NOT NULL,
         triggered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
@@ -691,15 +657,6 @@ export async function initializeDatabase() {
       WHERE devocional_score IS NULL OR devocional_score = 0
     `);
     
-    // Migração: Remover tag "bloqueado" de contatos que nunca receberam devocional
-    await client.query(`
-      DELETE FROM contact_tag_relations
-      WHERE tag_id IN (SELECT id FROM contact_tags WHERE name = 'bloqueado')
-        AND contact_id IN (
-          SELECT id FROM contacts WHERE last_devocional_sent_at IS NULL
-        )
-    `);
-    
     // Migração: Resetar health_status para 'healthy' de instâncias conectadas que estão marcadas como 'down'
     await client.query(`
       UPDATE instances
@@ -779,6 +736,15 @@ export async function initializeDatabase() {
       CREATE INDEX IF NOT EXISTS idx_contact_tag_tag ON contact_tag_relations(tag_id);
     `);
 
+    // Migração: Remover tag "bloqueado" de contatos que nunca receberam devocional
+    await client.query(`
+      DELETE FROM contact_tag_relations
+      WHERE tag_id IN (SELECT id FROM contact_tags WHERE name = 'bloqueado')
+        AND contact_id IN (
+          SELECT id FROM contacts WHERE last_devocional_sent_at IS NULL
+        )
+    `);
+
     // Criar tabela de listas
     await client.query(`
       CREATE TABLE IF NOT EXISTS contact_lists (
@@ -813,6 +779,87 @@ export async function initializeDatabase() {
     await client.query(`
       CREATE INDEX IF NOT EXISTS idx_list_items_list ON contact_list_items(list_id);
       CREATE INDEX IF NOT EXISTS idx_list_items_contact ON contact_list_items(contact_id);
+    `);
+
+    // FKs entre messages, dispatches, contatos, devocionais (banco novo: tabelas sem REFERENCES no CREATE)
+    await client.query(`
+      DO $$ 
+      BEGIN 
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                       WHERE table_name = 'messages' AND column_name = 'dispatch_id') THEN
+          ALTER TABLE messages ADD COLUMN dispatch_id INTEGER;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                       WHERE table_name = 'messages' AND column_name = 'dispatch_type') THEN
+          ALTER TABLE messages ADD COLUMN dispatch_type VARCHAR(50);
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                       WHERE table_name = 'messages' AND column_name = 'contact_id') THEN
+          ALTER TABLE messages ADD COLUMN contact_id INTEGER;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                       WHERE table_name = 'messages' AND column_name = 'devocional_id') THEN
+          ALTER TABLE messages ADD COLUMN devocional_id INTEGER;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                       WHERE table_name = 'messages' AND column_name = 'message_category') THEN
+          ALTER TABLE messages ADD COLUMN message_category VARCHAR(50);
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                       WHERE table_name = 'messages' AND column_name = 'tags') THEN
+          ALTER TABLE messages ADD COLUMN tags TEXT[];
+        END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'messages_dispatch_id_fkey') THEN
+          ALTER TABLE messages ADD CONSTRAINT messages_dispatch_id_fkey 
+            FOREIGN KEY (dispatch_id) REFERENCES dispatches(id) ON DELETE SET NULL;
+        END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'messages_contact_id_fkey') THEN
+          ALTER TABLE messages ADD CONSTRAINT messages_contact_id_fkey 
+            FOREIGN KEY (contact_id) REFERENCES contacts(id) ON DELETE SET NULL;
+        END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'messages_devocional_id_fkey') THEN
+          ALTER TABLE messages ADD CONSTRAINT messages_devocional_id_fkey 
+            FOREIGN KEY (devocional_id) REFERENCES devocionais(id) ON DELETE SET NULL;
+        END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'dispatches_list_id_fkey') THEN
+          ALTER TABLE dispatches ADD CONSTRAINT dispatches_list_id_fkey 
+            FOREIGN KEY (list_id) REFERENCES contact_lists(id) ON DELETE SET NULL;
+        END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'dispatches_devocional_id_fkey') THEN
+          ALTER TABLE dispatches ADD CONSTRAINT dispatches_devocional_id_fkey 
+            FOREIGN KEY (devocional_id) REFERENCES devocionais(id) ON DELETE SET NULL;
+        END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'devocional_config_list_id_fkey') THEN
+          ALTER TABLE devocional_config ADD CONSTRAINT devocional_config_list_id_fkey 
+            FOREIGN KEY (list_id) REFERENCES contact_lists(id) ON DELETE SET NULL;
+        END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ai_detections_contact_id_fkey') THEN
+          ALTER TABLE ai_detections ADD CONSTRAINT ai_detections_contact_id_fkey 
+            FOREIGN KEY (contact_id) REFERENCES contacts(id) ON DELETE CASCADE;
+        END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ai_detections_dispatch_id_fkey') THEN
+          ALTER TABLE ai_detections ADD CONSTRAINT ai_detections_dispatch_id_fkey 
+            FOREIGN KEY (dispatch_id) REFERENCES dispatches(id) ON DELETE CASCADE;
+        END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ai_interactions_dispatch_id_fkey') THEN
+          ALTER TABLE ai_interactions ADD CONSTRAINT ai_interactions_dispatch_id_fkey 
+            FOREIGN KEY (dispatch_id) REFERENCES dispatches(id) ON DELETE CASCADE;
+        END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ai_interactions_contact_id_fkey') THEN
+          ALTER TABLE ai_interactions ADD CONSTRAINT ai_interactions_contact_id_fkey 
+            FOREIGN KEY (contact_id) REFERENCES contacts(id) ON DELETE CASCADE;
+        END IF;
+      END $$;
     `);
 
     // Melhorar tabela webhook_events
