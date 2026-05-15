@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { pool } from '../database';
+import { normalizePhoneDigits } from '../utils/phoneNumber';
 
 /**
  * Verifica se um número de telefone está registrado no WhatsApp usando Evolution API
@@ -11,8 +12,7 @@ export async function checkWhatsAppNumber(
   apiKey?: string
 ): Promise<{ isValid: boolean; cached?: boolean }> {
   try {
-    // Normalizar número (remover + e caracteres não numéricos)
-    const normalizedNumber = phoneNumber.replace(/[^\d]/g, '');
+    const normalizedNumber = normalizePhoneDigits(phoneNumber, '55');
     
     if (!normalizedNumber || normalizedNumber.length < 10) {
       return { isValid: false };

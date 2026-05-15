@@ -2,6 +2,7 @@ import { pool } from '../database';
 import axios from 'axios';
 import { createHash } from 'crypto';
 import { addLog } from '../routes/logs';
+import { normalizePhoneDigits } from '../utils/phoneNumber';
 import {
   getBlindageProfilePackage,
   BLINDAGE_PROFILES_META,
@@ -479,20 +480,9 @@ async function validatePhoneNumber(
 
   const config = parseRuleConfig(numberValidationRule.config);
 
-  // Normalizar número (sempre fazer, mesmo se não validar formato)
-  const cleanNumber = phoneNumber.replace(/[\s\-\(\)]/g, '');
-  let normalizedNumber = cleanNumber;
-  
-  if (!normalizedNumber.startsWith('+')) {
-    // Se não tem +, assumir código do Brasil (55) se não especificado
-    if (config.default_country_code) {
-      normalizedNumber = `+${config.default_country_code}${normalizedNumber}`;
-    } else if (normalizedNumber.startsWith('55')) {
-      normalizedNumber = `+${normalizedNumber}`;
-    } else {
-      normalizedNumber = `+55${normalizedNumber}`;
-    }
-  }
+  const countryCode = String(config.default_country_code || '55').replace(/\D/g, '') || '55';
+  const numberToCheck = normalizePhoneDigits(phoneNumber, countryCode);
+  const normalizedNumber = numberToCheck ? `+${numberToCheck}` : '';
 
   // 1. Validar formato do número (E.164)
   if (config.validate_format !== false) {
@@ -560,9 +550,6 @@ async function validatePhoneNumber(
       const instance = instanceResult.rows[0];
       const evolutionApiUrl = process.env.EVOLUTION_API_URL || instance.api_url;
       const evolutionApiKey = process.env.EVOLUTION_API_KEY || instance.api_key;
-
-      // Normalizar número para verificação (remover +)
-      const numberToCheck = normalizedNumber.replace('+', '');
 
       // Verificar cache primeiro
       const cacheResult = await pool.query(

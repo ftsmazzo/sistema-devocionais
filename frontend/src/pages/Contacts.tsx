@@ -944,9 +944,12 @@ export default function Contacts() {
                   <input
                     type="text" required value={formData.phone_number}
                     onChange={(e) => setFormData({ ...formData, phone_number: e.target.value })}
-                    placeholder="Ex: 5511999999999"
+                    placeholder="Ex: 17991234567 ou 5517991234567"
                     style={{ width: '100%', padding: '12px 16px', background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 12, color: 'var(--text-primary)', outline: 'none' }}
                   />
+                  <p style={{ margin: '8px 0 0', fontSize: '0.72rem', color: 'var(--text-muted)', lineHeight: 1.45 }}>
+                    Pode digitar só DDD + celular (como na landing) ou já com 55 na frente. O sistema padroniza ao salvar.
+                  </p>
                 </div>
                 <div>
                   <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Nome Completo</label>

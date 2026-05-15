@@ -2,6 +2,7 @@ import express from 'express';
 import { pool } from '../database';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { checkWhatsAppNumber, validateContactsWhatsApp } from '../services/whatsappValidation';
+import { normalizeContactPhoneForStorage } from '../utils/phoneNumber';
 
 const router = express.Router();
 
@@ -210,8 +211,11 @@ router.post('/', async (req: AuthRequest, res) => {
       return res.status(400).json({ error: 'phone_number é obrigatório' });
     }
 
-    // Normalizar número (remover caracteres não numéricos, exceto +)
-    const normalizedPhone = phone_number.replace(/[^\d+]/g, '');
+    const phoneNorm = normalizeContactPhoneForStorage(String(phone_number));
+    if (!phoneNorm.ok) {
+      return res.status(400).json({ error: phoneNorm.error });
+    }
+    const normalizedPhone = phoneNorm.phone;
 
     const result = await pool.query(
       `INSERT INTO contacts (phone_number, name, email, source, metadata, opt_in, opt_in_at, opt_out, opt_out_at)
@@ -548,7 +552,11 @@ router.put('/:id', async (req: AuthRequest, res) => {
     let paramCount = 1;
 
     if (phone_number !== undefined && phone_number !== null && String(phone_number).trim() !== '') {
-      const normalizedPhone = String(phone_number).replace(/[^\d+]/g, '');
+      const phoneNorm = normalizeContactPhoneForStorage(String(phone_number));
+      if (!phoneNorm.ok) {
+        return res.status(400).json({ error: phoneNorm.error });
+      }
+      const normalizedPhone = phoneNorm.phone;
       const dup = await pool.query(
         `SELECT id FROM contacts WHERE phone_number = $1 AND id <> $2`,
         [normalizedPhone, id]
@@ -907,14 +915,12 @@ router.post('/import', async (req: AuthRequest, res) => {
           continue;
         }
 
-        // Normalizar número (remover caracteres não numéricos, exceto +)
-        const normalizedPhone = phone_number.replace(/[^\d+]/g, '');
-        
-        // Validar formato básico de telefone
-        if (normalizedPhone.length < 10) {
-          results.errors.push({ contact: contactData, error: 'Número de telefone inválido (muito curto)' });
+        const phoneNorm = normalizeContactPhoneForStorage(String(phone_number));
+        if (!phoneNorm.ok) {
+          results.errors.push({ contact: contactData, error: phoneNorm.error });
           continue;
         }
+        const normalizedPhone = phoneNorm.phone;
 
         // Sanitizar nome e email
         name = name.trim() || null;

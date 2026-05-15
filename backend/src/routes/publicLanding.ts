@@ -2,6 +2,7 @@ import express from 'express';
 import { z } from 'zod';
 import { pool } from '../database';
 import { checkWhatsAppNumber } from '../services/whatsappValidation';
+import { normalizePhoneDigits } from '../utils/phoneNumber';
 
 const router = express.Router();
 
@@ -96,7 +97,7 @@ router.post('/inscricao-devocional', async (req, res) => {
     if (!built.ok) {
       return res.status(400).json({ error: built.error });
     }
-    const normalizedPhone = built.e164;
+    const normalizedPhone = normalizePhoneDigits(built.e164, '55');
     const nameTrim = name.trim();
     let emailTrim = email?.trim() || null;
     if (emailTrim && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailTrim)) {
