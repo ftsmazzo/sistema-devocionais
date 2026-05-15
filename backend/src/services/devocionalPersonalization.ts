@@ -1,4 +1,26 @@
 /**
+ * Substitui placeholders do template de marketing/disparo manual.
+ * Suporta {{name}}, {{first_name}}, {{nome}}, {{nome_completo}} (case-insensitive).
+ */
+export function applyMessageTemplate(
+  template: string,
+  contactName: string | null | undefined
+): string {
+  if (!template || !/\{\{/.test(template)) {
+    return template;
+  }
+  const fullName = (contactName || '').trim();
+  const firstName = fullName ? fullName.split(/\s+/)[0] : '';
+  const displayName = firstName || fullName || 'amigo';
+
+  return template
+    .replace(/\{\{\s*name\s*\}\}/gi, displayName)
+    .replace(/\{\{\s*first_name\s*\}\}/gi, firstName || displayName)
+    .replace(/\{\{\s*nome\s*\}\}/gi, displayName)
+    .replace(/\{\{\s*nome_completo\s*\}\}/gi, fullName || displayName);
+}
+
+/**
  * Personalizar mensagem de devocional
  * Adiciona saudação (Bom dia/Tarde/Noite) + primeiro nome
  */

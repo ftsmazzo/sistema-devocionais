@@ -1039,6 +1039,107 @@ router.post('/import', async (req: AuthRequest, res) => {
 });
 
 /**
+ * Tags em massa (adicionar ou remover)
+ * POST /api/contacts/bulk-tags
+ * Body: { contact_ids: number[], tag_ids: number[], action: 'add' | 'remove' }
+ */
+router.post('/bulk-tags', async (req: AuthRequest, res) => {
+  try {
+    const { contact_ids, tag_ids, action } = req.body;
+
+    if (!Array.isArray(contact_ids) || contact_ids.length === 0) {
+      return res.status(400).json({ error: 'contact_ids deve ser um array não vazio' });
+    }
+    if (!Array.isArray(tag_ids) || tag_ids.length === 0) {
+      return res.status(400).json({ error: 'tag_ids deve ser um array não vazio' });
+    }
+    if (contact_ids.length > MAX_SELECTION_IDS) {
+      return res.status(400).json({
+        error: `Máximo de ${MAX_SELECTION_IDS} contatos por operação.`,
+      });
+    }
+
+    const act = action === 'remove' ? 'remove' : 'add';
+    const contactIds = contact_ids.map((id: unknown) => Number(id)).filter((id) => Number.isInteger(id) && id > 0);
+    const tagIds = tag_ids.map((id: unknown) => Number(id)).filter((id) => Number.isInteger(id) && id > 0);
+
+    if (contactIds.length === 0 || tagIds.length === 0) {
+      return res.status(400).json({ error: 'IDs de contato ou tag inválidos.' });
+    }
+
+    let affected = 0;
+    if (act === 'add') {
+      const ins = await pool.query(
+        `INSERT INTO contact_tag_relations (contact_id, tag_id)
+         SELECT c.id, t.id
+         FROM unnest($1::int[]) AS c(id)
+         CROSS JOIN unnest($2::int[]) AS t(id)
+         ON CONFLICT (contact_id, tag_id) DO NOTHING`,
+        [contactIds, tagIds]
+      );
+      affected = ins.rowCount ?? 0;
+    } else {
+      const del = await pool.query(
+        `DELETE FROM contact_tag_relations
+         WHERE contact_id = ANY($1::int[]) AND tag_id = ANY($2::int[])`,
+        [contactIds, tagIds]
+      );
+      affected = del.rowCount ?? 0;
+    }
+
+    res.json({
+      success: true,
+      action: act,
+      affected,
+      contacts: contactIds.length,
+      tags: tagIds.length,
+      message:
+        act === 'add'
+          ? `Tags aplicadas: ${affected} vínculo(s) novo(s) em ${contactIds.length} contato(s).`
+          : `Tags removidas: ${affected} vínculo(s) em ${contactIds.length} contato(s).`,
+    });
+  } catch (error: any) {
+    console.error('❌ Erro em bulk-tags:', error);
+    res.status(500).json({ error: 'Erro na operação de tags em massa', message: error.message });
+  }
+});
+
+/**
+ * Excluir contatos em massa
+ * POST /api/contacts/bulk-delete
+ */
+router.post('/bulk-delete', async (req: AuthRequest, res) => {
+  try {
+    const { contact_ids } = req.body;
+    if (!Array.isArray(contact_ids) || contact_ids.length === 0) {
+      return res.status(400).json({ error: 'contact_ids deve ser um array não vazio' });
+    }
+    if (contact_ids.length > MAX_SELECTION_IDS) {
+      return res.status(400).json({
+        error: `Máximo de ${MAX_SELECTION_IDS} contatos por operação.`,
+      });
+    }
+
+    const contactIds = contact_ids.map((id: unknown) => Number(id)).filter((id) => Number.isInteger(id) && id > 0);
+    if (contactIds.length === 0) {
+      return res.status(400).json({ error: 'Nenhum ID de contato válido.' });
+    }
+
+    const del = await pool.query(`DELETE FROM contacts WHERE id = ANY($1::int[])`, [contactIds]);
+    const deleted = del.rowCount ?? 0;
+
+    res.json({
+      success: true,
+      deleted,
+      message: `${deleted} contato(s) excluído(s).`,
+    });
+  } catch (error: any) {
+    console.error('❌ Erro em bulk-delete:', error);
+    res.status(500).json({ error: 'Erro ao excluir contatos em massa', message: error.message });
+  }
+});
+
+/**
  * Atualizar contatos em massa
  * POST /api/contacts/bulk-update
  */

@@ -2,7 +2,11 @@ import { pool } from '../database';
 import axios from 'axios';
 import { applyBlindage, recordBlindageSuccessfulSend } from './blindage';
 import { withGlobalOutboundGate } from './globalOutboundGate';
-import { personalizeDevocionalMessage, formatDevocionalMessage } from './devocionalPersonalization';
+import {
+  personalizeDevocionalMessage,
+  formatDevocionalMessage,
+  applyMessageTemplate,
+} from './devocionalPersonalization';
 import { addLog } from '../routes/logs';
 
 /**
@@ -140,6 +144,10 @@ export async function processRetryQueue(): Promise<void> {
 
         // Preparar mensagem
         let message = item.message_template;
+
+        if (item.dispatch_type === 'marketing') {
+          message = applyMessageTemplate(item.message_template, item.contact_name);
+        }
 
         if (item.dispatch_type === 'devocional' && item.devocional_id) {
           const devResult = await pool.query(

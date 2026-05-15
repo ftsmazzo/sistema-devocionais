@@ -124,6 +124,7 @@ export default function Contacts() {
   const [importTags, setImportTags] = useState<number[]>([]);
   const [selectingAllFiltered, setSelectingAllFiltered] = useState(false);
   const [exportingCsv, setExportingCsv] = useState(false);
+  const [bulkWorking, setBulkWorking] = useState(false);
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(searchTerm.trim()), 450);
@@ -174,9 +175,9 @@ export default function Contacts() {
     return params;
   };
 
-  const loadContacts = async () => {
+  const loadContacts = async (opts?: { silent?: boolean }) => {
     try {
-      setLoading(true);
+      if (!opts?.silent) setLoading(true);
       const params = buildListQueryParams();
       const response = await api.get(`/contacts?${params.toString()}`);
       setContacts(response.data.contacts);
@@ -185,7 +186,7 @@ export default function Contacts() {
       console.error('Erro ao carregar contatos:', error);
       setToast({ message: 'Erro ao carregar contatos', type: 'error' });
     } finally {
-      setLoading(false);
+      if (!opts?.silent) setLoading(false);
     }
   };
 
@@ -282,7 +283,7 @@ export default function Contacts() {
     if (selectedContacts.length === 0) return;
     if (!confirm(`Revalidar WhatsApp na Evolution para ${selectedContacts.length} contato(s)? Requer instância conectada.`)) return;
     try {
-      setLoading(true);
+      setBulkWorking(true);
       const res = await api.post('/contacts/bulk-update', {
         contact_ids: selectedContacts,
         validate_whatsapp: true,
@@ -291,11 +292,55 @@ export default function Contacts() {
         message: res.data?.message || `Validação: ${res.data?.validated ?? 0} ok, ${res.data?.invalid ?? 0} inválidos.`,
         type: 'success',
       });
-      loadContacts();
+      await loadContacts({ silent: true });
     } catch (error: any) {
       setToast({ message: error.response?.data?.error || 'Erro na validação em massa', type: 'error' });
     } finally {
-      setLoading(false);
+      setBulkWorking(false);
+    }
+  };
+
+  const handleBulkApplyTags = async () => {
+    if (bulkTagSelection.length === 0 || selectedContacts.length === 0) return;
+    const count = selectedContacts.length;
+    const tagIds = [...bulkTagSelection];
+    setShowBulkTagModal(false);
+    setBulkTagSelection([]);
+    setBulkWorking(true);
+    setToast({ message: `Aplicando tags em ${count} contato(s)…`, type: 'info' });
+    try {
+      const res = await api.post('/contacts/bulk-tags', {
+        contact_ids: selectedContacts,
+        tag_ids: tagIds,
+        action: 'add',
+      });
+      setSelectedContacts([]);
+      setToast({ message: res.data?.message || 'Tags aplicadas com sucesso!', type: 'success' });
+      await loadContacts({ silent: true });
+    } catch (error: any) {
+      setToast({ message: error.response?.data?.error || 'Erro na operação em massa', type: 'error' });
+    } finally {
+      setBulkWorking(false);
+    }
+  };
+
+  const handleBulkDeleteContacts = async () => {
+    if (selectedContacts.length === 0) return;
+    if (!confirm(`Excluir ${selectedContacts.length} contato(s) definitivamente?`)) return;
+    const ids = [...selectedContacts];
+    setShowBulkTagModal(false);
+    setBulkTagSelection([]);
+    setBulkWorking(true);
+    setToast({ message: `Excluindo ${ids.length} contato(s)…`, type: 'info' });
+    try {
+      const res = await api.post('/contacts/bulk-delete', { contact_ids: ids });
+      setSelectedContacts([]);
+      setToast({ message: res.data?.message || 'Contatos excluídos!', type: 'success' });
+      await loadContacts({ silent: true });
+    } catch (error: any) {
+      setToast({ message: error.response?.data?.error || 'Erro ao excluir', type: 'error' });
+    } finally {
+      setBulkWorking(false);
     }
   };
 
@@ -646,13 +691,19 @@ export default function Contacts() {
         <>
           {/* Status Bar */}
           <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 16, padding: '0 8px' }}>
-            <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+            <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
               Mostrando <strong style={{ color: 'var(--gold-primary)' }}>{contacts.length}</strong> de {total} contatos
               {selectedContacts.length > 0 && (
                 <>
                   {' '}
                   · <strong style={{ color: 'var(--sky)' }}>{selectedContacts.length}</strong> selecionado(s)
                 </>
+              )}
+              {bulkWorking && (
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: '#38bdf8' }}>
+                  <RefreshCw size={14} className="animate-spin" />
+                  Sincronizando…
+                </span>
               )}
             </span>
             <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
@@ -678,17 +729,18 @@ export default function Contacts() {
                   <button type="button" onClick={() => setSelectedContacts([])} className="btn-outline" style={{ padding: '6px 12px', borderRadius: 10, fontSize: '0.78rem' }}>
                     Limpar seleção
                   </button>
-                  <button type="button" onClick={handleBulkValidateWhatsApp} className="btn-outline" style={{ padding: '6px 12px', borderRadius: 10, fontSize: '0.78rem', color: '#38bdf8', borderColor: 'rgba(56,189,248,0.35)' }}>
+                  <button type="button" onClick={handleBulkValidateWhatsApp} disabled={bulkWorking} className="btn-outline" style={{ padding: '6px 12px', borderRadius: 10, fontSize: '0.78rem', color: '#38bdf8', borderColor: 'rgba(56,189,248,0.35)', opacity: bulkWorking ? 0.6 : 1 }}>
                     Revalidar WhatsApp ({selectedContacts.length})
                   </button>
                   <button
                     type="button"
+                    disabled={bulkWorking}
                     onClick={() => {
                       setBulkTagSelection([]);
                       setShowBulkTagModal(true);
                     }}
                     className="badge badge-gold"
-                    style={{ border: 'none', cursor: 'pointer', padding: '6px 14px', fontSize: '0.78rem' }}
+                    style={{ border: 'none', cursor: bulkWorking ? 'not-allowed' : 'pointer', padding: '6px 14px', fontSize: '0.78rem', opacity: bulkWorking ? 0.6 : 1 }}
                   >
                     Ações em massa
                   </button>
@@ -1093,73 +1145,18 @@ export default function Contacts() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               <button
                 type="button"
-                disabled={bulkTagSelection.length === 0}
-                onClick={async () => {
-                  try {
-                    setLoading(true);
-                    let ok = 0;
-                    let fail = 0;
-                    for (const contactId of selectedContacts) {
-                      for (const tagId of bulkTagSelection) {
-                        try {
-                          await api.post(`/contacts/${contactId}/tags`, { tag_id: tagId });
-                          ok++;
-                        } catch {
-                          fail++;
-                        }
-                      }
-                    }
-                    setShowBulkTagModal(false);
-                    setBulkTagSelection([]);
-                    setSelectedContacts([]);
-                    if (fail > 0) {
-                      setToast({ message: `Tags: ${ok} vínculo(s) ok, ${fail} falha(s). Verifique duplicatas ou rede.`, type: fail >= ok ? 'error' : 'warning' });
-                    } else {
-                      setToast({ message: 'Tags aplicadas com sucesso!', type: 'success' });
-                    }
-                    loadContacts();
-                  } catch (e) {
-                    setToast({ message: 'Erro na operação em massa', type: 'error' });
-                  } finally {
-                    setLoading(false);
-                  }
-                }}
-                className="btn-gold" style={{ padding: '14px 0', borderRadius: 12, opacity: bulkTagSelection.length === 0 ? 0.5 : 1 }}
+                disabled={bulkTagSelection.length === 0 || bulkWorking}
+                onClick={handleBulkApplyTags}
+                className="btn-gold" style={{ padding: '14px 0', borderRadius: 12, opacity: bulkTagSelection.length === 0 || bulkWorking ? 0.5 : 1 }}
               >
                 Aplicar Tags
               </button>
               
               <button
                 type="button"
-                onClick={async () => {
-                  if (!confirm(`Excluir ${selectedContacts.length} contatos definitivamente?`)) return;
-                  const n = selectedContacts.length;
-                  const ids = [...selectedContacts];
-                  try {
-                    setLoading(true);
-                    let delFail = 0;
-                    for (const id of ids) {
-                      try {
-                        await api.delete(`/contacts/${id}`);
-                      } catch {
-                        delFail++;
-                      }
-                    }
-                    setShowBulkTagModal(false);
-                    setBulkTagSelection([]);
-                    setSelectedContacts([]);
-                    setToast({
-                      message: delFail > 0 ? `${n - delFail} removidos, ${delFail} falha(s).` : 'Contatos excluídos!',
-                      type: delFail > 0 ? 'warning' : 'success',
-                    });
-                    loadContacts();
-                  } catch (e) {
-                    setToast({ message: 'Erro ao excluir', type: 'error' });
-                  } finally {
-                    setLoading(false);
-                  }
-                }}
-                style={{ padding: '14px 0', borderRadius: 12, background: 'rgba(244, 63, 94, 0.1)', color: 'var(--rose)', border: '1px solid rgba(244, 63, 94, 0.2)', cursor: 'pointer', fontWeight: 600 }}
+                disabled={bulkWorking}
+                onClick={handleBulkDeleteContacts}
+                style={{ padding: '14px 0', borderRadius: 12, background: 'rgba(244, 63, 94, 0.1)', color: 'var(--rose)', border: '1px solid rgba(244, 63, 94, 0.2)', cursor: bulkWorking ? 'not-allowed' : 'pointer', fontWeight: 600, opacity: bulkWorking ? 0.5 : 1 }}
               >
                 Excluir Todos Selecionados
               </button>

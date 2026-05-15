@@ -1,6 +1,7 @@
 import { pool } from '../database';
 import axios from 'axios';
 import { applyBlindage, recordBlindageSuccessfulSend } from './blindage';
+import { applyMessageTemplate } from './devocionalPersonalization';
 import { withGlobalOutboundGate } from './globalOutboundGate';
 import {
   loadDispatchPacingRuntime,
@@ -194,13 +195,15 @@ export async function processMarketingDispatch(params: MarketingDispatchParams):
       try {
         console.log(`\n   📤 [${contactIndex}/${contacts.length}] Processando contato: ${contact.phone_number} (${contact.name || 'Sem nome'})`);
 
+        const personalizedMessage = applyMessageTemplate(dispatch.message_template, contact.name);
+
         let abortContact = false;
         await withGlobalOutboundGate(async () => {
           // Aplicar blindagem (define instância e delay; usar instância retornada pela blindagem)
           const blindageStartTime = Date.now();
           const blindageResult = await applyBlindage({
             to: contact.phone_number,
-            message: dispatch.message_template,
+            message: personalizedMessage,
             instanceId: instance?.id,
             messageType: 'marketing',
           });
@@ -278,17 +281,17 @@ export async function processMarketingDispatch(params: MarketingDispatchParams):
             await sendMessageWithMedia(
               instance,
               contact.phone_number,
-              dispatch.message_template,
+              personalizedMessage,
               mediaUrl,
               mediaType
             );
           } else {
             // Enviar apenas texto
-            console.log(`      💬 Enviando mensagem de texto (${dispatch.message_template.length} caracteres)`);
+            console.log(`      💬 Enviando mensagem de texto (${personalizedMessage.length} caracteres)`);
             await sendTextMessage(
               instance,
               contact.phone_number,
-              dispatch.message_template
+              personalizedMessage
             );
           }
           const sendTime = Date.now() - sendStartTime;
@@ -308,7 +311,7 @@ export async function processMarketingDispatch(params: MarketingDispatchParams):
               `${contact.phone_number}@s.whatsapp.net`,
               true,
               mediaType || 'text',
-              dispatch.message_template,
+              personalizedMessage,
               new Date(),
               'sent',
               dispatchId,
@@ -356,7 +359,7 @@ export async function processMarketingDispatch(params: MarketingDispatchParams):
           );
           await recordBlindageSuccessfulSend({
             to: contact.phone_number,
-            message: dispatch.message_template,
+            message: personalizedMessage,
             messageType: 'marketing',
           });
         });
