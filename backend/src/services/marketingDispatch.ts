@@ -10,6 +10,14 @@ import {
 } from './dispatchPacing';
 import { addLog } from '../routes/logs';
 import { pingInstanceHealth } from './retryQueue';
+import {
+  assertEvolutionSendOk,
+  enqueueDispatchRetry,
+  isInstanceConnectivityError,
+  markInstanceOfflineInDb,
+  notifyAdminInstanceOffline,
+  removeInstanceFromPool,
+} from './dispatchRetry';
 
 /**
  * Serviço para processar disparos de marketing
@@ -143,6 +151,24 @@ export async function processMarketingDispatch(params: MarketingDispatchParams):
       throw new Error('Nenhuma instância conectada disponível');
     }
 
+    const notifyPhoneResult = await pool.query(
+      `SELECT notification_phone FROM devocional_config ORDER BY id DESC LIMIT 1`
+    );
+    const adminNotifyPhone: string | null = notifyPhoneResult.rows[0]?.notification_phone ?? null;
+
+    const notifyAdmin = async (phone: string, message: string) => {
+      const inst = await pool.query(
+        `SELECT instance_name, api_url, api_key FROM instances WHERE status = 'connected' LIMIT 1`
+      );
+      if (inst.rows.length === 0) return;
+      const row = inst.rows[0];
+      await axios.post(
+        `${row.api_url}/message/sendText/${row.instance_name}`,
+        { number: phone, text: message },
+        { headers: { apikey: row.api_key, 'Content-Type': 'application/json' }, timeout: 15000 }
+      );
+    };
+
     // Verificar saúde REAL de cada instância via ping antes de usar
     const verifiedInstances: any[] = [];
     for (const inst of instances) {
@@ -152,6 +178,13 @@ export async function processMarketingDispatch(params: MarketingDispatchParams):
       } else {
         console.log(`   ⚠️ Instância ${inst.instance_name} offline no ping - removida do disparo`);
         addLog('warning', `[Mensagem ${dispatchId}] Instância ${inst.instance_name} não respondeu ao ping`);
+        await markInstanceOfflineInDb(inst.id);
+        await notifyAdminInstanceOffline(
+          adminNotifyPhone,
+          inst.instance_name,
+          'Falha no ping antes do disparo',
+          notifyAdmin
+        );
       }
     }
 
@@ -371,41 +404,27 @@ export async function processMarketingDispatch(params: MarketingDispatchParams):
         await maybeDispatchPacingPause(pacing, successCount, `Marketing ${dispatchId}`);
 
       } catch (error: any) {
-        const isInstanceError =
-          error.code === 'ECONNREFUSED' ||
-          error.code === 'ETIMEDOUT' ||
-          error.code === 'ENOTFOUND' ||
-          (error.response?.status >= 500);
-
         console.error(`   ❌ Erro ao enviar para ${contact.phone_number}:`, error.message);
         failedCount++;
         try {
-          if (isInstanceError) {
-            // Marcar instância como offline
-            await pool.query(
-              `UPDATE instances SET status = 'disconnected', updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
-              [instance.id]
+          if (isInstanceConnectivityError(error)) {
+            await markInstanceOfflineInDb(instance.id);
+            await notifyAdminInstanceOffline(
+              adminNotifyPhone,
+              instance.instance_name,
+              error.message || 'erro de conexão',
+              notifyAdmin
             );
-            addLog('warning', `[Mensagem ${dispatchId}] Instância ${instance.id} marcada offline após falha`);
-
-            // Colocar na fila de retry
-            await pool.query(
-              `INSERT INTO dispatch_contacts (
-                dispatch_id, instance_id, contact_number, contact_name,
-                status, failed_reason, retry_count, last_retry_at, retry_instance_id
-              ) VALUES ($1, $2, $3, $4, 'pending_retry', $5, 1, CURRENT_TIMESTAMP, $2)`,
-              [
-                dispatchId,
-                instance.id,
-                contact.phone_number,
-                contact.name,
-                `Instância offline: ${error.message}`.slice(0, 500)
-              ]
-            );
-            console.log(`   🔄 Lead ${contact.phone_number} adicionado à fila de retry`);
-            addLog('info', `[Mensagem ${dispatchId}] Lead ${contact.phone_number} na fila de retry`);
+            instances = removeInstanceFromPool(instances, instance.id);
+            await enqueueDispatchRetry({
+              dispatchId,
+              instanceId: instance.id,
+              contactNumber: contact.phone_number,
+              contactName: contact.name,
+              failedReason: `Instância offline: ${error.message}`,
+            });
+            addLog('info', `[Mensagem ${dispatchId}] ${contact.phone_number} — retry único enfileirado`);
           } else {
-            // Falha real
             await pool.query(
               `INSERT INTO dispatch_contacts (dispatch_id, instance_id, contact_number, contact_name, status, failed_reason)
                VALUES ($1, $2, $3, $4, 'failed', $5)`,
@@ -510,8 +529,11 @@ async function sendTextMessage(
         'apikey': instance.api_key,
         'Content-Type': 'application/json',
       },
+      timeout: 20000,
+      validateStatus: () => true,
     }
   );
+  assertEvolutionSendOk(response);
 
   return response.data;
 }
@@ -559,8 +581,11 @@ async function sendMessageWithMedia(
         'apikey': instance.api_key,
         'Content-Type': 'application/json',
       },
+      timeout: 20000,
+      validateStatus: () => true,
     }
   );
+  assertEvolutionSendOk(response);
 
   return response.data;
 }

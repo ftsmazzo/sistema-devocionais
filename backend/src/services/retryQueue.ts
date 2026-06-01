@@ -8,15 +8,15 @@ import {
   applyMessageTemplate,
 } from './devocionalPersonalization';
 import { addLog } from '../routes/logs';
+import {
+  MAX_DISPATCH_RETRY_ATTEMPTS,
+  RETRY_DISPATCH_MAX_AGE_HOURS,
+  alreadySentInDispatch,
+  assertEvolutionSendOk,
+  isInstanceConnectivityError,
+} from './dispatchRetry';
 
-/**
- * Serviço de Fila de Retry
- * Reprocessa leads que falharam por instância indisponível
- * Executa a cada 5 minutos via cron
- * Máximo de 3 tentativas por lead, usando instâncias diferentes
- */
-
-const MAX_RETRY_COUNT = 3;
+let retryQueueRunning = false;
 
 /**
  * Verifica se uma instância está realmente online via ping na Evolution API
@@ -45,18 +45,16 @@ export async function pingInstanceHealth(instanceId: number): Promise<boolean> {
 
     const isOnline = state === 'open';
 
-    // Atualizar status no banco
     await pool.query(
-      `UPDATE instances SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
-      [isOnline ? 'connected' : 'disconnected', instanceId]
+      `UPDATE instances SET status = $1, health_status = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3`,
+      [isOnline ? 'connected' : 'disconnected', isOnline ? 'healthy' : 'down', instanceId]
     );
 
     return isOnline;
   } catch (error: any) {
     addLog('warning', `[RetryQueue] Erro ao pingar instância ${instanceId}: ${error.message}`);
-    // Em caso de erro de conexão, marcar como desconectada
     await pool.query(
-      `UPDATE instances SET status = 'disconnected', updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
+      `UPDATE instances SET status = 'disconnected', health_status = 'down', updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
       [instanceId]
     );
     return false;
@@ -64,13 +62,29 @@ export async function pingInstanceHealth(instanceId: number): Promise<boolean> {
 }
 
 /**
- * Processa a fila de retry
+ * Processa a fila de retry — no máximo 1 reenvio por contato/disparo, só disparos recentes.
  */
 export async function processRetryQueue(): Promise<void> {
+  if (retryQueueRunning) {
+    addLog('info', '[RetryQueue] Processamento já em andamento — ignorando tick duplicado.');
+    return;
+  }
+
+  retryQueueRunning = true;
   try {
-    // Buscar todos os dispatch_contacts com status 'pending_retry' e retry_count < MAX
+    await pool.query(
+      `UPDATE dispatch_contacts dc
+       SET status = 'failed',
+           failed_reason = COALESCE(dc.failed_reason, '') || ' [retry expirado — disparo antigo]'
+       FROM dispatches d
+       WHERE dc.dispatch_id = d.id
+         AND dc.status = 'pending_retry'
+         AND d.created_at < NOW() - ($1::int * INTERVAL '1 hour')`,
+      [RETRY_DISPATCH_MAX_AGE_HOURS]
+    );
+
     const pendingResult = await pool.query(
-      `SELECT 
+      `SELECT DISTINCT ON (dc.dispatch_id, dc.contact_number)
         dc.id,
         dc.dispatch_id,
         dc.contact_number,
@@ -85,9 +99,11 @@ export async function processRetryQueue(): Promise<void> {
        JOIN dispatches d ON dc.dispatch_id = d.id
        WHERE dc.status = 'pending_retry'
          AND dc.retry_count < $1
-       ORDER BY dc.created_at ASC
+         AND d.created_at > NOW() - ($2::text || ' hours')::interval
+         AND d.status IN ('running', 'completed')
+       ORDER BY dc.dispatch_id, dc.contact_number, dc.created_at ASC
        LIMIT 50`,
-      [MAX_RETRY_COUNT]
+      [MAX_DISPATCH_RETRY_ATTEMPTS, String(RETRY_DISPATCH_MAX_AGE_HOURS)]
     );
 
     if (pendingResult.rows.length === 0) {
@@ -97,7 +113,6 @@ export async function processRetryQueue(): Promise<void> {
     addLog('info', `[RetryQueue] Processando ${pendingResult.rows.length} lead(s) na fila de retry`);
     console.log(`🔄 [RetryQueue] ${pendingResult.rows.length} lead(s) para retentar`);
 
-    // Buscar instâncias conectadas
     const instancesResult = await pool.query(
       `SELECT id, instance_name, api_url, api_key, phone_number
        FROM instances
@@ -110,17 +125,29 @@ export async function processRetryQueue(): Promise<void> {
       return;
     }
 
-    const instances = instancesResult.rows;
+    let instances = instancesResult.rows;
 
     for (const item of pendingResult.rows) {
       try {
-        console.log(`   🔄 Retentando lead: ${item.contact_number} (tentativa ${item.retry_count + 1}/${MAX_RETRY_COUNT})`);
+        if (await alreadySentInDispatch(item.dispatch_id, item.contact_number)) {
+          await pool.query(
+            `UPDATE dispatch_contacts SET status = 'sent', sent_at = COALESCE(sent_at, CURRENT_TIMESTAMP) WHERE id = $1`,
+            [item.id]
+          );
+          addLog(
+            'info',
+            `[RetryQueue] ${item.contact_number} já tinha envio no disparo ${item.dispatch_id} — fila cancelada.`
+          );
+          continue;
+        }
 
-        // Selecionar instância diferente da última usada
+        console.log(
+          `   🔄 Retentando lead: ${item.contact_number} (tentativa ${item.retry_count + 1}/${MAX_DISPATCH_RETRY_ATTEMPTS})`
+        );
+
         const availableInstances = instances.filter((i) => i.id !== item.retry_instance_id);
         const candidates = availableInstances.length > 0 ? availableInstances : instances;
 
-        // Verificar qual instância está realmente online
         let selectedInstance: any = null;
         for (const candidate of candidates) {
           const isOnline = await pingInstanceHealth(candidate.id);
@@ -128,21 +155,21 @@ export async function processRetryQueue(): Promise<void> {
             selectedInstance = candidate;
             break;
           }
+          instances = instances.filter((i) => i.id !== candidate.id);
         }
 
         if (!selectedInstance) {
           addLog('warning', `[RetryQueue] Nenhuma instância online para retry de ${item.contact_number}`);
-          // Incrementar retry_count mas manter pending_retry
           await pool.query(
-            `UPDATE dispatch_contacts 
-             SET retry_count = retry_count + 1, last_retry_at = CURRENT_TIMESTAMP
+            `UPDATE dispatch_contacts
+             SET last_retry_at = CURRENT_TIMESTAMP,
+                 failed_reason = COALESCE(failed_reason, '') || ' [sem instância online]'
              WHERE id = $1`,
             [item.id]
           );
           continue;
         }
 
-        // Preparar mensagem
         let message = item.message_template;
 
         if (item.dispatch_type === 'marketing') {
@@ -172,8 +199,8 @@ export async function processRetryQueue(): Promise<void> {
 
           if (!blindageResult.canSend) {
             await pool.query(
-              `UPDATE dispatch_contacts 
-               SET status = 'failed', 
+              `UPDATE dispatch_contacts
+               SET status = 'failed',
                    failed_reason = $1,
                    retry_count = retry_count + 1,
                    last_retry_at = CURRENT_TIMESTAMP
@@ -188,6 +215,15 @@ export async function processRetryQueue(): Promise<void> {
             await new Promise((resolve) => setTimeout(resolve, blindageResult.delay));
           }
 
+          if (await alreadySentInDispatch(item.dispatch_id, item.contact_number)) {
+            await pool.query(
+              `UPDATE dispatch_contacts SET status = 'sent', sent_at = CURRENT_TIMESTAMP WHERE id = $1`,
+              [item.id]
+            );
+            skipLead = true;
+            return;
+          }
+
           await pool.query(
             `UPDATE instances SET last_message_sent_at = CURRENT_TIMESTAMP WHERE id = $1`,
             [selectedInstance.id]
@@ -200,8 +236,10 @@ export async function processRetryQueue(): Promise<void> {
             {
               headers: { apikey: selectedInstance.api_key, 'Content-Type': 'application/json' },
               timeout: 15000,
+              validateStatus: () => true,
             }
           );
+          assertEvolutionSendOk(sendResponse);
 
           const msgResult = await pool.query(
             `INSERT INTO messages (
@@ -225,7 +263,7 @@ export async function processRetryQueue(): Promise<void> {
           );
 
           await pool.query(
-            `UPDATE dispatch_contacts 
+            `UPDATE dispatch_contacts
              SET status = 'sent',
                  sent_at = CURRENT_TIMESTAMP,
                  message_sent_id = $1,
@@ -248,51 +286,46 @@ export async function processRetryQueue(): Promise<void> {
           });
 
           await pool.query(
-            `UPDATE dispatches 
+            `UPDATE dispatches
              SET contacts_success = contacts_success + 1,
                  contacts_failed = GREATEST(0, contacts_failed - 1)
              WHERE id = $1`,
             [item.dispatch_id]
           );
 
-          addLog('success', `[RetryQueue] ✅ Retry bem-sucedido: ${item.contact_number} via instância ${selectedInstance.id}`);
+          addLog(
+            'success',
+            `[RetryQueue] ✅ Retry único concluído: ${item.contact_number} via ${selectedInstance.instance_name}`
+          );
           console.log(`   ✅ Retry enviado: ${item.contact_number} via instância ${selectedInstance.instance_name}`);
         });
 
         if (skipLead) {
           continue;
         }
-
       } catch (error: any) {
         console.error(`   ❌ Retry falhou para ${item.contact_number}:`, error.message);
 
         const newRetryCount = item.retry_count + 1;
-        const isInstanceError =
-          error.code === 'ECONNREFUSED' ||
-          error.code === 'ETIMEDOUT' ||
-          error.code === 'ENOTFOUND' ||
-          (error.response?.status >= 500);
 
-        if (newRetryCount >= MAX_RETRY_COUNT || !isInstanceError) {
-          // Falha definitiva
+        if (newRetryCount >= MAX_DISPATCH_RETRY_ATTEMPTS || !isInstanceConnectivityError(error)) {
           await pool.query(
-            `UPDATE dispatch_contacts 
+            `UPDATE dispatch_contacts
              SET status = 'failed',
                  failed_reason = $1,
                  retry_count = $2,
                  last_retry_at = CURRENT_TIMESTAMP
              WHERE id = $3`,
             [
-              `Falha definitiva após ${newRetryCount} tentativas: ${error.message}`.slice(0, 500),
+              `Falha definitiva após retry: ${error.message}`.slice(0, 500),
               newRetryCount,
               item.id,
             ]
           );
-          addLog('error', `[RetryQueue] ❌ Falha definitiva após ${newRetryCount} tentativas: ${item.contact_number}`);
+          addLog('error', `[RetryQueue] ❌ Falha definitiva: ${item.contact_number}`);
         } else {
-          // Manter na fila
           await pool.query(
-            `UPDATE dispatch_contacts 
+            `UPDATE dispatch_contacts
              SET retry_count = $1, last_retry_at = CURRENT_TIMESTAMP
              WHERE id = $2`,
             [newRetryCount, item.id]
@@ -305,5 +338,7 @@ export async function processRetryQueue(): Promise<void> {
   } catch (error: any) {
     console.error('❌ [RetryQueue] Erro ao processar fila de retry:', error.message);
     addLog('error', `[RetryQueue] Erro geral: ${error.message}`);
+  } finally {
+    retryQueueRunning = false;
   }
 }

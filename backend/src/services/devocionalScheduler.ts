@@ -12,6 +12,14 @@ import { canReceiveDevocional, updateDevocionalScore } from './devocionalScoring
 import { addLog } from '../routes/logs';
 import { pingInstanceHealth } from './retryQueue';
 import { reconcileActiveJourneyForDate } from './journeyReconcile';
+import {
+  assertEvolutionSendOk,
+  enqueueDispatchRetry,
+  isInstanceConnectivityError,
+  markInstanceOfflineInDb,
+  notifyAdminInstanceOffline,
+  removeInstanceFromPool,
+} from './dispatchRetry';
 
 /**
  * Serviço de agendamento para disparo automático de devocionais
@@ -316,7 +324,7 @@ export async function executeDevocionalDispatch(): Promise<void> {
     }
 
     // Verificar saúde REAL de cada instância via ping
-    const instances: any[] = [];
+    let instances: any[] = [];
     for (const inst of instancesResult.rows) {
       const isOnline = await pingInstanceHealth(inst.id);
       if (isOnline) {
@@ -324,6 +332,13 @@ export async function executeDevocionalDispatch(): Promise<void> {
       } else {
         console.log(`   ⚠️ Instância ${inst.instance_name} offline no ping - ignorada`);
         addLog('warning', `[Devocional] Instância ${inst.instance_name} não respondeu ao ping - removida do disparo`);
+        await markInstanceOfflineInDb(inst.id);
+        await notifyAdminInstanceOffline(
+          config.notification_phone,
+          inst.instance_name,
+          'Falha no ping antes do disparo',
+          sendNotification
+        );
       }
     }
 
@@ -369,28 +384,49 @@ export async function executeDevocionalDispatch(): Promise<void> {
     let instanceIndex = 0;
 
     const pacing = await loadDispatchPacingRuntime();
+    let lastOfflineInstanceId: number | null = instances[0]?.id ?? null;
 
     for (const contact of eligibleContacts) {
-      const preferredIdx = preferredInstanceIndexForDispatch(
-        pacing,
-        successCount,
-        instanceIndex,
-        instances.length
+      const formattedDevocional = formatDevocionalMessage(devocional);
+      const personalizedMessage = personalizeDevocionalMessage(
+        formattedDevocional,
+        contact.name,
+        config.timezone
       );
-      const instance = instances[preferredIdx];
-      if (pacing.rotateEveryN <= 0) {
-        instanceIndex++;
+
+      if (instances.length === 0) {
+        failedCount++;
+        const instId = lastOfflineInstanceId ?? instancesResult.rows[0]?.id;
+        if (instId) {
+          await enqueueDispatchRetry({
+            dispatchId,
+            instanceId: instId,
+            contactNumber: contact.phone_number,
+            contactName: contact.name,
+            failedReason: 'Todas as instâncias offline durante o disparo',
+          });
+        }
+        continue;
       }
-      try {
 
-        // Formatar mensagem personalizada
-        const formattedDevocional = formatDevocionalMessage(devocional);
-        const personalizedMessage = personalizeDevocionalMessage(
-          formattedDevocional,
-          contact.name,
-          config.timezone
+      let contactSent = false;
+      let instanceAttempts = 0;
+      const maxInstanceAttempts = Math.max(instances.length, 1);
+
+      while (!contactSent && instanceAttempts < maxInstanceAttempts && instances.length > 0) {
+        instanceAttempts++;
+        const preferredIdx = preferredInstanceIndexForDispatch(
+          pacing,
+          successCount,
+          instanceIndex,
+          instances.length
         );
+        const instance = instances[preferredIdx];
+        if (pacing.rotateEveryN <= 0) {
+          instanceIndex++;
+        }
 
+        try {
         let aborted = false;
         await withGlobalOutboundGate(async () => {
           // Aplicar blindagem
@@ -473,8 +509,11 @@ export async function executeDevocionalDispatch(): Promise<void> {
                 'apikey': instance.api_key,
                 'Content-Type': 'application/json',
               },
+              timeout: 20000,
+              validateStatus: () => true,
             }
           );
+          assertEvolutionSendOk(response);
 
           // Registrar mensagem
           const messageResult = await pool.query(
@@ -538,64 +577,70 @@ export async function executeDevocionalDispatch(): Promise<void> {
         });
 
         if (aborted) {
-          continue;
+          contactSent = true;
+          break;
         }
 
+        contactSent = true;
         await maybeDispatchPacingPause(pacing, successCount, `Devocional ${dispatchId}`);
 
       } catch (error: any) {
-        const isInstanceError =
-          error.code === 'ECONNREFUSED' ||
-          error.code === 'ETIMEDOUT' ||
-          error.code === 'ENOTFOUND' ||
-          (error.response?.status >= 500);
-
         console.error(`   ❌ Erro ao enviar para ${contact.phone_number}:`, error.message);
-        failedCount++;
-        try {
-          if (isInstanceError) {
-            // Marcar instância como offline
-            await pool.query(
-              `UPDATE instances SET status = 'disconnected', updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
-              [instance.id]
-            );
-            addLog('warning', `[Devocional] Instância ${instance.id} marcada como offline após falha de envio`);
 
-            // Colocar na fila de retry
-            await pool.query(
-              `INSERT INTO dispatch_contacts (
-                dispatch_id, instance_id, contact_number, contact_name,
-                status, failed_reason, retry_count, last_retry_at, retry_instance_id
-              ) VALUES ($1, $2, $3, $4, 'pending_retry', $5, 1, CURRENT_TIMESTAMP, $2)`,
-              [
-                dispatchId,
-                instance.id,
-                contact.phone_number,
-                contact.name,
-                `Instância offline: ${error.message}`.slice(0, 500)
-              ]
-            );
-            console.log(`   🔄 Lead ${contact.phone_number} adicionado à fila de retry`);
-            addLog('info', `[Devocional] Lead ${contact.phone_number} adicionado à fila de retry (instância offline)`);
-          } else {
-            // Erro real (número inválido, bloqueado, etc): falha definitiva
-            await pool.query(
-              `INSERT INTO dispatch_contacts (
-                dispatch_id, instance_id, contact_number, contact_name,
-                status, failed_reason
-              ) VALUES ($1, $2, $3, $4, 'failed', $5)`,
-              [
-                dispatchId,
-                instance.id,
-                contact.phone_number,
-                contact.name,
-                (error.message || String(error)).slice(0, 500)
-              ]
-            );
-          }
-          console.log(`   📝 Falha registrada em dispatch_contacts: ${contact.phone_number}`);
+        if (isInstanceConnectivityError(error)) {
+          lastOfflineInstanceId = instance.id;
+          await markInstanceOfflineInDb(instance.id);
+          await notifyAdminInstanceOffline(
+            config.notification_phone,
+            instance.instance_name,
+            error.message || 'erro de conexão',
+            sendNotification
+          );
+          instances = removeInstanceFromPool(instances, instance.id);
+          addLog(
+            'warning',
+            `[Devocional] Instância ${instance.instance_name} removida do pool; tentando próxima para ${contact.phone_number}`
+          );
+          continue;
+        }
+
+        try {
+          await pool.query(
+            `INSERT INTO dispatch_contacts (
+              dispatch_id, instance_id, contact_number, contact_name,
+              status, failed_reason
+            ) VALUES ($1, $2, $3, $4, 'failed', $5)`,
+            [
+              dispatchId,
+              instance.id,
+              contact.phone_number,
+              contact.name,
+              (error.message || String(error)).slice(0, 500),
+            ]
+          );
         } catch (insertErr: any) {
           console.error(`   ⚠️ Erro ao registrar falha em dispatch_contacts:`, insertErr.message);
+        }
+        failedCount++;
+        contactSent = true;
+      }
+      }
+
+      if (!contactSent) {
+        failedCount++;
+        const instId = lastOfflineInstanceId ?? instances[0]?.id ?? instancesResult.rows[0]?.id;
+        if (instId) {
+          const queued = await enqueueDispatchRetry({
+            dispatchId,
+            instanceId: instId,
+            contactNumber: contact.phone_number,
+            contactName: contact.name,
+            failedReason: 'Falha em todas as instâncias tentadas no disparo',
+          });
+          if (queued) {
+            console.log(`   🔄 Lead ${contact.phone_number} na fila de retry (1 tentativa posterior)`);
+            addLog('info', `[Devocional] ${contact.phone_number} enfileirado para retry único`);
+          }
         }
       }
     }
