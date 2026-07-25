@@ -1,36 +1,19 @@
+/**
+ * Enfileira disparos de marketing em dispatch_items.
+ * O worker PostgreSQL é o único executor de envio.
+ */
 import { pool } from '../database';
-import { applyBlindage, recordBlindageSuccessfulSend } from './blindage';
 import { applyMessageTemplate } from './devocionalPersonalization';
-import { withGlobalOutboundGate } from './globalOutboundGate';
-import {
-  loadDispatchPacingRuntime,
-  maybeDispatchPacingPause,
-  preferredInstanceIndexForDispatch,
-} from './dispatchPacing';
 import { addLog } from '../routes/logs';
 import { pingInstanceHealth } from './retryQueue';
+import { markInstanceOfflineInDb, notifyAdminInstanceOffline } from './dispatchRetry';
+import { maskPhone } from './evolutionSafeSender';
+import { ensureDispatchItem, isDispatchItemSent } from './dispatchItems';
 import {
-  enqueueDispatchRetry,
-  isInstanceConnectivityError,
-  markInstanceOfflineInDb,
-  notifyAdminInstanceOffline,
-  removeInstanceFromPool,
-} from './dispatchRetry';
-import { maskPhone, sendEvolutionTextSafely } from './evolutionSafeSender';
-import {
-  ensureDispatchItem,
-  isDispatchItemSent,
-  markDispatchItemFailed,
-  markDispatchItemProcessing,
-  markDispatchItemSent,
-  markDispatchItemSkipped,
-  syncDispatchContactStatus,
-} from './dispatchItems';
-
-/**
- * Serviço para processar disparos de marketing
- * Suporta texto, imagem e PDF
- */
+  assertDispatchPipelineAllowed,
+  DispatchOperationalError,
+} from './dispatchRuntimeConfig';
+import { sendAdminWhatsAppNotification } from './adminWhatsAppNotify';
 
 interface MarketingDispatchParams {
   dispatchId: number;
@@ -38,17 +21,18 @@ interface MarketingDispatchParams {
 }
 
 /**
- * Processar e enviar disparo de marketing
+ * Processar disparo de marketing = apenas enfileirar itens para o worker.
  */
 export async function processMarketingDispatch(params: MarketingDispatchParams): Promise<void> {
   const { dispatchId, instanceIds } = params;
 
   try {
-    const logMsg = `📢 Iniciando processamento de disparo de marketing ID ${dispatchId}`;
+    assertDispatchPipelineAllowed();
+
+    const logMsg = `📢 Enfileirando disparo de marketing ID ${dispatchId} (worker)`;
     console.log(logMsg);
     addLog('info', logMsg);
 
-    // Buscar dados do disparo
     const dispatchResult = await pool.query(
       `SELECT 
         d.*,
@@ -65,53 +49,38 @@ export async function processMarketingDispatch(params: MarketingDispatchParams):
 
     const dispatch = dispatchResult.rows[0];
 
-    // Verificar se já está processando ou concluído
     if (dispatch.status === 'completed' || dispatch.status === 'stopped') {
       console.log(`   ⚠️ Disparo já está em status: ${dispatch.status}`);
       return;
     }
 
-    // Se já está running, verificar se realmente está processando ou se precisa continuar
     if (dispatch.status === 'running') {
-      // Verificar se há mensagens já enviadas (indica que está processando)
-      const messagesCheck = await pool.query(
-        `SELECT COUNT(*) as count FROM dispatch_contacts WHERE dispatch_id = $1`,
+      const itemsCheck = await pool.query(
+        `SELECT COUNT(*)::int AS count FROM dispatch_items WHERE dispatch_id = $1`,
         [dispatchId]
       );
-      const messagesSent = parseInt(messagesCheck.rows[0]?.count || '0');
-      
-      if (messagesSent > 0) {
-        console.log(`   ⚠️ Disparo já está sendo processado (${messagesSent} mensagens enviadas)`);
+      if ((itemsCheck.rows[0]?.count || 0) > 0) {
+        console.log(`   ⚠️ Disparo já possui itens enfileirados`);
         return;
       }
-      // Se não há mensagens, pode ser que o processamento anterior falhou, então continuar
-      console.log(`   ℹ️ Disparo em status 'running' mas sem mensagens, continuando processamento...`);
     }
 
-    // Atualizar status para running
     await pool.query(
-      `UPDATE dispatches SET status = 'running', started_at = CURRENT_TIMESTAMP WHERE id = $1`,
+      `UPDATE dispatches SET status = 'running', started_at = COALESCE(started_at, CURRENT_TIMESTAMP) WHERE id = $1`,
       [dispatchId]
     );
 
-    // Buscar contatos
     let contacts: any[] = [];
 
     if (dispatch.list_id) {
-      // Buscar contatos da lista
-      const listResult = await pool.query(
-        `SELECT * FROM contact_lists WHERE id = $1`,
-        [dispatch.list_id]
-      );
-
+      const listResult = await pool.query(`SELECT * FROM contact_lists WHERE id = $1`, [
+        dispatch.list_id,
+      ]);
       if (listResult.rows.length === 0) {
         throw new Error(`Lista ${dispatch.list_id} não encontrada`);
       }
-
-      const list = listResult.rows[0];
-      contacts = await getContactsFromList(list);
+      contacts = await getContactsFromList(listResult.rows[0]);
     } else if (dispatch.contact_ids && Array.isArray(dispatch.contact_ids)) {
-      // Buscar contatos específicos
       const contactsResult = await pool.query(
         `SELECT id, phone_number, name, whatsapp_validated, opt_in, opt_out
          FROM contacts
@@ -134,23 +103,16 @@ export async function processMarketingDispatch(params: MarketingDispatchParams):
       return;
     }
 
-    // Buscar instâncias
     let instances: any[] = [];
-
     if (instanceIds && instanceIds.length > 0) {
       const instancesResult = await pool.query(
-        `SELECT id, instance_name, api_url, api_key, phone_number
-         FROM instances
-         WHERE id = ANY($1::int[]) AND status = 'connected'`,
+        `SELECT id, instance_name FROM instances WHERE id = ANY($1::int[]) AND status = 'connected'`,
         [instanceIds]
       );
       instances = instancesResult.rows;
     } else {
       const instancesResult = await pool.query(
-        `SELECT id, instance_name, api_url, api_key, phone_number
-         FROM instances
-         WHERE status = 'connected'
-         ORDER BY last_message_sent_at ASC NULLS FIRST`
+        `SELECT id, instance_name FROM instances WHERE status = 'connected' ORDER BY last_message_sent_at ASC NULLS FIRST`
       );
       instances = instancesResult.rows;
     }
@@ -164,34 +126,18 @@ export async function processMarketingDispatch(params: MarketingDispatchParams):
     );
     const adminNotifyPhone: string | null = notifyPhoneResult.rows[0]?.notification_phone ?? null;
 
-    const notifyAdmin = async (phone: string, message: string) => {
-      const inst = await pool.query(
-        `SELECT id FROM instances WHERE status = 'connected' ORDER BY last_message_sent_at ASC NULLS FIRST LIMIT 1`
-      );
-      if (inst.rows.length === 0) return;
-      await sendEvolutionTextSafely({
-        instanceId: inst.rows[0].id,
-        number: phone,
-        text: message,
-        messageType: 'notification',
-      });
-    };
-
-    // Verificar saúde REAL de cada instância via ping antes de usar
     const verifiedInstances: any[] = [];
     for (const inst of instances) {
       const isOnline = await pingInstanceHealth(inst.id);
       if (isOnline) {
         verifiedInstances.push(inst);
       } else {
-        console.log(`   ⚠️ Instância ${inst.instance_name} offline no ping - removida do disparo`);
-        addLog('warning', `[Mensagem ${dispatchId}] Instância ${inst.instance_name} não respondeu ao ping`);
         await markInstanceOfflineInDb(inst.id);
         await notifyAdminInstanceOffline(
           adminNotifyPhone,
           inst.instance_name,
           'Falha no ping antes do disparo',
-          notifyAdmin
+          sendAdminWhatsAppNotification
         );
       }
     }
@@ -200,347 +146,68 @@ export async function processMarketingDispatch(params: MarketingDispatchParams):
       throw new Error('Todas as instâncias estão offline. Verifique a conexão WhatsApp.');
     }
 
-    // Usar apenas instâncias verificadas
-    instances = verifiedInstances;
-    console.log(`   📱 ${instances.length} instância(s) verificada(s) e disponível(is)`);
-
-    const pacing = await loadDispatchPacingRuntime();
-
-    // Parse metadata
-    const metadata = typeof dispatch.metadata === 'string' 
-      ? JSON.parse(dispatch.metadata) 
-      : dispatch.metadata || {};
-
-    const mediaUrl = metadata.media_url;
-    const mediaType = metadata.media_type; // 'image', 'pdf', 'document'
-
-    // Processar envio para cada contato
-    let successCount = 0;
-    let failedCount = 0;
-    let instanceIndex = 0;
-
-    const startTime = Date.now();
-    let contactIndex = 0;
+    let enqueued = 0;
+    let alreadySent = 0;
 
     for (const contact of contacts) {
-      contactIndex++;
-      const contactStartTime = Date.now();
-      
-      const preferredIdx = preferredInstanceIndexForDispatch(
-        pacing,
-        successCount,
-        instanceIndex,
-        instances.length
-      );
-      let instance = instances[preferredIdx];
-      let currentItemId: number | null = null;
-      try {
-        console.log(`\n   📤 [${contactIndex}/${contacts.length}] Processando contato: ${maskPhone(contact.phone_number)} (${contact.name || 'Sem nome'})`);
+      const personalizedMessage = applyMessageTemplate(dispatch.message_template, contact.name);
 
-        const personalizedMessage = applyMessageTemplate(dispatch.message_template, contact.name);
+      const dispatchItem = await ensureDispatchItem({
+        dispatchId,
+        contactId: contact.id,
+        contactNumber: contact.phone_number,
+        contactName: contact.name,
+        messageType: 'marketing',
+        messageSnapshot: personalizedMessage,
+        maxAttempts: 1,
+      });
 
-        const dispatchItem = await ensureDispatchItem({
-          dispatchId,
-          contactId: contact.id,
-          contactNumber: contact.phone_number,
-          contactName: contact.name,
-          messageType: 'marketing',
-          messageSnapshot: personalizedMessage,
-          maxAttempts: 1,
-        });
-        currentItemId = dispatchItem.id;
-
-        if (dispatchItem.status === 'sent' || (await isDispatchItemSent(dispatchId, contact.phone_number))) {
-          addLog('info', `[Marketing ${dispatchId}] Item já sent — skip ${maskPhone(contact.phone_number)}`);
-          successCount++;
-          continue;
-        }
-
-        let abortContact = false;
-        await withGlobalOutboundGate(async () => {
-          // Aplicar blindagem (define instância e delay; usar instância retornada pela blindagem)
-          const blindageStartTime = Date.now();
-          const blindageResult = await applyBlindage({
-            to: contact.phone_number,
-            message: personalizedMessage,
-            instanceId: instance?.id,
-            messageType: 'marketing',
-          });
-          const blindageTime = Date.now() - blindageStartTime;
-          const blindageLog = `🛡️ Blindagem aplicada em ${blindageTime}ms`;
-          console.log(`      ${blindageLog}`);
-          addLog('info', `[Marketing ${dispatchId}] ${blindageLog}`);
-
-          if (!blindageResult.canSend) {
-            const blockLog = `⛔ BLOQUEADO pela blindagem: ${blindageResult.reason}`;
-            console.log(`      ${blockLog}`);
-            addLog('warning', `[Marketing ${dispatchId}] ${blockLog} - Contato: ${maskPhone(contact.phone_number)}`);
-            failedCount++;
-            await markDispatchItemSkipped({
-              itemId: dispatchItem.id,
-              reason: `Blindagem: ${blindageResult.reason || 'bloqueado'}`,
-              instanceId: instance?.id,
-            });
-            await syncDispatchContactStatus({
-              dispatchId,
-              contactNumber: contact.phone_number,
-              contactName: contact.name,
-              instanceId: instance?.id,
-              status: 'failed',
-              failedReason: `Blindagem: ${blindageResult.reason || 'bloqueado'}`,
-            });
-            if (pacing.rotateEveryN <= 0) {
-              instanceIndex++;
-            }
-            abortContact = true;
-            return;
-          }
-
-          instance = blindageResult.selectedInstanceId != null
-            ? instances.find((i: any) => i.id === blindageResult.selectedInstanceId) || instances[instanceIndex % instances.length]
-            : instances[instanceIndex % instances.length];
-          if (pacing.rotateEveryN <= 0) {
-            instanceIndex++;
-          }
-          console.log(`      🔄 Usando instância: ${instance.instance_name} (ID: ${instance.id})`);
-
-          // Aplicar delay
-          if (blindageResult.delay && blindageResult.delay > 0) {
-            const delaySeconds = Math.ceil(blindageResult.delay / 1000);
-            const delayStartTime = Date.now();
-            const delayLog = `⏳ [DELAY] Aguardando ${delaySeconds}s (${blindageResult.delay}ms) antes de enviar...`;
-            console.log(`      ${delayLog}`);
-            addLog('info', `[Marketing ${dispatchId}] ${delayLog} - Contato: ${maskPhone(contact.phone_number)}`);
-            await new Promise(resolve => setTimeout(resolve, blindageResult.delay));
-            const actualDelay = Date.now() - delayStartTime;
-            const delayDiff = actualDelay - blindageResult.delay;
-            if (Math.abs(delayDiff) > 100) {
-              const delayWarn = `⚠️ [DELAY] ATENÇÃO: Esperado ${blindageResult.delay}ms, mas levou ${actualDelay}ms (diferença: ${delayDiff > 0 ? '+' : ''}${delayDiff}ms)`;
-              console.log(`      ${delayWarn}`);
-              addLog('warning', `[Marketing ${dispatchId}] ${delayWarn}`);
-            } else {
-              const delayOk = `✅ [DELAY] Concluído corretamente: ${actualDelay}ms`;
-              console.log(`      ${delayOk}`);
-              addLog('success', `[Marketing ${dispatchId}] ${delayOk}`);
-            }
-          } else {
-            const noDelayWarn = `⚠️ [DELAY] NENHUM DELAY CONFIGURADO - Enviando imediatamente!`;
-            console.log(`      ${noDelayWarn}`);
-            addLog('warning', `[Marketing ${dispatchId}] ${noDelayWarn}`);
-          }
-
-          if (await isDispatchItemSent(dispatchId, contact.phone_number)) {
-            abortContact = true;
-            return;
-          }
-
-          await markDispatchItemProcessing(dispatchItem.id, instance.id);
-
-          // CRÍTICO: Atualizar last_message_sent_at ANTES de enviar para que o próximo cálculo de delay seja correto
-          // Isso garante que o delay global seja respeitado mesmo com rotação de instâncias
-          await pool.query(
-            `UPDATE instances 
-             SET last_message_sent_at = CURRENT_TIMESTAMP 
-             WHERE id = $1`,
-            [instance.id]
-          );
-
-          // Enviar mensagem (texto ou mídia) via cliente único com guard persistente
-          const sendStartTime = Date.now();
-          const sendResult = await sendEvolutionTextSafely({
-            instanceId: instance.id,
-            number: contact.phone_number,
-            text: personalizedMessage,
-            messageType: 'marketing',
-            metadata: { dispatchId, contactId: contact.id, dispatchItemId: dispatchItem.id },
-            media:
-              mediaUrl && mediaType
-                ? { url: mediaUrl, type: String(mediaType) }
-                : undefined,
-          });
-          const sendTime = Date.now() - sendStartTime;
-          console.log(`      ✅ Mensagem enviada em ${sendTime}ms (seq=${sendResult.sequenceNumber})`);
-
-          // Registrar mensagem
-          const messageResult = await pool.query(
-            `INSERT INTO messages (
-              instance_id, message_id, remote_jid, from_me,
-              message_type, message_body, timestamp, status,
-              dispatch_id, dispatch_type, contact_id
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-            RETURNING id`,
-            [
-              instance.id,
-              sendResult.messageId,
-              `${contact.phone_number}@s.whatsapp.net`,
-              true,
-              mediaType || 'text',
-              personalizedMessage,
-              new Date(),
-              'sent',
-              dispatchId,
-              'marketing',
-              contact.id,
-            ]
-          );
-
-          await markDispatchItemSent({
-            itemId: dispatchItem.id,
-            providerMessageId: sendResult.messageId,
-            instanceId: instance.id,
-          });
-          await syncDispatchContactStatus({
-            dispatchId,
-            contactNumber: contact.phone_number,
-            contactName: contact.name,
-            instanceId: instance.id,
-            status: 'sent',
-            messageSentId: messageResult.rows[0].id,
-          });
-
-          successCount++;
-          const contactTotalTime = Date.now() - contactStartTime;
-          const totalElapsed = Date.now() - startTime;
-          const avgTimePerContact = totalElapsed / contactIndex;
-          const estimatedRemaining = Math.ceil((avgTimePerContact * (contacts.length - contactIndex)) / 1000);
-
-          const successLog = `✅ SUCESSO! Tempo total: ${contactTotalTime}ms`;
-          const progressLog = `📊 Progresso: ${successCount}/${contacts.length} enviados | Tempo médio: ${Math.ceil(avgTimePerContact)}ms | Estimativa restante: ~${estimatedRemaining}s`;
-          console.log(`      ${successLog}`);
-          console.log(`      ${progressLog}`);
-          addLog('success', `[Marketing ${dispatchId}] ${successLog} - Contato: ${maskPhone(contact.phone_number)}`);
-          addLog('info', `[Marketing ${dispatchId}] ${progressLog}`);
-
-          // Atualizar última mensagem enviada da instância
-          await pool.query(
-            `UPDATE instances
-             SET last_message_sent_at = CURRENT_TIMESTAMP,
-                 last_activity_at = CURRENT_TIMESTAMP
-             WHERE id = $1`,
-            [instance.id]
-          );
-          await recordBlindageSuccessfulSend({
-            to: contact.phone_number,
-            message: personalizedMessage,
-            messageType: 'marketing',
-          });
-        });
-
-        if (abortContact) {
-          continue;
-        }
-
-        await maybeDispatchPacingPause(pacing, successCount, `Marketing ${dispatchId}`);
-
-      } catch (error: any) {
-        console.error(`   ❌ Erro ao enviar para ${maskPhone(contact.phone_number)}:`, error.message);
-        failedCount++;
-        try {
-          if (isInstanceConnectivityError(error)) {
-            await markInstanceOfflineInDb(instance.id);
-            await notifyAdminInstanceOffline(
-              adminNotifyPhone,
-              instance.instance_name,
-              error.message || 'erro de conexão',
-              notifyAdmin
-            );
-            instances = removeInstanceFromPool(instances, instance.id);
-            if (currentItemId) {
-              await markDispatchItemFailed({
-                itemId: currentItemId,
-                errorMessage: `Instância offline: ${error.message}`,
-                errorCategory: 'instance_offline',
-                instanceId: instance.id,
-                asPendingRetry: true,
-              });
-            }
-            await enqueueDispatchRetry({
-              dispatchId,
-              instanceId: instance.id,
-              contactNumber: contact.phone_number,
-              contactName: contact.name,
-              failedReason: `Instância offline: ${error.message}`,
-            });
-            addLog('info', `[Mensagem ${dispatchId}] ${maskPhone(contact.phone_number)} — retry único enfileirado`);
-          } else {
-            if (currentItemId) {
-              await markDispatchItemFailed({
-                itemId: currentItemId,
-                errorMessage: error.message || String(error),
-                errorCategory: 'send_error',
-                instanceId: instance?.id,
-              });
-            }
-            await syncDispatchContactStatus({
-              dispatchId,
-              contactNumber: contact.phone_number,
-              contactName: contact.name,
-              instanceId: instance?.id,
-              status: 'failed',
-              failedReason: error.message || String(error),
-            });
-          }
-        } catch (e) { /* ignore */ }
+      if (dispatchItem.status === 'sent' || (await isDispatchItemSent(dispatchId, contact.phone_number))) {
+        alreadySent++;
+        continue;
       }
+
+      await pool.query(
+        `INSERT INTO dispatch_contacts (dispatch_id, contact_number, contact_name, status)
+         SELECT $1, $2, $3, 'pending'
+         WHERE NOT EXISTS (
+           SELECT 1 FROM dispatch_contacts
+           WHERE dispatch_id = $1 AND contact_number = $2
+         )`,
+        [dispatchId, contact.phone_number, contact.name]
+      );
+
+      enqueued++;
+      addLog(
+        'info',
+        `[Marketing ${dispatchId}] Enfileirado item ${dispatchItem.id} ${maskPhone(contact.phone_number)}`
+      );
     }
 
-    // Atualizar status do disparo
     await pool.query(
       `UPDATE dispatches
-       SET status = 'completed',
-           contacts_processed = $1,
-           contacts_success = $2,
-           contacts_failed = $3,
-           completed_at = CURRENT_TIMESTAMP
-       WHERE id = $4`,
-      [contacts.length, successCount, failedCount, dispatchId]
+       SET total_contacts = $1,
+           contacts_processed = $2,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $3`,
+      [contacts.length, alreadySent, dispatchId]
     );
 
-    const totalTime = Date.now() - startTime;
-    const totalTimeSeconds = Math.ceil(totalTime / 1000);
-    const completeLog = `✅ Disparo concluído: ${successCount} sucesso, ${failedCount} falhas`;
-    const timeLog = `⏱️ Tempo total: ${totalTimeSeconds}s (${totalTime}ms)`;
-    const avgLog = `📊 Média: ${Math.ceil(totalTime / contacts.length)}ms por contato`;
-    console.log(`\n   ${completeLog}`);
-    console.log(`   ${timeLog}`);
-    console.log(`   ${avgLog}`);
+    const completeLog = `✅ Marketing ${dispatchId} enfileirado: ${enqueued} itens, ${alreadySent} já sent — worker processará`;
+    console.log(`   ${completeLog}`);
     addLog('success', `[Marketing ${dispatchId}] ${completeLog}`);
-    addLog('info', `[Marketing ${dispatchId}] ${timeLog}`);
-    addLog('info', `[Marketing ${dispatchId}] ${avgLog}`);
 
-    // Enviar notificação de conclusão (se configurado)
-    // Buscar telefone de notificação do devocional (marketing não tem notification_phone)
-    const devocionalConfigResult = await pool.query(
-      `SELECT notification_phone FROM devocional_config ORDER BY id DESC LIMIT 1`
-    );
-    const notificationPhone = devocionalConfigResult.rows[0]?.notification_phone;
-    
-    if (notificationPhone) {
-      try {
-        const instanceResult = await pool.query(
-          `SELECT id FROM instances WHERE status = 'connected' ORDER BY last_message_sent_at ASC NULLS FIRST LIMIT 1`
-        );
-
-        if (instanceResult.rows.length > 0) {
-          await sendEvolutionTextSafely({
-            instanceId: instanceResult.rows[0].id,
-            number: notificationPhone,
-            text: `✅ Disparo de Marketing "${dispatch.name}" concluído:\n\n📊 ${successCount} enviados\n❌ ${failedCount} falhas\n⏱️ Tempo total: ${totalTimeSeconds}s\n📈 Média: ${Math.ceil(totalTime / contacts.length)}ms por contato`,
-            messageType: 'notification',
-          });
-          console.log(`   📲 [NOTIFICAÇÃO ÚNICA] Enviada para ${maskPhone(notificationPhone)}`);
-        }
-      } catch (error: any) {
-        console.error(`   ⚠️ Erro ao enviar notificação:`, error.message);
-      }
-    } else {
-      console.log(`   ℹ️ Nenhum telefone de notificação configurado`);
+    if (adminNotifyPhone) {
+      await sendAdminWhatsAppNotification(
+        adminNotifyPhone,
+        `✅ Disparo de Marketing "${dispatch.name}" enfileirado:\n📦 ${enqueued} itens no worker`
+      );
     }
-
   } catch (error: any) {
     console.error(`❌ Erro ao processar disparo de marketing:`, error);
-    
-    // Atualizar status para failed
+    if (error instanceof DispatchOperationalError) {
+      addLog('error', `[Marketing ${dispatchId}] ${error.message}`);
+    }
     await pool.query(
       `UPDATE dispatches SET status = 'failed', completed_at = CURRENT_TIMESTAMP WHERE id = $1`,
       [dispatchId]
@@ -548,15 +215,11 @@ export async function processMarketingDispatch(params: MarketingDispatchParams):
   }
 }
 
-/**
- * Buscar contatos de uma lista (static, dynamic ou hybrid)
- */
 async function getContactsFromList(list: any): Promise<any[]> {
   let query = '';
   let params: any[] = [];
 
   if (list.list_type === 'static') {
-    // Lista estática
     query = `
       SELECT DISTINCT c.id, c.phone_number, c.name
       FROM contacts c
@@ -568,14 +231,12 @@ async function getContactsFromList(list: any): Promise<any[]> {
     `;
     params = [list.id];
   } else {
-    // Lista dinâmica ou híbrida
     const filterConfig = list.filter_config || {};
-    
+
     let whereConditions = ['c.whatsapp_validated = true', 'c.opt_in = true', 'c.opt_out = false'];
     let joinClauses = '';
     let paramCount = 1;
 
-    // Tags incluídas
     if (filterConfig.tags && Array.isArray(filterConfig.tags) && filterConfig.tags.length > 0) {
       joinClauses += ` JOIN contact_tag_relations ctr${paramCount} ON c.id = ctr${paramCount}.contact_id`;
       whereConditions.push(`ctr${paramCount}.tag_id = ANY($${paramCount}::int[])`);
@@ -583,7 +244,6 @@ async function getContactsFromList(list: any): Promise<any[]> {
       paramCount++;
     }
 
-    // Tags excluídas
     if (filterConfig.exclude_tags && Array.isArray(filterConfig.exclude_tags) && filterConfig.exclude_tags.length > 0) {
       whereConditions.push(`NOT EXISTS (
         SELECT 1 FROM contact_tag_relations ctr_ex
@@ -602,13 +262,14 @@ async function getContactsFromList(list: any): Promise<any[]> {
       WHERE ${whereConditions.join(' AND ')}
     `;
 
-    // Se for híbrida, também incluir contatos da lista estática
     if (list.list_type === 'hybrid') {
-      const hasDynamicFilters = (filterConfig.tags && Array.isArray(filterConfig.tags) && filterConfig.tags.length > 0) ||
-                                (filterConfig.exclude_tags && Array.isArray(filterConfig.exclude_tags) && filterConfig.exclude_tags.length > 0);
-      
+      const hasDynamicFilters =
+        (filterConfig.tags && Array.isArray(filterConfig.tags) && filterConfig.tags.length > 0) ||
+        (filterConfig.exclude_tags &&
+          Array.isArray(filterConfig.exclude_tags) &&
+          filterConfig.exclude_tags.length > 0);
+
       if (!hasDynamicFilters) {
-        // Apenas lista estática
         query = `
           SELECT DISTINCT c.id, c.phone_number, c.name
           FROM contacts c
@@ -620,7 +281,6 @@ async function getContactsFromList(list: any): Promise<any[]> {
         `;
         params = [list.id];
       } else {
-        // Tem filtros dinâmicos, combinar estática + dinâmica
         query = `
           SELECT DISTINCT c.id, c.phone_number, c.name
           FROM contacts c

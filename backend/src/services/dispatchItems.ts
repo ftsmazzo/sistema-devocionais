@@ -224,9 +224,48 @@ export async function markDispatchItemSkipped(params: {
          error_category = 'skipped',
          error_message = $2,
          instance_id = COALESCE($3, instance_id),
+         lock_token = NULL,
+         locked_at = NULL,
+         lock_expires_at = NULL,
          updated_at = CURRENT_TIMESTAMP
      WHERE id = $1 AND status <> 'sent'`,
     [params.itemId, summarizeError(params.reason), params.instanceId ?? null]
+  );
+}
+
+/**
+ * Devolve item para a fila (status reversível) com backoff — usado em dry-run / REAL_SEND off.
+ */
+export async function releaseDispatchItemToQueue(params: {
+  itemId: number;
+  status?: 'pending' | 'pending_retry';
+  errorMessage: string;
+  errorCategory: string;
+  backoffMinutes?: number;
+  instanceId?: number | null;
+}): Promise<void> {
+  const status = params.status ?? 'pending';
+  const backoff = Math.max(1, params.backoffMinutes ?? 60);
+  await pool.query(
+    `UPDATE dispatch_items
+     SET status = $2,
+         error_message = $3,
+         error_category = $4,
+         instance_id = COALESCE($5, instance_id),
+         next_retry_at = CURRENT_TIMESTAMP + ($6::text || ' minutes')::interval,
+         lock_token = NULL,
+         locked_at = NULL,
+         lock_expires_at = NULL,
+         updated_at = CURRENT_TIMESTAMP
+     WHERE id = $1 AND status <> 'sent'`,
+    [
+      params.itemId,
+      status,
+      summarizeError(params.errorMessage),
+      params.errorCategory,
+      params.instanceId ?? null,
+      String(backoff),
+    ]
   );
 }
 

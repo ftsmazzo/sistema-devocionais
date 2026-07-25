@@ -1,6 +1,6 @@
 /**
  * Worker interno de dispatch_items via PostgreSQL (FOR UPDATE SKIP LOCKED).
- * Sem BullMQ/Redis. Desligado por default; envio real desligado por default.
+ * Único caminho operacional de envio de campanha — chama sendEvolutionTextSafely.
  */
 import { randomBytes } from 'crypto';
 import { pool } from '../database';
@@ -16,51 +16,34 @@ import {
   markDispatchItemFailed,
   markDispatchItemSent,
   markDispatchItemSkipped,
+  releaseDispatchItemToQueue,
   syncDispatchContactStatus,
 } from './dispatchItems';
 import { isInstanceConnectivityError } from './dispatchRetry';
+import {
+  getDispatchWorkerBatchSize,
+  getDispatchWorkerIntervalMs,
+  isDispatchDryRunEnabled,
+  isDispatchRealSendEnabled,
+  isDispatchWorkerEnabled,
+} from './dispatchRuntimeConfig';
+import { updateDevocionalScore } from './devocionalScoring';
+import { recordBlindageSuccessfulSend } from './blindage';
 
-function envFlag(name: string, defaultValue: boolean): boolean {
-  const raw = process.env[name];
-  if (raw == null || String(raw).trim() === '') return defaultValue;
-  const v = String(raw).trim().toLowerCase();
-  if (['1', 'true', 'yes', 'on'].includes(v)) return true;
-  if (['0', 'false', 'no', 'off'].includes(v)) return false;
-  return defaultValue;
-}
-
-function envInt(name: string, fallback: number): number {
-  const raw = process.env[name];
-  if (raw == null || String(raw).trim() === '') return fallback;
-  const n = Number(raw);
-  return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback;
-}
-
-export function isDispatchWorkerEnabled(): boolean {
-  return envFlag('DISPATCH_WORKER_ENABLED', false);
-}
-
-export function isDispatchRealSendEnabled(): boolean {
-  return envFlag('DISPATCH_REAL_SEND_ENABLED', false);
-}
-
-export function getDispatchWorkerBatchSize(): number {
-  return envInt('DISPATCH_WORKER_BATCH_SIZE', 1);
-}
-
-export function getDispatchWorkerIntervalMs(): number {
-  return envInt('DISPATCH_WORKER_INTERVAL_MS', 30_000);
-}
+export {
+  isDispatchWorkerEnabled,
+  isDispatchRealSendEnabled,
+  isDispatchDryRunEnabled,
+  getDispatchWorkerBatchSize,
+  getDispatchWorkerIntervalMs,
+  getDispatchRuntimeSnapshot,
+} from './dispatchRuntimeConfig';
 
 const LOCK_TTL_MS = 5 * 60_000;
 
 let workerTimer: ReturnType<typeof setInterval> | null = null;
 let tickRunning = false;
 
-/**
- * Reserva até `limit` itens elegíveis com lock transacional.
- * Exportado para testes secos.
- */
 export async function claimDispatchItems(
   limit: number = getDispatchWorkerBatchSize(),
   lockTtlMs: number = LOCK_TTL_MS
@@ -174,25 +157,81 @@ async function bumpDispatchCounters(
   }
 }
 
-async function getDispatchStatus(dispatchId: number): Promise<string | null> {
-  const r = await pool.query(`SELECT status FROM dispatches WHERE id = $1`, [dispatchId]);
-  return r.rows[0]?.status ?? null;
+async function getDispatchRow(dispatchId: number): Promise<{
+  status: string;
+  metadata: any;
+  dispatch_type: string | null;
+  devocional_id: number | null;
+} | null> {
+  const r = await pool.query(
+    `SELECT status, metadata, dispatch_type, devocional_id FROM dispatches WHERE id = $1`,
+    [dispatchId]
+  );
+  return r.rows[0] ?? null;
+}
+
+async function maybeCompleteDispatch(dispatchId: number): Promise<void> {
+  const open = await pool.query(
+    `SELECT COUNT(*)::int AS c
+     FROM dispatch_items
+     WHERE dispatch_id = $1
+       AND status IN ('pending', 'pending_retry', 'processing')`,
+    [dispatchId]
+  );
+  if ((open.rows[0]?.c ?? 0) > 0) return;
+
+  await pool.query(
+    `UPDATE dispatches
+     SET status = 'completed',
+         completed_at = COALESCE(completed_at, CURRENT_TIMESTAMP),
+         updated_at = CURRENT_TIMESTAMP
+     WHERE id = $1 AND status = 'running'`,
+    [dispatchId]
+  );
+}
+
+async function validateDestination(item: DispatchItemRow): Promise<{ ok: true } | { ok: false; reason: string }> {
+  const number = String(item.contact_number || '').trim();
+  if (!number) {
+    return { ok: false, reason: 'Número/destino vazio' };
+  }
+
+  if (item.contact_id) {
+    const c = await pool.query(
+      `SELECT opt_out, opt_in, whatsapp_validated, phone_number
+       FROM contacts WHERE id = $1`,
+      [item.contact_id]
+    );
+    if (c.rows.length === 0) {
+      return { ok: false, reason: 'Contato não encontrado' };
+    }
+    const row = c.rows[0];
+    if (row.opt_out === true) {
+      return { ok: false, reason: 'Contato com opt-out' };
+    }
+    if (row.opt_in === false) {
+      return { ok: false, reason: 'Contato sem opt-in' };
+    }
+    if (row.whatsapp_validated === false) {
+      return { ok: false, reason: 'WhatsApp não validado' };
+    }
+  }
+
+  return { ok: true };
 }
 
 /**
- * Processa um item já claimado (status processing + lock).
- * Se DISPATCH_REAL_SEND_ENABLED=false: marca skipped com REAL_SEND_DISABLED (sem Evolution).
- * Escolha: skipped (não pending) para evitar reprocessamento infinito a cada tick.
+ * Processa item claimado. Dry-run não marca sent; REAL_SEND off sem dry-run devolve à fila.
  */
 export async function processClaimedDispatchItem(item: DispatchItemRow): Promise<{
-  outcome: 'sent' | 'skipped' | 'failed' | 'pending_retry' | 'noop';
+  outcome: 'sent' | 'skipped' | 'failed' | 'pending_retry' | 'noop' | 'dry_run' | 'deferred';
   realSendAttempted: boolean;
 }> {
-  const dispatchStatus = await getDispatchStatus(item.dispatch_id);
-  if (!dispatchStatus || !['running', 'pending'].includes(dispatchStatus)) {
+  const dispatch = await getDispatchRow(item.dispatch_id);
+  if (!dispatch || !['running', 'pending'].includes(dispatch.status)) {
     await markDispatchItemSkipped({
       itemId: item.id,
-      reason: `Dispatch inativo (status=${dispatchStatus || 'missing'})`,
+      reason: `Dispatch inativo (status=${dispatch?.status || 'missing'})`,
     });
     await clearItemLock(item.id);
     return { outcome: 'skipped', realSendAttempted: false };
@@ -201,37 +240,29 @@ export async function processClaimedDispatchItem(item: DispatchItemRow): Promise
   if (await isDispatchItemSent(item.dispatch_id, item.contact_number)) {
     await markDispatchItemSent({ itemId: item.id });
     await clearItemLock(item.id);
+    await maybeCompleteDispatch(item.dispatch_id);
     return { outcome: 'noop', realSendAttempted: false };
   }
 
-  // Re-check row status in case another path already sent
   const fresh = await pool.query(`SELECT status FROM dispatch_items WHERE id = $1`, [item.id]);
   if (fresh.rows[0]?.status === 'sent') {
     await clearItemLock(item.id);
     return { outcome: 'noop', realSendAttempted: false };
   }
 
-  if (!isDispatchRealSendEnabled()) {
-    await markDispatchItemSkipped({
-      itemId: item.id,
-      reason: 'REAL_SEND_DISABLED',
+  const dest = await validateDestination(item);
+  if (!dest.ok) {
+    await markDispatchItemSkipped({ itemId: item.id, reason: dest.reason });
+    await syncDispatchContactStatus({
+      dispatchId: item.dispatch_id,
+      contactNumber: item.contact_number,
+      contactName: item.contact_name,
+      status: 'failed',
+      failedReason: dest.reason,
     });
-    // Garantir mensagem canônica pedida na subetapa
-    await pool.query(
-      `UPDATE dispatch_items
-       SET error_message = 'REAL_SEND_DISABLED',
-           error_category = 'real_send_disabled',
-           lock_token = NULL,
-           locked_at = NULL,
-           lock_expires_at = NULL,
-           updated_at = CURRENT_TIMESTAMP
-       WHERE id = $1`,
-      [item.id]
-    );
-    addLog(
-      'info',
-      `[DispatchWorker] Item ${item.id} skipped (REAL_SEND_DISABLED) ${maskPhone(item.contact_number)}`
-    );
+    await bumpDispatchCounters(item.dispatch_id, 'failed');
+    await clearItemLock(item.id);
+    await maybeCompleteDispatch(item.dispatch_id);
     return { outcome: 'skipped', realSendAttempted: false };
   }
 
@@ -244,7 +275,40 @@ export async function processClaimedDispatchItem(item: DispatchItemRow): Promise
     });
     await clearItemLock(item.id);
     await bumpDispatchCounters(item.dispatch_id, 'failed');
+    await maybeCompleteDispatch(item.dispatch_id);
     return { outcome: 'failed', realSendAttempted: false };
+  }
+
+  // --- Dry-run / real-send gates (sem Evolution) ---
+  if (!isDispatchRealSendEnabled()) {
+    if (isDispatchDryRunEnabled()) {
+      await releaseDispatchItemToQueue({
+        itemId: item.id,
+        status: 'pending',
+        errorMessage: 'DRY_RUN',
+        errorCategory: 'dry_run',
+        backoffMinutes: 24 * 60,
+      });
+      addLog(
+        'info',
+        `[DispatchWorker] DRY_RUN item ${item.id} ${maskPhone(item.contact_number)} — sem Evolution, status reversível`
+      );
+      await maybeCompleteDispatch(item.dispatch_id);
+      return { outcome: 'dry_run', realSendAttempted: false };
+    }
+
+    await releaseDispatchItemToQueue({
+      itemId: item.id,
+      status: 'pending',
+      errorMessage: 'REAL_SEND_DISABLED',
+      errorCategory: 'real_send_disabled',
+      backoffMinutes: 60,
+    });
+    addLog(
+      'warning',
+      `[DispatchWorker] Item ${item.id} devolvido à fila (REAL_SEND_DISABLED) ${maskPhone(item.contact_number)}`
+    );
+    return { outcome: 'deferred', realSendAttempted: false };
   }
 
   const instanceId = await resolveSendInstanceId(item.instance_id);
@@ -266,34 +330,63 @@ export async function processClaimedDispatchItem(item: DispatchItemRow): Promise
     return { outcome: 'pending_retry', realSendAttempted: false };
   }
 
+  // Last-mile: revalidar dispatch imediatamente antes da chamada externa
+  const lastMile = await getDispatchRow(item.dispatch_id);
+  if (!lastMile || !['running', 'pending'].includes(lastMile.status)) {
+    await markDispatchItemSkipped({
+      itemId: item.id,
+      reason: `Dispatch pausado/cancelado antes do envio (status=${lastMile?.status || 'missing'})`,
+    });
+    await clearItemLock(item.id);
+    return { outcome: 'skipped', realSendAttempted: false };
+  }
+
+  if (await isDispatchItemSent(item.dispatch_id, item.contact_number)) {
+    await markDispatchItemSent({ itemId: item.id });
+    await clearItemLock(item.id);
+    return { outcome: 'noop', realSendAttempted: false };
+  }
+
+  const metadata =
+    typeof lastMile.metadata === 'string'
+      ? JSON.parse(lastMile.metadata || '{}')
+      : lastMile.metadata || {};
+  const mediaUrl = metadata.media_url;
+  const mediaType = metadata.media_type;
+
   try {
     const sendResult = await sendEvolutionTextSafely({
       instanceId,
       number: item.contact_number,
       text: String(text),
-      messageType: item.message_type || 'avulsa',
+      messageType: item.message_type || lastMile.dispatch_type || 'avulsa',
       metadata: { dispatchId: item.dispatch_id, dispatchItemId: item.id, worker: true },
+      media:
+        mediaUrl && mediaType
+          ? { url: String(mediaUrl), type: String(mediaType) }
+          : undefined,
     });
 
     const msgResult = await pool.query(
       `INSERT INTO messages (
          instance_id, message_id, remote_jid, from_me,
          message_type, message_body, timestamp, status,
-         dispatch_id, dispatch_type, contact_id
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+         dispatch_id, dispatch_type, contact_id, devocional_id
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
        RETURNING id`,
       [
         instanceId,
         sendResult.messageId,
         `${item.contact_number}@s.whatsapp.net`,
         true,
-        'text',
+        mediaType || 'text',
         String(text),
         new Date(),
         'sent',
         item.dispatch_id,
-        item.message_type || 'avulsa',
+        item.message_type || lastMile.dispatch_type || 'avulsa',
         item.contact_id,
+        lastMile.devocional_id,
       ]
     );
 
@@ -311,7 +404,30 @@ export async function processClaimedDispatchItem(item: DispatchItemRow): Promise
       messageSentId: msgResult.rows[0].id,
     });
     await bumpDispatchCounters(item.dispatch_id, 'success');
+
+    if (
+      (item.message_type === 'devocional' || lastMile.dispatch_type === 'devocional') &&
+      item.contact_id
+    ) {
+      try {
+        await updateDevocionalScore(item.contact_id, 'sent');
+      } catch {
+        /* não bloquear envio */
+      }
+    }
+
+    try {
+      await recordBlindageSuccessfulSend({
+        to: item.contact_number,
+        message: String(text),
+        messageType: item.message_type || lastMile.dispatch_type || 'avulsa',
+      });
+    } catch {
+      /* ignore */
+    }
+
     await clearItemLock(item.id);
+    await maybeCompleteDispatch(item.dispatch_id);
 
     addLog(
       'success',
@@ -325,7 +441,7 @@ export async function processClaimedDispatchItem(item: DispatchItemRow): Promise
         ['provider_unavailable', 'timeout', 'network', 'instance_offline'].includes(error.kind));
 
     const asPendingRetry =
-      connectivity && (item.attempt_count ?? 0) < (item.max_attempts ?? 1);
+      connectivity && (item.attempt_count ?? 0) < Math.max(item.max_attempts ?? 1, 1) + 1;
 
     await markDispatchItemFailed({
       itemId: item.id,
@@ -346,6 +462,7 @@ export async function processClaimedDispatchItem(item: DispatchItemRow): Promise
       await bumpDispatchCounters(item.dispatch_id, 'failed');
     }
     await clearItemLock(item.id);
+    await maybeCompleteDispatch(item.dispatch_id);
 
     addLog(
       'error',
@@ -363,10 +480,6 @@ export interface WorkerTickResult {
   results: Array<{ itemId: number; outcome: string; realSendAttempted: boolean }>;
 }
 
-/**
- * Um tick do worker: claim + processa lote.
- * Seguro chamar em testes com DISPATCH_REAL_SEND_ENABLED=false.
- */
 export async function processDispatchWorkerTick(
   batchSize: number = getDispatchWorkerBatchSize()
 ): Promise<WorkerTickResult> {
@@ -401,19 +514,21 @@ export async function processDispatchWorkerTick(
 }
 
 export function startDispatchWorker(): void {
-  if (workerTimer) {
-    return;
-  }
+  if (workerTimer) return;
+
   const intervalMs = getDispatchWorkerIntervalMs();
   const batch = getDispatchWorkerBatchSize();
-  const realSend = isDispatchRealSendEnabled();
+  const snap = {
+    realSend: isDispatchRealSendEnabled(),
+    dryRun: isDispatchDryRunEnabled(),
+  };
 
   console.log(
-    `⚙️ DispatchWorker LIGADO — interval=${intervalMs}ms batch=${batch} realSend=${realSend}`
+    `⚙️ DispatchWorker LIGADO — interval=${intervalMs}ms batch=${batch} realSend=${snap.realSend} dryRun=${snap.dryRun}`
   );
   addLog(
     'info',
-    `[DispatchWorker] Iniciado interval=${intervalMs}ms batch=${batch} realSend=${realSend}`
+    `[DispatchWorker] Iniciado interval=${intervalMs}ms batch=${batch} realSend=${snap.realSend} dryRun=${snap.dryRun}`
   );
 
   const run = async () => {
@@ -434,7 +549,6 @@ export function startDispatchWorker(): void {
     }
   };
 
-  // Primeiro tick após intervalo (não no boot imediato)
   workerTimer = setInterval(run, intervalMs);
   if (typeof workerTimer.unref === 'function') {
     workerTimer.unref();

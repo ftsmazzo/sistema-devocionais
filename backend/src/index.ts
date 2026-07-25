@@ -21,9 +21,9 @@ import { executeDevocionalDispatch } from './services/devocionalScheduler';
 import { createGlobalDefaultRules, reconcileBlindageRuleConfigs } from './services/blindage';
 import { processRetryQueue } from './services/retryQueue';
 import {
-  isDispatchRealSendEnabled,
   isDispatchWorkerEnabled,
   startDispatchWorker,
+  getDispatchRuntimeSnapshot,
 } from './services/dispatchWorker';
 
 dotenv.config();
@@ -162,12 +162,13 @@ async function start() {
       // Worker PostgreSQL de dispatch_items (desligado por default)
       if (isDispatchWorkerEnabled()) {
         startDispatchWorker();
+        const snap = getDispatchRuntimeSnapshot();
         console.log(
-          `⚙️ DispatchWorker ENABLED (realSend=${isDispatchRealSendEnabled()})`
+          `⚙️ DispatchWorker ENABLED (realSend=${snap.realSendEnabled} dryRun=${snap.dryRunEnabled})`
         );
       } else {
         console.log(
-          '⚙️ DispatchWorker DISABLED (DISPATCH_WORKER_ENABLED=false) — envio continua nos fluxos síncronos'
+          '⚙️ DispatchWorker DISABLED (DISPATCH_WORKER_ENABLED=false) — novos disparos serão bloqueados até ativar o worker'
         );
       }
     });

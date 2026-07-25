@@ -4,27 +4,16 @@ import path from 'path';
 import fs from 'fs';
 import { pool } from '../database';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
-import { applyBlindage, recordBlindageSuccessfulSend } from '../services/blindage';
-import { withGlobalOutboundGate } from '../services/globalOutboundGate';
 import { processMarketingDispatch } from '../services/marketingDispatch';
 import { executeDevocionalDispatch } from '../services/devocionalScheduler';
-import {
-  loadDispatchPacingRuntime,
-  maybeDispatchPacingPause,
-  preferredInstanceIndexForDispatch,
-} from '../services/dispatchPacing';
 import { personalizeDevocionalMessage, formatDevocionalMessage } from '../services/devocionalPersonalization';
-import { canReceiveDevocional, updateDevocionalScore } from '../services/devocionalScoring';
-import { maskPhone, sendEvolutionTextSafely } from '../services/evolutionSafeSender';
+import { canReceiveDevocional } from '../services/devocionalScoring';
+import { maskPhone } from '../services/evolutionSafeSender';
+import { ensureDispatchItem, isDispatchItemSent } from '../services/dispatchItems';
 import {
-  ensureDispatchItem,
-  isDispatchItemSent,
-  markDispatchItemFailed,
-  markDispatchItemProcessing,
-  markDispatchItemSent,
-  markDispatchItemSkipped,
-  syncDispatchContactStatus,
-} from '../services/dispatchItems';
+  assertDispatchPipelineAllowed,
+  DispatchOperationalError,
+} from '../services/dispatchRuntimeConfig';
 import { addLog } from './logs';
 
 const router = express.Router();
@@ -655,6 +644,19 @@ router.post('/:id/clone', async (req: AuthRequest, res) => {
  */
 router.post('/:id/start', async (req: AuthRequest, res) => {
   try {
+    try {
+      assertDispatchPipelineAllowed();
+    } catch (err: any) {
+      if (err instanceof DispatchOperationalError) {
+        return res.status(503).json({
+          error: 'Disparo bloqueado pela configuração operacional',
+          message: err.message,
+          code: err.code,
+        });
+      }
+      throw err;
+    }
+
     const { id } = req.params;
 
     const dispatchResult = await pool.query(
@@ -693,25 +695,23 @@ router.post('/:id/start', async (req: AuthRequest, res) => {
       });
     }
 
-    // Iniciar processamento em background baseado no tipo
+    // Enfileirar itens em background (worker envia)
     if (dispatch.dispatch_type === 'marketing') {
-      // Processar marketing em background (não bloqueia a resposta)
       processMarketingDispatch({
         dispatchId: parseInt(id),
         instanceIds: dispatch.instance_ids || undefined,
       }).catch((error) => {
-        console.error(`❌ Erro ao processar disparo de marketing ${id}:`, error);
+        console.error(`❌ Erro ao enfileirar disparo de marketing ${id}:`, error);
       });
     } else if (dispatch.dispatch_type === 'devocional') {
-      // Disparo manual de devocional - processar imediatamente em background
       processDevocionalDispatchManually(parseInt(id)).catch((error) => {
-        console.error(`❌ Erro ao processar disparo manual de devocional ${id}:`, error);
+        console.error(`❌ Erro ao enfileirar disparo manual de devocional ${id}:`, error);
       });
     }
 
     res.json({ 
       success: true,
-      message: 'Disparo iniciado',
+      message: 'Disparo enfileirado para o worker',
       dispatch_id: id
     });
   } catch (error: any) {
@@ -815,7 +815,9 @@ router.delete('/:id', async (req: AuthRequest, res) => {
  */
 async function processDevocionalDispatchManually(dispatchId: number): Promise<void> {
   try {
+    assertDispatchPipelineAllowed();
     console.log(`📖 Processando disparo manual de devocional ID ${dispatchId}`);
+    addLog('info', `[Devocional Manual ${dispatchId}] Enfileirando para worker`);
 
     // Buscar dados do disparo
     const dispatchResult = await pool.query(
@@ -1033,23 +1035,18 @@ async function processDevocionalDispatchManually(dispatchId: number): Promise<vo
       return;
     }
 
-    // Buscar instâncias
+    // Pré-checagem de instâncias (envio fica no worker)
     let instances: any[] = [];
 
     if (dispatch.instance_ids && Array.isArray(dispatch.instance_ids) && dispatch.instance_ids.length > 0) {
       const instancesResult = await pool.query(
-        `SELECT id, instance_name, api_url, api_key, phone_number
-         FROM instances
-         WHERE id = ANY($1::int[]) AND status = 'connected'`,
+        `SELECT id, instance_name FROM instances WHERE id = ANY($1::int[]) AND status = 'connected'`,
         [dispatch.instance_ids]
       );
       instances = instancesResult.rows;
     } else {
       const instancesResult = await pool.query(
-        `SELECT id, instance_name, api_url, api_key, phone_number
-         FROM instances
-         WHERE status = 'connected'
-         ORDER BY last_message_sent_at ASC NULLS FIRST`
+        `SELECT id, instance_name FROM instances WHERE status = 'connected' ORDER BY last_message_sent_at ASC NULLS FIRST`
       );
       instances = instancesResult.rows;
     }
@@ -1063,258 +1060,67 @@ async function processDevocionalDispatchManually(dispatchId: number): Promise<vo
       return;
     }
 
-    console.log(`   📱 ${instances.length} instância(s) disponível(is)`);
-
-    const pacing = await loadDispatchPacingRuntime();
-
-    // Buscar configuração para timezone
     const configResult = await pool.query(
       `SELECT timezone FROM devocional_config ORDER BY id DESC LIMIT 1`
     );
     const timezone = configResult.rows[0]?.timezone || 'America/Sao_Paulo';
 
-    // Processar envio para cada contato
-    let successCount = 0;
-    let failedCount = 0;
-    let instanceIndex = 0;
+    let enqueued = 0;
+    let alreadySent = 0;
 
     for (const contact of eligibleContacts) {
-      try {
-        const contactStartTime = Date.now();
-        const preferredIdx = preferredInstanceIndexForDispatch(
-          pacing,
-          successCount,
-          instanceIndex,
-          instances.length
-        );
-        const preferredInstanceId = instances[preferredIdx]?.id;
+      const formattedDevocional = formatDevocionalMessage(devocional);
+      const personalizedMessage = personalizeDevocionalMessage(
+        formattedDevocional,
+        contact.name,
+        timezone
+      );
 
-        const formattedDevocional = formatDevocionalMessage(devocional);
-        const personalizedMessage = personalizeDevocionalMessage(
-          formattedDevocional,
-          contact.name,
-          timezone
-        );
+      const dispatchItem = await ensureDispatchItem({
+        dispatchId,
+        contactId: contact.id,
+        contactNumber: contact.phone_number,
+        contactName: contact.name,
+        messageType: 'devocional',
+        messageSnapshot: personalizedMessage,
+        maxAttempts: 1,
+      });
 
-        const dispatchItem = await ensureDispatchItem({
-          dispatchId,
-          contactId: contact.id,
-          contactNumber: contact.phone_number,
-          contactName: contact.name,
-          messageType: 'devocional',
-          messageSnapshot: personalizedMessage,
-          maxAttempts: 1,
-        });
-
-        if (dispatchItem.status === 'sent' || (await isDispatchItemSent(dispatchId, contact.phone_number))) {
-          addLog('info', `[Devocional Manual ${dispatchId}] Item já sent — skip ${maskPhone(contact.phone_number)}`);
-          successCount++;
-          continue;
-        }
-
-        let abortContact = false;
-        await withGlobalOutboundGate(async () => {
-          const blindageStartTime = Date.now();
-          const blindageResult = await applyBlindage({
-            to: contact.phone_number,
-            message: personalizedMessage,
-            instanceId: preferredInstanceId,
-            messageType: 'devocional',
-          });
-          const blindageTime = Date.now() - blindageStartTime;
-          addLog('info', `[Devocional Manual ${dispatchId}] 🛡️ Blindagem aplicada em ${blindageTime}ms`);
-
-          if (!blindageResult.canSend) {
-            console.log(`   ⛔ Contato ${maskPhone(contact.phone_number)} bloqueado pela blindagem: ${blindageResult.reason}`);
-            addLog(
-              'warning',
-              `[Devocional Manual ${dispatchId}] ⛔ Bloqueado pela blindagem: ${blindageResult.reason} — ${maskPhone(contact.phone_number)}`
-            );
-            failedCount++;
-            await markDispatchItemSkipped({
-              itemId: dispatchItem.id,
-              reason: `Blindagem: ${blindageResult.reason || 'bloqueado'}`,
-              instanceId: preferredInstanceId,
-            });
-            await syncDispatchContactStatus({
-              dispatchId,
-              contactNumber: contact.phone_number,
-              contactName: contact.name,
-              instanceId: preferredInstanceId,
-              status: 'failed',
-              failedReason: `Blindagem: ${blindageResult.reason || 'bloqueado'}`,
-            });
-            if (pacing.rotateEveryN <= 0) {
-              instanceIndex++;
-            }
-            abortContact = true;
-            return;
-          }
-
-          const instance = blindageResult.selectedInstanceId != null
-            ? instances.find((i: any) => i.id === blindageResult.selectedInstanceId) || instances[instanceIndex % instances.length]
-            : instances[instanceIndex % instances.length];
-          if (pacing.rotateEveryN <= 0) {
-            instanceIndex++;
-          }
-
-          if (blindageResult.delay && blindageResult.delay > 0) {
-            const delaySeconds = Math.ceil(blindageResult.delay / 1000);
-            const delayStartTime = Date.now();
-            const delayLog = `⏳ [DELAY] Aguardando ${delaySeconds}s (${blindageResult.delay}ms) antes de enviar para ${maskPhone(contact.phone_number)}`;
-            console.log(`   ${delayLog}`);
-            addLog('info', `[Devocional Manual ${dispatchId}] ${delayLog}`);
-            await new Promise(resolve => setTimeout(resolve, blindageResult.delay));
-            const actualDelay = Date.now() - delayStartTime;
-            const delayDiff = actualDelay - blindageResult.delay;
-            if (Math.abs(delayDiff) > 100) {
-              const delayWarn = `⚠️ [DELAY] Esperado ${blindageResult.delay}ms, decorreu ${actualDelay}ms`;
-              console.log(`   ${delayWarn}`);
-              addLog('warning', `[Devocional Manual ${dispatchId}] ${delayWarn}`);
-            } else {
-              const delayOk = `✅ [DELAY] Concluído corretamente: ${actualDelay}ms`;
-              console.log(`   ${delayOk}`);
-              addLog('success', `[Devocional Manual ${dispatchId}] ${delayOk}`);
-            }
-          } else if (!blindageResult.delay || blindageResult.delay === 0) {
-            addLog('warning', `[Devocional Manual ${dispatchId}] ⚠️ Nenhum delay configurado - envio imediato para ${maskPhone(contact.phone_number)}`);
-          }
-
-          if (await isDispatchItemSent(dispatchId, contact.phone_number)) {
-            abortContact = true;
-            return;
-          }
-
-          await markDispatchItemProcessing(dispatchItem.id, instance.id);
-
-          await pool.query(
-            `UPDATE instances 
-             SET last_message_sent_at = CURRENT_TIMESTAMP 
-             WHERE id = $1`,
-            [instance.id]
-          );
-
-          const sendResult = await sendEvolutionTextSafely({
-            instanceId: instance.id,
-            number: contact.phone_number,
-            text: personalizedMessage,
-            messageType: 'devocional',
-            metadata: { dispatchId, contactId: contact.id, manual: true, dispatchItemId: dispatchItem.id },
-          });
-
-          const messageResult = await pool.query(
-            `INSERT INTO messages (
-              instance_id, message_id, remote_jid, from_me,
-              message_type, message_body, timestamp, status,
-              dispatch_id, dispatch_type, contact_id, devocional_id
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-            RETURNING id`,
-            [
-              instance.id,
-              sendResult.messageId,
-              `${contact.phone_number}@s.whatsapp.net`,
-              true,
-              'text',
-              personalizedMessage,
-              new Date(),
-              'sent',
-              dispatchId,
-              'devocional',
-              contact.id,
-              devocionalId,
-            ]
-          );
-
-          await updateDevocionalScore(contact.id, 'sent');
-
-          await markDispatchItemSent({
-            itemId: dispatchItem.id,
-            providerMessageId: sendResult.messageId,
-            instanceId: instance.id,
-          });
-          await syncDispatchContactStatus({
-            dispatchId,
-            contactNumber: contact.phone_number,
-            contactName: contact.name,
-            instanceId: instance.id,
-            status: 'sent',
-            messageSentId: messageResult.rows[0].id,
-          });
-
-          successCount++;
-          const contactTotalMs = Date.now() - contactStartTime;
-          console.log(`   ✅ Enviado para ${maskPhone(contact.phone_number)} (${successCount}/${eligibleContacts.length})`);
-          addLog(
-            'success',
-            `[Devocional Manual ${dispatchId}] ✅ SUCESSO! Tempo total: ${contactTotalMs}ms — ${maskPhone(contact.phone_number)}`
-          );
-          addLog(
-            'info',
-            `[Devocional Manual ${dispatchId}] 📊 Progresso: ${successCount}/${eligibleContacts.length} enviados`
-          );
-
-          await pool.query(
-            `UPDATE instances
-             SET last_message_sent_at = CURRENT_TIMESTAMP,
-                 last_activity_at = CURRENT_TIMESTAMP
-             WHERE id = $1`,
-            [instance.id]
-          );
-          await recordBlindageSuccessfulSend({
-            to: contact.phone_number,
-            message: personalizedMessage,
-            messageType: 'devocional',
-          });
-        });
-
-        if (abortContact) {
-          continue;
-        }
-
-        await maybeDispatchPacingPause(pacing, successCount, `Devocional Manual ${dispatchId}`);
-
-      } catch (error: any) {
-        console.error(`   ❌ Erro ao enviar para ${maskPhone(contact.phone_number)}:`, error.message);
-        addLog(
-          'error',
-          `[Devocional Manual ${dispatchId}] ❌ Erro ao enviar para ${maskPhone(contact.phone_number)}: ${error.message || error}`
-        );
-        failedCount++;
-        try {
-          await markDispatchItemFailed({
-            itemId: (
-              await ensureDispatchItem({
-                dispatchId,
-                contactId: contact.id,
-                contactNumber: contact.phone_number,
-                contactName: contact.name,
-                messageType: 'devocional',
-              })
-            ).id,
-            errorMessage: error.message || String(error),
-            errorCategory: 'send_error',
-          });
-        } catch {
-          /* ignore */
-        }
+      if (dispatchItem.status === 'sent' || (await isDispatchItemSent(dispatchId, contact.phone_number))) {
+        alreadySent++;
+        continue;
       }
+
+      await pool.query(
+        `INSERT INTO dispatch_contacts (dispatch_id, contact_number, contact_name, status)
+         SELECT $1, $2, $3, 'pending'
+         WHERE NOT EXISTS (
+           SELECT 1 FROM dispatch_contacts
+           WHERE dispatch_id = $1 AND contact_number = $2
+         )`,
+        [dispatchId, contact.phone_number, contact.name]
+      );
+
+      enqueued++;
+      addLog(
+        'info',
+        `[Devocional Manual ${dispatchId}] Enfileirado item ${dispatchItem.id} ${maskPhone(contact.phone_number)}`
+      );
     }
 
     await pool.query(
       `UPDATE dispatches
-       SET status = 'completed',
-           contacts_processed = $1,
-           contacts_success = $2,
-           contacts_failed = $3,
-           completed_at = CURRENT_TIMESTAMP
-       WHERE id = $4`,
-      [eligibleContacts.length, successCount, failedCount, dispatchId]
+       SET total_contacts = $1,
+           contacts_processed = $2,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $3`,
+      [eligibleContacts.length, alreadySent, dispatchId]
     );
 
-    console.log(`   ✅ Disparo manual concluído: ${successCount} sucesso, ${failedCount} falhas`);
+    console.log(`   ✅ Enfileiramento manual: ${enqueued} itens, ${alreadySent} já sent — worker processará`);
     addLog(
       'success',
-      `[Devocional Manual ${dispatchId}] ✅ Disparo concluído: ${successCount} sucesso, ${failedCount} falhas`
+      `[Devocional Manual ${dispatchId}] Enfileirados ${enqueued} itens (${alreadySent} já sent)`
     );
 
   } catch (error: any) {
