@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type CSSProperties } from 'react';
+import { Link } from 'react-router-dom';
 import api from '@/lib/api';
 import Toast from '@/components/ui/Toast';
 import {
@@ -10,6 +11,7 @@ import {
   List,
   RefreshCw,
   Server,
+  Settings,
   ShieldAlert,
   Users,
 } from 'lucide-react';
@@ -268,11 +270,19 @@ export default function OperacaoDevocional() {
               Operação Devocional
             </h1>
             <p style={{ margin: '6px 0 0', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-              Preparar público do dia → fila → worker — sem disparo manual nesta tela
+              Preparar público, fila e acompanhamento do envio de hoje. Configuração permanente fica em Config. Devocional.
             </p>
           </div>
         </div>
-        <div style={{ display: 'flex', gap: 10 }}>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          <Link
+            to="/devocional/config"
+            className="btn-secondary"
+            style={{ display: 'flex', alignItems: 'center', gap: 8, textDecoration: 'none' }}
+          >
+            <Settings size={16} />
+            Ajustar Config. Devocional
+          </Link>
           <button type="button" className="btn-secondary" onClick={() => loadAll()} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <RefreshCw size={16} />
             Atualizar
@@ -343,6 +353,24 @@ export default function OperacaoDevocional() {
                 <span><strong>{b.code}</strong> — {b.message}</span>
               </div>
             ))}
+            {status.blocks.some((b) => ['NO_CONFIG', 'DISABLED', 'NO_LIST'].includes(b.code)) && (
+              <Link
+                to="/devocional/config"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  marginTop: 4,
+                  color: 'var(--gold-primary)',
+                  fontWeight: 700,
+                  fontSize: '0.9rem',
+                  textDecoration: 'none',
+                }}
+              >
+                <Settings size={16} />
+                Ajustar Config. Devocional
+              </Link>
+            )}
           </div>
         )}
 
