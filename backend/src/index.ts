@@ -20,6 +20,11 @@ import { errorHandler } from './middleware/errorHandler';
 import { executeDevocionalDispatch } from './services/devocionalScheduler';
 import { createGlobalDefaultRules, reconcileBlindageRuleConfigs } from './services/blindage';
 import { processRetryQueue } from './services/retryQueue';
+import {
+  isDispatchRealSendEnabled,
+  isDispatchWorkerEnabled,
+  startDispatchWorker,
+} from './services/dispatchWorker';
 
 dotenv.config();
 
@@ -153,6 +158,18 @@ async function start() {
         }
       });
       console.log('🔄 Cron job de retry iniciado (processa a cada 5 minutos)');
+
+      // Worker PostgreSQL de dispatch_items (desligado por default)
+      if (isDispatchWorkerEnabled()) {
+        startDispatchWorker();
+        console.log(
+          `⚙️ DispatchWorker ENABLED (realSend=${isDispatchRealSendEnabled()})`
+        );
+      } else {
+        console.log(
+          '⚙️ DispatchWorker DISABLED (DISPATCH_WORKER_ENABLED=false) — envio continua nos fluxos síncronos'
+        );
+      }
     });
 
     // Manter o processo vivo
