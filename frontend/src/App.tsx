@@ -64,6 +64,7 @@ function App() {
         <Route path="/login" element={<Login />} />
         <Route path="/" element={<PrivateRoute><Instances /></PrivateRoute>} />
         <Route path="/blindage/:instanceId?" element={<PrivateRoute><Blindage /></PrivateRoute>} />
+        <Route path="/worker-config" element={<Navigate to="/blindage" replace />} />
         <Route path="/contacts" element={<PrivateRoute><Contacts /></PrivateRoute>} />
         <Route path="/tags" element={<PrivateRoute><Tags /></PrivateRoute>} />
         <Route path="/lists" element={<PrivateRoute><Lists /></PrivateRoute>} />

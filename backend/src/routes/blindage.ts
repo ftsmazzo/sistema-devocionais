@@ -2,11 +2,30 @@ import express from 'express';
 import { pool } from '../database';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { createDefaultRules, reconcileBlindageRuleConfigs, applyBlindageGlobalProfile, BLINDAGE_PROFILES_META, getBlindageProfilePackage } from '../services/blindage';
+import { getWorkerConfigSnapshot } from '../services/workerConfigSnapshot';
 
 const router = express.Router();
 
 // Todas as rotas requerem autenticação
 router.use(authenticateToken);
+
+/**
+ * Configurações reais do motor de disparo (worker + guard).
+ * GET /api/blindage/worker-config
+ * Somente leitura — não chama Evolution.
+ */
+router.get('/worker-config', async (_req: AuthRequest, res) => {
+  try {
+    const snapshot = await getWorkerConfigSnapshot();
+    res.json(snapshot);
+  } catch (error: any) {
+    console.error('Erro ao carregar worker-config:', error);
+    res.status(500).json({
+      error: 'Erro ao carregar configurações do worker',
+      message: error?.message || String(error),
+    });
+  }
+});
 
 /**
  * Listar perfis de blindagem (Fase A — presets globais estilo MassFlow).

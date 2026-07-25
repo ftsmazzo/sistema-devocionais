@@ -76,6 +76,30 @@ function getDelayBounds(): { minMs: number; maxMs: number } {
   return { minMs, maxMs };
 }
 
+/** Snapshot somente leitura da cadência efetiva do guard (ENV). Sem efeito colateral. */
+export function getEvolutionCadenceSnapshot(): {
+  min_delay_ms: number;
+  max_delay_ms: number;
+  send_timeout_ms: number;
+  cooldown_rate_limit_ms: number;
+  cooldown_forbidden_ms: number;
+  cooldown_5xx_ms: number;
+  cooldown_network_ms: number;
+  cooldown_default_ms: number;
+} {
+  const { minMs, maxMs } = getDelayBounds();
+  return {
+    min_delay_ms: minMs,
+    max_delay_ms: maxMs,
+    send_timeout_ms: envInt('EVOLUTION_SEND_TIMEOUT_MS', 20_000),
+    cooldown_rate_limit_ms: envInt('EVOLUTION_COOLDOWN_RATE_LIMIT_MS', 15 * 60_000),
+    cooldown_forbidden_ms: envInt('EVOLUTION_COOLDOWN_FORBIDDEN_MS', 30 * 60_000),
+    cooldown_5xx_ms: envInt('EVOLUTION_COOLDOWN_5XX_MS', 10 * 60_000),
+    cooldown_network_ms: envInt('EVOLUTION_COOLDOWN_NETWORK_MS', 5 * 60_000),
+    cooldown_default_ms: envInt('EVOLUTION_COOLDOWN_DEFAULT_MS', 5 * 60_000),
+  };
+}
+
 function randomDelayMs(minMs: number, maxMs: number): number {
   if (maxMs <= minMs) return minMs;
   return minMs + Math.floor(Math.random() * (maxMs - minMs + 1));

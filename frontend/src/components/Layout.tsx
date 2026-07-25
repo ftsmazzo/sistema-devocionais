@@ -3,7 +3,6 @@ import { Link, useLocation } from 'react-router-dom';
 import { useAuthStore } from '@/store/authStore';
 import {
   BookOpen,
-  Shield,
   MessageCircle,
   LogOut,
   Menu,
@@ -29,7 +28,7 @@ const navSections = [
     label: 'WhatsApp',
     items: [
       { name: 'Instâncias', href: '/', icon: Smartphone },
-      { name: 'Blindagens', href: '/blindage', icon: Shield },
+      { name: 'Configurações do Worker', href: '/blindage', icon: Settings },
     ],
   },
   {

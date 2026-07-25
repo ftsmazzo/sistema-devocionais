@@ -11,7 +11,7 @@ import {
   CheckCircle2,
   XCircle,
   Clock,
-  Shield,
+  Settings,
   Smartphone,
   Edit,
   X,
@@ -487,7 +487,7 @@ export default function Instances() {
 
               {/* Card Footer Action */}
               <button
-                onClick={() => navigate(`/blindage/${instance.id}`)}
+                onClick={() => navigate('/blindage')}
                 style={{
                   width: '100%', padding: '16px', background: 'rgba(167, 139, 250, 0.05)', border: 'none',
                   borderTop: '1px solid var(--border)', color: '#a78bfa', fontWeight: 600, fontSize: '0.85rem',
@@ -495,7 +495,7 @@ export default function Instances() {
                   transition: '0.2s'
                 }}
               >
-                <Shield size={16} /> Configurar Blindagem
+                <Settings size={16} /> Configurações do Worker
               </button>
             </div>
             );
