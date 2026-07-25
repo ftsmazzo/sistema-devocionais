@@ -9,6 +9,7 @@ import Tags from './pages/Tags';
 import Lists from './pages/Lists';
 import Dispatches from './pages/Dispatches';
 import DevocionalConfig from './pages/DevocionalConfig';
+import OperacaoDevocional from './pages/OperacaoDevocional';
 import MensagensPersonalizadas from './pages/MensagensPersonalizadas';
 import Logs from './pages/Logs';
 import SessaoDevocional from './pages/SessaoDevocional';
@@ -67,6 +68,7 @@ function App() {
         <Route path="/tags" element={<PrivateRoute><Tags /></PrivateRoute>} />
         <Route path="/lists" element={<PrivateRoute><Lists /></PrivateRoute>} />
         <Route path="/dispatches" element={<PrivateRoute><Dispatches /></PrivateRoute>} />
+        <Route path="/devocional/operacao" element={<PrivateRoute><OperacaoDevocional /></PrivateRoute>} />
         <Route path="/devocional/config" element={<PrivateRoute><DevocionalConfig /></PrivateRoute>} />
         <Route path="/devocional/criativo" element={<PrivateRoute><SessaoDevocional /></PrivateRoute>} />
         {/* Rota nova: Mensagens Personalizadas (antigo /marketing/config) */}

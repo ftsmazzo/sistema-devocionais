@@ -6,6 +6,12 @@ import {
   todaySaoPauloYmd,
   eachDateInclusiveYmd,
 } from '../services/journeyReconcile';
+import {
+  getDevocionalOperationStatus,
+  prepareTodayDevocionalOperation,
+  getTodayDevocionalOperation,
+  getTodayDevocionalQueue,
+} from '../services/devocionalOperation';
 
 const router = express.Router();
 
@@ -1056,9 +1062,72 @@ router.post('/reset-test-data', authenticateToken, async (req: AuthRequest, res)
 });
 
 /**
+ * Central operacional — status do disparo diário
+ * GET /api/devocional/operation/status
+ */
+router.get('/operation/status', authenticateToken, async (req: AuthRequest, res) => {
+  try {
+    const data = await getDevocionalOperationStatus();
+    res.json(data);
+  } catch (error: any) {
+    console.error('❌ Erro operation/status:', error);
+    res.status(500).json({ error: 'Erro ao obter status operacional', message: error.message });
+  }
+});
+
+/**
+ * Preparar envio de hoje (cria dispatch + items, sem Evolution)
+ * POST /api/devocional/operation/prepare-today
+ */
+router.post('/operation/prepare-today', authenticateToken, async (req: AuthRequest, res) => {
+  try {
+    const data = await prepareTodayDevocionalOperation();
+    res.json({ success: true, ...data });
+  } catch (error: any) {
+    const status = error.status || 500;
+    console.error('❌ Erro operation/prepare-today:', error);
+    res.status(status).json({
+      error: status === 400 ? error.message : 'Erro ao preparar envio de hoje',
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * Visão do dia (devocional + dispatch + resumo)
+ * GET /api/devocional/operation/today
+ */
+router.get('/operation/today', authenticateToken, async (req: AuthRequest, res) => {
+  try {
+    const data = await getTodayDevocionalOperation();
+    res.json(data);
+  } catch (error: any) {
+    console.error('❌ Erro operation/today:', error);
+    res.status(500).json({ error: 'Erro ao obter operação de hoje', message: error.message });
+  }
+});
+
+/**
+ * Fila paginada do dispatch do dia
+ * GET /api/devocional/operation/queue?page=1&page_size=25&status=pending
+ */
+router.get('/operation/queue', authenticateToken, async (req: AuthRequest, res) => {
+  try {
+    const page = parseInt(String(req.query.page || '1'), 10);
+    const pageSize = parseInt(String(req.query.page_size || req.query.pageSize || '25'), 10);
+    const status = req.query.status ? String(req.query.status) : null;
+    const data = await getTodayDevocionalQueue({ page, pageSize, status });
+    res.json(data);
+  } catch (error: any) {
+    console.error('❌ Erro operation/queue:', error);
+    res.status(500).json({ error: 'Erro ao listar fila', message: error.message });
+  }
+});
+
+/**
  * Buscar devocional por ID
  * GET /api/devocional/:id
- * IMPORTANTE: Esta rota deve vir DEPOIS das rotas específicas (/config, /date/:date, /ai-config, /generate)
+ * IMPORTANTE: Esta rota deve vir DEPOIS das rotas específicas (/config, /date/:date, /ai-config, /generate, /operation/*)
  */
 router.get('/:id', async (req: express.Request, res: express.Response) => {
   try {

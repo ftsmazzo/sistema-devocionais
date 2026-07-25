@@ -17,6 +17,7 @@ import {
   Smartphone,
   ChevronRight,
   Brain,
+  Activity,
 } from 'lucide-react';
 
 interface LayoutProps {
@@ -43,6 +44,7 @@ const navSections = [
     label: 'Disparos',
     items: [
       { name: 'Disparos', href: '/dispatches', icon: Send },
+      { name: 'Operação Devocional', href: '/devocional/operacao', icon: Activity },
       { name: 'Jornada Bíblica', href: '/devocional/criativo', icon: Brain },
       { name: 'Config. Devocional', href: '/devocional/config', icon: Settings },
       { name: 'Mensagens Personalizadas', href: '/mensagens/config', icon: MessageCircle },
