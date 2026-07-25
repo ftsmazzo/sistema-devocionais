@@ -1169,6 +1169,39 @@ export async function initializeDatabase() {
       WHERE status = 'pending_retry';
     `);
 
+    // ============================================
+    // Guard persistente de envio por instância (Evolution)
+    // ============================================
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS instance_send_guard (
+        id SERIAL PRIMARY KEY,
+        instance_id INTEGER UNIQUE NOT NULL REFERENCES instances(id) ON DELETE CASCADE,
+        next_available_at TIMESTAMP,
+        last_reserved_at TIMESTAMP,
+        last_sent_at TIMESTAMP,
+        reservation_token VARCHAR(100),
+        reservation_expires_at TIMESTAMP,
+        sequence_number INTEGER DEFAULT 0,
+        daily_usage_date DATE,
+        daily_sent_count INTEGER DEFAULT 0,
+        hourly_window_start TIMESTAMP,
+        hourly_sent_count INTEGER DEFAULT 0,
+        cooldown_until TIMESTAMP,
+        violation_count INTEGER DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_instance_send_guard_instance
+        ON instance_send_guard(instance_id);
+      CREATE INDEX IF NOT EXISTS idx_instance_send_guard_next_available
+        ON instance_send_guard(next_available_at);
+      CREATE INDEX IF NOT EXISTS idx_instance_send_guard_cooldown
+        ON instance_send_guard(cooldown_until);
+    `);
+
     console.log('✅ Tabelas criadas/verificadas');
   } finally {
     client.release();

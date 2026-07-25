@@ -12,9 +12,9 @@ import {
   MAX_DISPATCH_RETRY_ATTEMPTS,
   RETRY_DISPATCH_MAX_AGE_HOURS,
   alreadySentInDispatch,
-  assertEvolutionSendOk,
   isInstanceConnectivityError,
 } from './dispatchRetry';
+import { maskPhone, sendEvolutionTextSafely } from './evolutionSafeSender';
 
 let retryQueueRunning = false;
 
@@ -229,17 +229,13 @@ export async function processRetryQueue(): Promise<void> {
             [selectedInstance.id]
           );
 
-          const sendUrl = `${selectedInstance.api_url}/message/sendText/${selectedInstance.instance_name}`;
-          const sendResponse = await axios.post(
-            sendUrl,
-            { number: item.contact_number, text: message },
-            {
-              headers: { apikey: selectedInstance.api_key, 'Content-Type': 'application/json' },
-              timeout: 15000,
-              validateStatus: () => true,
-            }
-          );
-          assertEvolutionSendOk(sendResponse);
+          const sendResult = await sendEvolutionTextSafely({
+            instanceId: selectedInstance.id,
+            number: item.contact_number,
+            text: message,
+            messageType: item.dispatch_type || 'avulsa',
+            metadata: { dispatchId: item.dispatch_id, retry: true },
+          });
 
           const msgResult = await pool.query(
             `INSERT INTO messages (
@@ -250,7 +246,7 @@ export async function processRetryQueue(): Promise<void> {
             RETURNING id`,
             [
               selectedInstance.id,
-              sendResponse.data?.key?.id || `retry-${Date.now()}`,
+              sendResult.messageId,
               `${item.contact_number}@s.whatsapp.net`,
               true,
               'text',
@@ -295,9 +291,9 @@ export async function processRetryQueue(): Promise<void> {
 
           addLog(
             'success',
-            `[RetryQueue] ✅ Retry único concluído: ${item.contact_number} via ${selectedInstance.instance_name}`
+            `[RetryQueue] ✅ Retry único concluído: ${maskPhone(item.contact_number)} via ${selectedInstance.instance_name}`
           );
-          console.log(`   ✅ Retry enviado: ${item.contact_number} via instância ${selectedInstance.instance_name}`);
+          console.log(`   ✅ Retry enviado: ${maskPhone(item.contact_number)} via instância ${selectedInstance.instance_name}`);
         });
 
         if (skipLead) {

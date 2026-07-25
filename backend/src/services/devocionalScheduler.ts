@@ -1,5 +1,4 @@
 import { pool } from '../database';
-import axios from 'axios';
 import { applyBlindage, recordBlindageSuccessfulSend } from './blindage';
 import { withGlobalOutboundGate } from './globalOutboundGate';
 import {
@@ -13,13 +12,17 @@ import { addLog } from '../routes/logs';
 import { pingInstanceHealth } from './retryQueue';
 import { reconcileActiveJourneyForDate } from './journeyReconcile';
 import {
-  assertEvolutionSendOk,
   enqueueDispatchRetry,
   isInstanceConnectivityError,
   markInstanceOfflineInDb,
   notifyAdminInstanceOffline,
   removeInstanceFromPool,
 } from './dispatchRetry';
+import {
+  maskPhone,
+  sendEvolutionTextSafely,
+  EvolutionSafeSendError,
+} from './evolutionSafeSender';
 
 /**
  * Serviço de agendamento para disparo automático de devocionais
@@ -496,24 +499,13 @@ export async function executeDevocionalDispatch(): Promise<void> {
             [instance.id]
           );
 
-          // Enviar mensagem
-          const sendMessageUrl = `${instance.api_url}/message/sendText/${instance.instance_name}`;
-          const response = await axios.post(
-            sendMessageUrl,
-            {
-              number: contact.phone_number,
-              text: personalizedMessage,
-            },
-            {
-              headers: {
-                'apikey': instance.api_key,
-                'Content-Type': 'application/json',
-              },
-              timeout: 20000,
-              validateStatus: () => true,
-            }
-          );
-          assertEvolutionSendOk(response);
+          const sendResult = await sendEvolutionTextSafely({
+            instanceId: instance.id,
+            number: contact.phone_number,
+            text: personalizedMessage,
+            messageType: 'devocional',
+            metadata: { dispatchId, contactId: contact.id },
+          });
 
           // Registrar mensagem
           const messageResult = await pool.query(
@@ -525,7 +517,7 @@ export async function executeDevocionalDispatch(): Promise<void> {
             RETURNING id`,
             [
               instance.id,
-              response.data?.key?.id || `temp-${Date.now()}`,
+              sendResult.messageId,
               `${contact.phone_number}@s.whatsapp.net`,
               true,
               'text',
@@ -585,9 +577,14 @@ export async function executeDevocionalDispatch(): Promise<void> {
         await maybeDispatchPacingPause(pacing, successCount, `Devocional ${dispatchId}`);
 
       } catch (error: any) {
-        console.error(`   ❌ Erro ao enviar para ${contact.phone_number}:`, error.message);
+        console.error(`   ❌ Erro ao enviar para ${maskPhone(contact.phone_number)}:`, error.message);
 
-        if (isInstanceConnectivityError(error)) {
+        const connectivity =
+          isInstanceConnectivityError(error) ||
+          (error instanceof EvolutionSafeSendError &&
+            ['provider_unavailable', 'timeout', 'network', 'instance_offline'].includes(error.kind));
+
+        if (connectivity) {
           lastOfflineInstanceId = instance.id;
           await markInstanceOfflineInDb(instance.id);
           await notifyAdminInstanceOffline(
@@ -599,7 +596,7 @@ export async function executeDevocionalDispatch(): Promise<void> {
           instances = removeInstanceFromPool(instances, instance.id);
           addLog(
             'warning',
-            `[Devocional] Instância ${instance.instance_name} removida do pool; tentando próxima para ${contact.phone_number}`
+            `[Devocional] Instância ${instance.instance_name} removida do pool; tentando próxima para ${maskPhone(contact.phone_number)}`
           );
           continue;
         }
@@ -679,11 +676,11 @@ async function sendNotification(phone: string | null, message: string): Promise<
   }
 
   try {
-    // Buscar primeira instância conectada
     const instanceResult = await pool.query(
-      `SELECT instance_name, api_url, api_key
+      `SELECT id
        FROM instances
        WHERE status = 'connected'
+       ORDER BY last_message_sent_at ASC NULLS FIRST
        LIMIT 1`
     );
 
@@ -691,24 +688,14 @@ async function sendNotification(phone: string | null, message: string): Promise<
       return;
     }
 
-    const instance = instanceResult.rows[0];
-    const sendMessageUrl = `${instance.api_url}/message/sendText/${instance.instance_name}`;
+    await sendEvolutionTextSafely({
+      instanceId: instanceResult.rows[0].id,
+      number: phone,
+      text: message,
+      messageType: 'notification',
+    });
 
-    await axios.post(
-      sendMessageUrl,
-      {
-        number: phone,
-        text: message,
-      },
-      {
-        headers: {
-          'apikey': instance.api_key,
-          'Content-Type': 'application/json',
-        },
-      }
-    );
-
-    console.log(`   📲 Notificação enviada para ${phone}`);
+    console.log(`   📲 Notificação enviada para ${maskPhone(phone)}`);
   } catch (error: any) {
     console.error(`   ⚠️ Erro ao enviar notificação:`, error.message);
   }

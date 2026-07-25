@@ -9,11 +9,18 @@ export const MAX_DISPATCH_RETRY_ATTEMPTS = 1;
 export const RETRY_DISPATCH_MAX_AGE_HOURS = 48;
 
 export function isInstanceConnectivityError(error: any): boolean {
+  if (
+    error?.name === 'EvolutionSafeSendError' &&
+    ['provider_unavailable', 'timeout', 'network', 'instance_offline'].includes(error?.kind)
+  ) {
+    return true;
+  }
   return (
     error?.code === 'ECONNREFUSED' ||
     error?.code === 'ETIMEDOUT' ||
     error?.code === 'ENOTFOUND' ||
-    (typeof error?.response?.status === 'number' && error.response.status >= 500)
+    (typeof error?.response?.status === 'number' && error.response.status >= 500) ||
+    (typeof error?.httpStatus === 'number' && error.httpStatus >= 500)
   );
 }
 

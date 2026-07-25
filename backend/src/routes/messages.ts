@@ -1,9 +1,9 @@
 import express from 'express';
-import axios from 'axios';
 import { pool } from '../database';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { applyBlindage, recordBlindageSuccessfulSend } from '../services/blindage';
 import { withGlobalOutboundGate } from '../services/globalOutboundGate';
+import { sendEvolutionTextSafely } from '../services/evolutionSafeSender';
 
 const router = express.Router();
 
@@ -56,41 +56,22 @@ router.post('/send', async (req: AuthRequest, res) => {
         await new Promise(resolve => setTimeout(resolve, blindageResult.delay));
       }
 
-      const instanceResult = await pool.query(
-        `SELECT id, instance_name, api_url, api_key, status 
-         FROM instances 
-         WHERE id = $1`,
-        [blindageResult.selectedInstanceId]
-      );
-
-      if (instanceResult.rows.length === 0) {
-        throw Object.assign(new Error('Instância não encontrada'), { statusCode: 404 });
+      if (!blindageResult.selectedInstanceId) {
+        throw Object.assign(new Error('Nenhuma instância selecionada pela blindagem'), { statusCode: 400 });
       }
 
-      const instance = instanceResult.rows[0];
+      const sendResult = await sendEvolutionTextSafely({
+        instanceId: blindageResult.selectedInstanceId,
+        number: to,
+        text: message,
+        messageType: messageType || 'avulsa',
+      });
 
-      if (instance.status !== 'connected') {
-        throw Object.assign(new Error('Instância não está conectada'), { statusCode: 400 });
-      }
-
-      const evolutionApiUrl = process.env.EVOLUTION_API_URL || instance.api_url;
-      const evolutionApiKey = process.env.EVOLUTION_API_KEY || instance.api_key;
-
-      const sendMessageUrl = `${evolutionApiUrl}/message/sendText/${instance.instance_name}`;
-
-      const response = await axios.post(
-        sendMessageUrl,
-        {
-          number: to,
-          text: message,
-        },
-        {
-          headers: {
-            'apikey': evolutionApiKey,
-            'Content-Type': 'application/json',
-          },
-        }
+      const instanceRow = await pool.query(
+        `SELECT id, phone_number FROM instances WHERE id = $1`,
+        [sendResult.instanceId]
       );
+      const instancePhone = instanceRow.rows[0]?.phone_number || 'unknown';
 
       const messageResult = await pool.query(
         `INSERT INTO messages (
@@ -106,9 +87,9 @@ router.post('/send', async (req: AuthRequest, res) => {
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
         RETURNING id`,
         [
-          instance.id,
-          response.data?.key?.id || `temp-${Date.now()}`,
-          instance.phone_number || 'unknown',
+          sendResult.instanceId,
+          sendResult.messageId,
+          instancePhone,
           to,
           message,
           messageType || 'avulsa',
@@ -116,14 +97,6 @@ router.post('/send', async (req: AuthRequest, res) => {
           'sent',
           new Date(),
         ]
-      );
-
-      await pool.query(
-        `UPDATE instances 
-         SET last_message_sent_at = CURRENT_TIMESTAMP,
-             last_activity_at = CURRENT_TIMESTAMP
-         WHERE id = $1`,
-        [instance.id]
       );
 
       await recordBlindageSuccessfulSend({
@@ -138,15 +111,20 @@ router.post('/send', async (req: AuthRequest, res) => {
           success: true,
           message: {
             id: messageResult.rows[0].id,
-            instanceId: instance.id,
+            instanceId: sendResult.instanceId,
             to,
             message,
             status: 'sent',
-            evolutionResponse: response.data,
+            evolutionResponse: sendResult.evolutionData,
           },
           blindage: {
             delayApplied: blindageResult.delay || 0,
             instanceSelected: blindageResult.selectedInstanceId,
+          },
+          sendGuard: {
+            waitedMs: sendResult.waitedMs,
+            delayAppliedMs: sendResult.delayAppliedMs,
+            sequenceNumber: sendResult.sequenceNumber,
           },
         },
       };
