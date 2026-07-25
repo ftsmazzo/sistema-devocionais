@@ -9,7 +9,7 @@ import { executeDevocionalDispatch } from '../services/devocionalScheduler';
 import { personalizeDevocionalMessage, formatDevocionalMessage } from '../services/devocionalPersonalization';
 import { canReceiveDevocional } from '../services/devocionalScoring';
 import { maskPhone } from '../services/evolutionSafeSender';
-import { ensureDispatchItem, isDispatchItemSent } from '../services/dispatchItems';
+import { ensureDispatchItemsBatch, isDispatchItemSent } from '../services/dispatchItems';
 import {
   assertDispatchPipelineAllowed,
   DispatchOperationalError,
@@ -19,6 +19,7 @@ import {
   PENDING_WHATSAPP_VALIDATION_MESSAGE,
   resolveListAudience,
 } from '../services/listAudienceResolver';
+import { normalizePhoneDigits } from '../utils/phoneNumber';
 import { addLog } from './logs';
 
 const router = express.Router();
@@ -1008,25 +1009,30 @@ async function processDevocionalDispatchManually(dispatchId: number): Promise<vo
     let enqueued = 0;
     let alreadySent = 0;
 
+    const batch = await ensureDispatchItemsBatch({
+      dispatchId,
+      contacts: eligibleContacts,
+      messageType: 'devocional',
+      maxAttempts: 1,
+      buildSnapshot: (contact) =>
+        personalizeDevocionalMessage(
+          formatDevocionalMessage(devocional),
+          contact.name ?? null,
+          timezone
+        ),
+    });
+
+    if (batch.expected !== eligibleContacts.length || batch.total < eligibleContacts.length) {
+      const msg =
+        `Enfileiramento manual incompleto: elegíveis=${eligibleContacts.length}, ` +
+        `únicos=${batch.expected}, items=${batch.total}`;
+      addLog('error', `[Devocional Manual ${dispatchId}] ${msg}`);
+      throw new Error(msg);
+    }
+
     for (const contact of eligibleContacts) {
-      const formattedDevocional = formatDevocionalMessage(devocional);
-      const personalizedMessage = personalizeDevocionalMessage(
-        formattedDevocional,
-        contact.name,
-        timezone
-      );
-
-      const dispatchItem = await ensureDispatchItem({
-        dispatchId,
-        contactId: contact.id,
-        contactNumber: contact.phone_number,
-        contactName: contact.name,
-        messageType: 'devocional',
-        messageSnapshot: personalizedMessage,
-        maxAttempts: 1,
-      });
-
-      if (dispatchItem.status === 'sent' || (await isDispatchItemSent(dispatchId, contact.phone_number))) {
+      const phone = normalizePhoneDigits(contact.phone_number || '', '55');
+      if (await isDispatchItemSent(dispatchId, phone)) {
         alreadySent++;
         continue;
       }
@@ -1038,31 +1044,30 @@ async function processDevocionalDispatchManually(dispatchId: number): Promise<vo
            SELECT 1 FROM dispatch_contacts
            WHERE dispatch_id = $1 AND contact_number = $2
          )`,
-        [dispatchId, contact.phone_number, contact.name]
+        [dispatchId, phone, contact.name]
       );
 
       enqueued++;
-      addLog(
-        'info',
-        `[Devocional Manual ${dispatchId}] Enfileirado item ${dispatchItem.id} ${maskPhone(contact.phone_number)}`
-      );
     }
 
     await pool.query(
       `UPDATE dispatches
        SET total_contacts = $1,
            contacts_processed = $2,
+           status = 'running',
+           completed_at = NULL,
            updated_at = CURRENT_TIMESTAMP
        WHERE id = $3`,
       [eligibleContacts.length, alreadySent, dispatchId]
     );
 
     console.log(
-      `   ✅ Enfileiramento manual: ${enqueued} itens, ${alreadySent} já sent — worker processará (${countsLog})`
+      `   ✅ Enfileiramento manual: created=${batch.created} reused=${batch.reused} total=${batch.total} ` +
+        `(enqueued=${enqueued}, already_sent=${alreadySent}) — worker (${countsLog})`
     );
     addLog(
       'success',
-      `[Devocional Manual ${dispatchId}] Enfileirados ${enqueued} itens (${alreadySent} já sent). ${countsLog}`
+      `[Devocional Manual ${dispatchId}] items=${batch.total} created=${batch.created} reused=${batch.reused}. ${countsLog}`
     );
 
   } catch (error: any) {

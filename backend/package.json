@@ -9,7 +9,8 @@
     "start": "node dist/index.js",
     "type-check": "tsc --noEmit",
     "test:audience-classify": "tsx scripts/test-list-audience-classify.ts",
-    "test:audience-resolver": "tsx scripts/test-list-audience-resolver.ts"
+    "test:audience-resolver": "tsx scripts/test-list-audience-resolver.ts",
+    "test:dispatch-completion": "tsx scripts/test-dispatch-completion.ts"
   },
   "keywords": [
     "evolution-api",

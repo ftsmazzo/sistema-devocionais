@@ -103,6 +103,7 @@ interface TodayPayload {
     error_category?: string;
     error_message?: string;
   }>;
+  inconsistencies?: Array<{ code: string; message: string }>;
   next_items: Array<{
     id: number;
     contact_name?: string;
@@ -212,7 +213,7 @@ export default function OperacaoDevocional() {
       setPrepareResult(data);
       setToast({
         type: 'success',
-        message: `Preparação ok: ${data.audience?.eligible ?? 0} elegíveis, ${data.items?.created ?? 0} itens novos (sem envio).`,
+        message: `Preparação ok: ${data.audience?.eligible ?? 0} elegíveis → ${data.items?.total ?? data.items?.created ?? 0} dispatch_items (novos: ${data.items?.created ?? 0}, sem envio).`,
       });
       await loadAll(true);
     } catch (error: any) {
@@ -373,6 +374,33 @@ export default function OperacaoDevocional() {
                 Ajustar Config. Devocional
               </Link>
             )}
+          </div>
+        )}
+
+        {today?.inconsistencies && today.inconsistencies.length > 0 && (
+          <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#fbbf24', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+              Inconsistência da fila
+            </div>
+            {today.inconsistencies.map((inc) => (
+              <div
+                key={inc.code}
+                style={{
+                  display: 'flex',
+                  gap: 10,
+                  alignItems: 'flex-start',
+                  padding: '10px 12px',
+                  borderRadius: 10,
+                  background: 'rgba(245, 158, 11, 0.1)',
+                  border: '1px solid rgba(245, 158, 11, 0.35)',
+                  color: '#fcd34d',
+                  fontSize: '0.85rem',
+                }}
+              >
+                <ShieldAlert size={16} style={{ flexShrink: 0, marginTop: 2 }} />
+                <span><strong>{inc.code}</strong> — {inc.message}</span>
+              </div>
+            ))}
           </div>
         )}
 

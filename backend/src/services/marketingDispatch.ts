@@ -9,7 +9,7 @@ import { addLog } from '../routes/logs';
 import { pingInstanceHealth } from './retryQueue';
 import { markInstanceOfflineInDb, notifyAdminInstanceOffline } from './dispatchRetry';
 import { maskPhone } from './evolutionSafeSender';
-import { ensureDispatchItem, isDispatchItemSent } from './dispatchItems';
+import { ensureDispatchItemsBatch, isDispatchItemSent } from './dispatchItems';
 import {
   assertDispatchPipelineAllowed,
   DispatchOperationalError,
@@ -22,6 +22,7 @@ import {
   resolveListAudience,
   type CategorizedAudience,
 } from './listAudienceResolver';
+import { normalizePhoneDigits } from '../utils/phoneNumber';
 
 interface MarketingDispatchParams {
   dispatchId: number;
@@ -180,20 +181,25 @@ export async function processMarketingDispatch(params: MarketingDispatchParams):
     let enqueued = 0;
     let alreadySent = 0;
 
+    const batch = await ensureDispatchItemsBatch({
+      dispatchId,
+      contacts,
+      messageType: 'marketing',
+      maxAttempts: 1,
+      buildSnapshot: (contact) => applyMessageTemplate(dispatch.message_template, contact.name),
+    });
+
+    if (batch.expected !== contacts.length || batch.total < contacts.length) {
+      const msg =
+        `Marketing enfileiramento incompleto: elegíveis=${contacts.length}, ` +
+        `únicos=${batch.expected}, items=${batch.total}`;
+      addLog('error', `[Marketing ${dispatchId}] ${msg}`);
+      throw new Error(msg);
+    }
+
     for (const contact of contacts) {
-      const personalizedMessage = applyMessageTemplate(dispatch.message_template, contact.name);
-
-      const dispatchItem = await ensureDispatchItem({
-        dispatchId,
-        contactId: contact.id,
-        contactNumber: contact.phone_number,
-        contactName: contact.name,
-        messageType: 'marketing',
-        messageSnapshot: personalizedMessage,
-        maxAttempts: 1,
-      });
-
-      if (dispatchItem.status === 'sent' || (await isDispatchItemSent(dispatchId, contact.phone_number))) {
+      const phone = normalizePhoneDigits(contact.phone_number || '', '55');
+      if (await isDispatchItemSent(dispatchId, phone)) {
         alreadySent++;
         continue;
       }
@@ -205,13 +211,13 @@ export async function processMarketingDispatch(params: MarketingDispatchParams):
            SELECT 1 FROM dispatch_contacts
            WHERE dispatch_id = $1 AND contact_number = $2
          )`,
-        [dispatchId, contact.phone_number, contact.name]
+        [dispatchId, phone, contact.name]
       );
 
       enqueued++;
       addLog(
         'info',
-        `[Marketing ${dispatchId}] Enfileirado item ${dispatchItem.id} ${maskPhone(contact.phone_number)}`
+        `[Marketing ${dispatchId}] Enfileirado ${maskPhone(phone)}`
       );
     }
 
@@ -219,21 +225,23 @@ export async function processMarketingDispatch(params: MarketingDispatchParams):
       `UPDATE dispatches
        SET total_contacts = $1,
            contacts_processed = $2,
+           status = 'running',
+           completed_at = NULL,
            updated_at = CURRENT_TIMESTAMP
        WHERE id = $3`,
       [contacts.length, alreadySent, dispatchId]
     );
 
     const completeLog =
-      `✅ Marketing ${dispatchId} enfileirado: ${enqueued} itens, ${alreadySent} já sent — worker processará ` +
-      `(${countsLog})`;
+      `✅ Marketing ${dispatchId} enfileirado: created=${batch.created} reused=${batch.reused} ` +
+      `total_items=${batch.total}, already_sent=${alreadySent} — worker processará (${countsLog})`;
     console.log(`   ${completeLog}`);
     addLog('success', `[Marketing ${dispatchId}] ${completeLog}`);
 
     if (adminNotifyPhone) {
       await sendAdminWhatsAppNotification(
         adminNotifyPhone,
-        `✅ Disparo de Marketing "${dispatch.name}" enfileirado:\n📦 ${enqueued} itens no worker` +
+        `✅ Disparo de Marketing "${dispatch.name}" enfileirado:\n📦 ${batch.total} itens no worker` +
           (audience.counts.needs_whatsapp_validation > 0
             ? `\n⚠️ ${audience.counts.needs_whatsapp_validation} pendentes de validação WhatsApp`
             : '')

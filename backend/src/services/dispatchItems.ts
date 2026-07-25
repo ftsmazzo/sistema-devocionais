@@ -1,8 +1,9 @@
 /**
  * Itens persistentes de disparo (um por contato/disparo).
- * Idempotência e rastreio sem worker — o envio continua síncrono nesta etapa.
+ * Idempotência: unique (dispatch_id, contact_number). Envio fica no worker.
  */
 import { pool } from '../database';
+import { normalizePhoneDigits } from '../utils/phoneNumber';
 import { maskPhone } from './evolutionSafeSender';
 
 export type DispatchItemStatus =
@@ -11,7 +12,23 @@ export type DispatchItemStatus =
   | 'sent'
   | 'failed'
   | 'skipped'
-  | 'pending_retry';
+  | 'pending_retry'
+  | 'scheduled'
+  | 'canceled';
+
+export const DISPATCH_ITEM_OPEN_STATUSES = [
+  'pending',
+  'pending_retry',
+  'processing',
+  'scheduled',
+] as const;
+
+export const DISPATCH_ITEM_TERMINAL_STATUSES = [
+  'sent',
+  'failed',
+  'skipped',
+  'canceled',
+] as const;
 
 export interface DispatchItemRow {
   id: number;
@@ -44,6 +61,7 @@ function summarizeError(err: unknown, max = 500): string {
 /**
  * Cria item se não existir (unique dispatch_id + contact_number).
  * Se já existir, devolve o atual sem sobrescrever status sent.
+ * Não falha silenciosamente após ON CONFLICT: busca o existente ou lança erro.
  */
 export async function ensureDispatchItem(params: {
   dispatchId: number;
@@ -54,17 +72,23 @@ export async function ensureDispatchItem(params: {
   messageSnapshot?: string | null;
   instanceId?: number | null;
   maxAttempts?: number;
-}): Promise<DispatchItemRow> {
+}): Promise<DispatchItemRow & { created: boolean }> {
   const {
     dispatchId,
     contactId = null,
-    contactNumber,
     contactName = null,
     messageType = null,
     messageSnapshot = null,
     instanceId = null,
     maxAttempts = 1,
   } = params;
+
+  const contactNumber = normalizePhoneDigits(params.contactNumber || '', '55');
+  if (!contactNumber || contactNumber.length < 10) {
+    throw new Error(
+      `Telefone inválido ao criar dispatch_item: dispatch=${dispatchId} contact=${maskPhone(params.contactNumber)}`
+    );
+  }
 
   const snap = truncateSnapshot(messageSnapshot);
 
@@ -89,7 +113,7 @@ export async function ensureDispatchItem(params: {
   );
 
   if (inserted.rows.length > 0) {
-    return inserted.rows[0] as DispatchItemRow;
+    return { ...(inserted.rows[0] as DispatchItemRow), created: true };
   }
 
   const existing = await pool.query(
@@ -108,7 +132,7 @@ export async function ensureDispatchItem(params: {
   const row = existing.rows[0] as DispatchItemRow;
 
   // Atualiza snapshot/nome se ainda pendente (não mexe em sent)
-  if (row.status === 'pending' || row.status === 'pending_retry' || row.status === 'failed') {
+  if (row.status === 'pending' || row.status === 'pending_retry' || row.status === 'failed' || row.status === 'scheduled') {
     const upd = await pool.query(
       `UPDATE dispatch_items
        SET contact_name = COALESCE($3, contact_name),
@@ -120,21 +144,132 @@ export async function ensureDispatchItem(params: {
        RETURNING *`,
       [row.id, dispatchId, contactName, contactId, messageType, snap]
     );
-    if (upd.rows[0]) return upd.rows[0] as DispatchItemRow;
+    if (upd.rows[0]) return { ...(upd.rows[0] as DispatchItemRow), created: false };
   }
 
-  return row;
+  return { ...row, created: false };
+}
+
+export interface EnsureDispatchItemsBatchResult {
+  created: number;
+  reused: number;
+  total: number;
+  expected: number;
+  items: DispatchItemRow[];
+  duplicate_phones_skipped: number;
+}
+
+/**
+ * Cria/reutiliza um item por contato elegível. Percorre todos; não para no primeiro.
+ * Telefones normalizados; duplicata normalizada conta como skip (não mascara sucesso).
+ */
+export async function ensureDispatchItemsBatch(params: {
+  dispatchId: number;
+  contacts: Array<{
+    id?: number | null;
+    phone_number: string;
+    name?: string | null;
+  }>;
+  messageType?: string | null;
+  buildSnapshot: (contact: { id?: number | null; phone_number: string; name?: string | null }) => string;
+  maxAttempts?: number;
+}): Promise<EnsureDispatchItemsBatchResult> {
+  const seen = new Set<string>();
+  let created = 0;
+  let reused = 0;
+  let duplicate_phones_skipped = 0;
+  const items: DispatchItemRow[] = [];
+
+  for (const contact of params.contacts) {
+    const phone = normalizePhoneDigits(contact.phone_number || '', '55');
+    if (!phone || phone.length < 10) {
+      throw new Error(
+        `Contato elegível com telefone inválido (id=${contact.id ?? '?'}, ${maskPhone(contact.phone_number)})`
+      );
+    }
+    if (seen.has(phone)) {
+      duplicate_phones_skipped++;
+      continue;
+    }
+    seen.add(phone);
+
+    const item = await ensureDispatchItem({
+      dispatchId: params.dispatchId,
+      contactId: contact.id ?? null,
+      contactNumber: phone,
+      contactName: contact.name ?? null,
+      messageType: params.messageType ?? null,
+      messageSnapshot: params.buildSnapshot(contact),
+      maxAttempts: params.maxAttempts ?? 1,
+    });
+
+    if (item.created) created++;
+    else reused++;
+    items.push(item);
+  }
+
+  const summary = await getDispatchItemsSummary(params.dispatchId);
+  if (summary.total < seen.size) {
+    throw new Error(
+      `Inconsistência ao enfileirar: esperados ${seen.size} itens únicos, mas dispatch_items.total=${summary.total}`
+    );
+  }
+
+  return {
+    created,
+    reused,
+    total: summary.total,
+    expected: seen.size,
+    items,
+    duplicate_phones_skipped,
+  };
+}
+
+/**
+ * Regra pura: dispatch só conclui com itens suficientes e todos terminais.
+ */
+export function evaluateDispatchCompletion(params: {
+  totalContacts: number;
+  itemsTotal: number;
+  openCount: number;
+  terminalCount: number;
+}): { canComplete: boolean; reason?: string } {
+  const expected = Math.max(0, Number(params.totalContacts) || 0);
+  const itemsTotal = Number(params.itemsTotal) || 0;
+  const openCount = Number(params.openCount) || 0;
+  const terminalCount = Number(params.terminalCount) || 0;
+
+  if (expected <= 0) {
+    return { canComplete: false, reason: 'total_contacts inválido (<=0); mantendo aberto' };
+  }
+  if (itemsTotal < expected) {
+    return {
+      canComplete: false,
+      reason: `Itens insuficientes: dispatch_items=${itemsTotal} < total_contacts=${expected}`,
+    };
+  }
+  if (openCount > 0) {
+    return { canComplete: false, reason: `Ainda há ${openCount} item(ns) aberto(s)` };
+  }
+  if (terminalCount < expected) {
+    return {
+      canComplete: false,
+      reason: `Terminais=${terminalCount} < total_contacts=${expected}`,
+    };
+  }
+  return { canComplete: true };
 }
 
 export async function isDispatchItemSent(
   dispatchId: number,
   contactNumber: string
 ): Promise<boolean> {
+  const phone = normalizePhoneDigits(contactNumber || '', '55');
   const r = await pool.query(
     `SELECT 1 FROM dispatch_items
      WHERE dispatch_id = $1 AND contact_number = $2 AND status = 'sent'
      LIMIT 1`,
-    [dispatchId, contactNumber]
+    [dispatchId, phone]
   );
   return r.rows.length > 0;
 }
@@ -273,20 +408,32 @@ export async function getDispatchItemsSummary(dispatchId: number): Promise<{
   total: number;
   pending: number;
   processing: number;
+  scheduled: number;
   sent: number;
   failed: number;
   skipped: number;
   pending_retry: number;
+  canceled: number;
+  open: number;
+  terminal: number;
 }> {
   const r = await pool.query(
     `SELECT
        COUNT(*)::int AS total,
        COUNT(*) FILTER (WHERE status = 'pending')::int AS pending,
        COUNT(*) FILTER (WHERE status = 'processing')::int AS processing,
+       COUNT(*) FILTER (WHERE status = 'scheduled')::int AS scheduled,
        COUNT(*) FILTER (WHERE status = 'sent')::int AS sent,
        COUNT(*) FILTER (WHERE status = 'failed')::int AS failed,
        COUNT(*) FILTER (WHERE status = 'skipped')::int AS skipped,
-       COUNT(*) FILTER (WHERE status = 'pending_retry')::int AS pending_retry
+       COUNT(*) FILTER (WHERE status = 'pending_retry')::int AS pending_retry,
+       COUNT(*) FILTER (WHERE status = 'canceled')::int AS canceled,
+       COUNT(*) FILTER (
+         WHERE status IN ('pending', 'pending_retry', 'processing', 'scheduled')
+       )::int AS open,
+       COUNT(*) FILTER (
+         WHERE status IN ('sent', 'failed', 'skipped', 'canceled')
+       )::int AS terminal
      FROM dispatch_items
      WHERE dispatch_id = $1`,
     [dispatchId]

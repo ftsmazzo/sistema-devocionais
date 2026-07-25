@@ -12,6 +12,8 @@ import {
 } from './evolutionSafeSender';
 import {
   DispatchItemRow,
+  evaluateDispatchCompletion,
+  getDispatchItemsSummary,
   isDispatchItemSent,
   markDispatchItemFailed,
   markDispatchItemSent,
@@ -167,30 +169,56 @@ async function getDispatchRow(dispatchId: number): Promise<{
   metadata: any;
   dispatch_type: string | null;
   devocional_id: number | null;
+  total_contacts: number | null;
 } | null> {
   const r = await pool.query(
-    `SELECT status, metadata, dispatch_type, devocional_id FROM dispatches WHERE id = $1`,
+    `SELECT status, metadata, dispatch_type, devocional_id, total_contacts FROM dispatches WHERE id = $1`,
     [dispatchId]
   );
   return r.rows[0] ?? null;
 }
 
 async function maybeCompleteDispatch(dispatchId: number): Promise<void> {
-  const open = await pool.query(
-    `SELECT COUNT(*)::int AS c
-     FROM dispatch_items
-     WHERE dispatch_id = $1
-       AND status IN ('pending', 'pending_retry', 'processing')`,
-    [dispatchId]
-  );
-  if ((open.rows[0]?.c ?? 0) > 0) return;
+  const dispatch = await getDispatchRow(dispatchId);
+  if (!dispatch || !['running', 'pending', 'queued'].includes(dispatch.status)) {
+    return;
+  }
+
+  const summary = await getDispatchItemsSummary(dispatchId);
+  const expected = Number(dispatch.total_contacts) || 0;
+  const decision = evaluateDispatchCompletion({
+    totalContacts: expected,
+    itemsTotal: summary.total,
+    openCount: summary.open,
+    terminalCount: summary.terminal,
+  });
+
+  if (!decision.canComplete) {
+    if (summary.total < expected || (expected > 0 && summary.terminal < expected && summary.open === 0)) {
+      addLog(
+        'error',
+        `[DispatchWorker] Dispatch ${dispatchId} NÃO concluído: ${decision.reason}. ` +
+          `Mantendo status=${dispatch.status} (itens=${summary.total}, terminais=${summary.terminal}, abertos=${summary.open}, esperado=${expected})`
+      );
+      // Reabre se estava inconsistente como completed (defesa — normalmente já está running)
+      await pool.query(
+        `UPDATE dispatches
+         SET status = CASE WHEN status IN ('completed', 'failed') THEN 'running' ELSE status END,
+             completed_at = NULL,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $1 AND status IN ('completed', 'failed')`,
+        [dispatchId]
+      );
+    }
+    return;
+  }
 
   await pool.query(
     `UPDATE dispatches
      SET status = 'completed',
          completed_at = COALESCE(completed_at, CURRENT_TIMESTAMP),
          updated_at = CURRENT_TIMESTAMP
-     WHERE id = $1 AND status = 'running'`,
+     WHERE id = $1 AND status IN ('running', 'pending', 'queued')`,
     [dispatchId]
   );
 }

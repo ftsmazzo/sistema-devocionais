@@ -4,7 +4,11 @@
  */
 import { pool } from '../database';
 import { formatDevocionalMessage, personalizeDevocionalMessage } from './devocionalPersonalization';
-import { ensureDispatchItem, getDispatchItemsSummary, isDispatchItemSent } from './dispatchItems';
+import {
+  ensureDispatchItemsBatch,
+  getDispatchItemsSummary,
+  isDispatchItemSent,
+} from './dispatchItems';
 import { getDispatchRuntimeSnapshot } from './dispatchRuntimeConfig';
 import { maskPhone } from './evolutionSafeSender';
 import { reconcileActiveJourneyForDate } from './journeyReconcile';
@@ -13,6 +17,8 @@ import {
   isWhatsAppAutoValidateOnPrepare,
   resolveListAudience,
 } from './listAudienceResolver';
+import { addLog } from '../routes/logs';
+import { normalizePhoneDigits } from '../utils/phoneNumber';
 
 function todayInTimezone(timezone: string): string {
   return new Intl.DateTimeFormat('en-CA', {
@@ -348,36 +354,50 @@ export async function prepareTodayDevocionalOperation() {
   }
 
   const dispatchId = dispatch.id as number;
-  let created = 0;
-  let reused = 0;
+
+  // Reabre se estava completed/failed — vamos (re)enfileirar todos os elegíveis
+  await pool.query(
+    `UPDATE dispatches
+     SET status = 'running',
+         completed_at = NULL,
+         updated_at = CURRENT_TIMESTAMP
+     WHERE id = $1 AND status IN ('completed', 'failed', 'stopped', 'pending')`,
+    [dispatchId]
+  );
+
+  const batch = await ensureDispatchItemsBatch({
+    dispatchId,
+    contacts: eligible,
+    messageType: 'devocional',
+    maxAttempts: 1,
+    buildSnapshot: (contact) =>
+      personalizeDevocionalMessage(
+        formatDevocionalMessage(devocional),
+        contact.name ?? null,
+        timezone
+      ),
+  });
+
+  if (batch.expected !== eligible.length) {
+    const msg =
+      `Preparação inconsistente: elegíveis=${eligible.length} mas telefones únicos=${batch.expected}` +
+      (batch.duplicate_phones_skipped
+        ? ` (duplicatas normalizadas=${batch.duplicate_phones_skipped})`
+        : '');
+    addLog('error', `[Operação] Dispatch ${dispatchId}: ${msg}`);
+    throw Object.assign(new Error(msg), { status: 409 });
+  }
+
+  if (batch.total < eligible.length) {
+    const msg = `Preparação incompleta: elegíveis=${eligible.length}, dispatch_items=${batch.total}`;
+    addLog('error', `[Operação] Dispatch ${dispatchId}: ${msg}`);
+    throw Object.assign(new Error(msg), { status: 409 });
+  }
+
   let alreadySent = 0;
-
   for (const contact of eligible) {
-    const personalized = personalizeDevocionalMessage(
-      formatDevocionalMessage(devocional),
-      contact.name,
-      timezone
-    );
-
-    const before = await pool.query(
-      `SELECT id, status FROM dispatch_items WHERE dispatch_id = $1 AND contact_number = $2 LIMIT 1`,
-      [dispatchId, contact.phone_number]
-    );
-
-    const item = await ensureDispatchItem({
-      dispatchId,
-      contactId: contact.id,
-      contactNumber: contact.phone_number,
-      contactName: contact.name,
-      messageType: 'devocional',
-      messageSnapshot: personalized,
-      maxAttempts: 1,
-    });
-
-    if (before.rows.length === 0) created++;
-    else reused++;
-
-    if (item.status === 'sent' || (await isDispatchItemSent(dispatchId, contact.phone_number))) {
+    const phone = normalizePhoneDigits(contact.phone_number || '', '55');
+    if (await isDispatchItemSent(dispatchId, phone)) {
       alreadySent++;
     }
 
@@ -387,20 +407,26 @@ export async function prepareTodayDevocionalOperation() {
        WHERE NOT EXISTS (
          SELECT 1 FROM dispatch_contacts WHERE dispatch_id = $1 AND contact_number = $2
        )`,
-      [dispatchId, contact.phone_number, contact.name]
+      [dispatchId, phone, contact.name]
     );
   }
 
   await pool.query(
     `UPDATE dispatches
      SET total_contacts = $1,
-         updated_at = CURRENT_TIMESTAMP,
-         status = CASE WHEN status IN ('completed', 'failed', 'stopped') THEN status ELSE 'running' END
+         status = 'running',
+         completed_at = NULL,
+         updated_at = CURRENT_TIMESTAMP
      WHERE id = $2`,
     [eligible.length, dispatchId]
   );
 
   const summary = await getDispatchItemsSummary(dispatchId);
+  if (summary.total < eligible.length) {
+    const msg = `Após prepare: dispatch_items=${summary.total} < elegíveis=${eligible.length}`;
+    addLog('error', `[Operação] Dispatch ${dispatchId}: ${msg}`);
+    throw Object.assign(new Error(msg), { status: 409 });
+  }
 
   return {
     date: dateYmd,
@@ -420,8 +446,9 @@ export async function prepareTodayDevocionalOperation() {
       auto_validate: autoValidateResult,
     },
     items: {
-      created,
-      reused,
+      created: batch.created,
+      reused: batch.reused,
+      total: batch.total,
       already_sent: alreadySent,
       summary,
     },
@@ -518,6 +545,49 @@ export async function getTodayDevocionalOperation() {
       ).rows[0].c
     : 0;
 
+  const inconsistencies: Array<{ code: string; message: string }> = [];
+  if (list && todayDevocional) {
+    const audience = await resolveListAudience(list);
+    const eligibleNow = audience.counts.eligible_now;
+    if (dispatch && itemsSummary) {
+      if (eligibleNow > itemsSummary.total) {
+        inconsistencies.push({
+          code: 'ITEMS_LT_ELIGIBLE',
+          message: `Elegíveis agora (${eligibleNow}) > dispatch_items (${itemsSummary.total}). Reexecute Preparar envio de hoje.`,
+        });
+      }
+      if (Number(dispatch.total_contacts) > itemsSummary.total) {
+        inconsistencies.push({
+          code: 'ITEMS_LT_TOTAL_CONTACTS',
+          message: `total_contacts (${dispatch.total_contacts}) > dispatch_items (${itemsSummary.total}). Fila incompleta.`,
+        });
+      }
+      if (
+        dispatch.status === 'completed' &&
+        itemsSummary.terminal < Number(dispatch.total_contacts || 0)
+      ) {
+        inconsistencies.push({
+          code: 'COMPLETED_EARLY',
+          message: `Dispatch completed com terminais (${itemsSummary.terminal}) < total_contacts (${dispatch.total_contacts}). Conclusão indevida.`,
+        });
+      }
+      if (
+        dispatch.status === 'completed' &&
+        itemsSummary.open > 0
+      ) {
+        inconsistencies.push({
+          code: 'COMPLETED_WITH_OPEN',
+          message: `Dispatch completed com ${itemsSummary.open} item(ns) ainda aberto(s).`,
+        });
+      }
+    } else if (eligibleNow > 0 && !dispatch) {
+      inconsistencies.push({
+        code: 'NO_DISPATCH_YET',
+        message: `Há ${eligibleNow} elegíveis, mas ainda não há dispatch de hoje. Use Preparar envio de hoje.`,
+      });
+    }
+  }
+
   const guards = await pool.query(
     `SELECT i.id, i.instance_name, i.status, g.next_available_at, g.cooldown_until
      FROM instances i
@@ -555,6 +625,7 @@ export async function getTodayDevocionalOperation() {
       : null,
     items_summary: itemsSummary,
     dry_run_marked: dryRunCount,
+    inconsistencies,
     recent_errors: recentErrors,
     next_items: nextItems,
     instances_guard: guards.rows.map((g) => ({

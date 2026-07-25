@@ -6,7 +6,7 @@ import { pingInstanceHealth } from './retryQueue';
 import { reconcileActiveJourneyForDate } from './journeyReconcile';
 import { markInstanceOfflineInDb, notifyAdminInstanceOffline } from './dispatchRetry';
 import { maskPhone } from './evolutionSafeSender';
-import { ensureDispatchItem, isDispatchItemSent } from './dispatchItems';
+import { ensureDispatchItemsBatch, isDispatchItemSent } from './dispatchItems';
 import {
   assertDispatchPipelineAllowed,
   DispatchOperationalError,
@@ -17,6 +17,7 @@ import {
   isWhatsAppAutoValidateOnPrepare,
   resolveListAudience,
 } from './listAudienceResolver';
+import { normalizePhoneDigits } from '../utils/phoneNumber';
 
 /**
  * Serviço de agendamento para disparo automático de devocionais
@@ -332,25 +333,30 @@ export async function executeDevocionalDispatch(): Promise<void> {
     let enqueued = 0;
     let alreadySent = 0;
 
+    const batch = await ensureDispatchItemsBatch({
+      dispatchId,
+      contacts: eligibleContacts,
+      messageType: 'devocional',
+      maxAttempts: 1,
+      buildSnapshot: (contact) =>
+        personalizeDevocionalMessage(
+          formatDevocionalMessage(devocional),
+          contact.name ?? null,
+          config.timezone
+        ),
+    });
+
+    if (batch.expected !== eligibleContacts.length || batch.total < eligibleContacts.length) {
+      const msg =
+        `Enfileiramento incompleto: elegíveis=${eligibleContacts.length}, ` +
+        `únicos=${batch.expected}, dispatch_items=${batch.total}`;
+      addLog('error', `[Devocional] Dispatch ${dispatchId}: ${msg}`);
+      throw new Error(msg);
+    }
+
     for (const contact of eligibleContacts) {
-      const formattedDevocional = formatDevocionalMessage(devocional);
-      const personalizedMessage = personalizeDevocionalMessage(
-        formattedDevocional,
-        contact.name,
-        config.timezone
-      );
-
-      const dispatchItem = await ensureDispatchItem({
-        dispatchId,
-        contactId: contact.id,
-        contactNumber: contact.phone_number,
-        contactName: contact.name,
-        messageType: 'devocional',
-        messageSnapshot: personalizedMessage,
-        maxAttempts: 1,
-      });
-
-      if (dispatchItem.status === 'sent' || (await isDispatchItemSent(dispatchId, contact.phone_number))) {
+      const phone = normalizePhoneDigits(contact.phone_number || '', '55');
+      if (await isDispatchItemSent(dispatchId, phone)) {
         alreadySent++;
         continue;
       }
@@ -362,13 +368,13 @@ export async function executeDevocionalDispatch(): Promise<void> {
            SELECT 1 FROM dispatch_contacts
            WHERE dispatch_id = $1 AND contact_number = $2
          )`,
-        [dispatchId, contact.phone_number, contact.name]
+        [dispatchId, phone, contact.name]
       );
 
       enqueued++;
       addLog(
         'info',
-        `[Devocional] Enfileirado item ${dispatchItem.id} ${maskPhone(contact.phone_number)}`
+        `[Devocional] Enfileirado ${maskPhone(phone)} (created=${batch.created}, reused=${batch.reused})`
       );
     }
 
@@ -376,22 +382,25 @@ export async function executeDevocionalDispatch(): Promise<void> {
       `UPDATE dispatches
        SET total_contacts = $1,
            contacts_processed = $2,
+           status = 'running',
+           completed_at = NULL,
            updated_at = CURRENT_TIMESTAMP
        WHERE id = $3`,
       [eligibleContacts.length, alreadySent, dispatchId]
     );
 
     console.log(
-      `   ✅ Enfileiramento concluído: ${enqueued} itens, ${alreadySent} já sent — worker processará`
+      `   ✅ Enfileiramento concluído: created=${batch.created} reused=${batch.reused} total_items=${batch.total} ` +
+        `(contacts_enqueued=${enqueued}, already_sent=${alreadySent}) — worker processará`
     );
     addLog(
       'success',
-      `[Devocional] Dispatch ${dispatchId}: ${enqueued} enfileirados, ${alreadySent} já enviados`
+      `[Devocional] Dispatch ${dispatchId}: items=${batch.total} created=${batch.created} reused=${batch.reused}`
     );
 
     await sendAdminWhatsAppNotification(
       config.notification_phone,
-      `✅ Devocional ${dispatchId} enfileirado: ${enqueued} itens no worker.`
+      `✅ Devocional ${dispatchId} enfileirado: ${batch.total} itens no worker.`
     );
 
   } catch (error: any) {
