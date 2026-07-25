@@ -1,6 +1,7 @@
 /**
  * Enfileira disparos de marketing em dispatch_items.
  * O worker PostgreSQL é o único executor de envio.
+ * Público resolvido via listAudienceResolver (sem forçar whatsapp_validated na query).
  */
 import { pool } from '../database';
 import { applyMessageTemplate } from './devocionalPersonalization';
@@ -14,6 +15,13 @@ import {
   DispatchOperationalError,
 } from './dispatchRuntimeConfig';
 import { sendAdminWhatsAppNotification } from './adminWhatsAppNotify';
+import {
+  formatAudienceCountsLog,
+  PENDING_WHATSAPP_VALIDATION_MESSAGE,
+  resolveContactsByIds,
+  resolveListAudience,
+  type CategorizedAudience,
+} from './listAudienceResolver';
 
 interface MarketingDispatchParams {
   dispatchId: number;
@@ -70,7 +78,7 @@ export async function processMarketingDispatch(params: MarketingDispatchParams):
       [dispatchId]
     );
 
-    let contacts: any[] = [];
+    let audience: CategorizedAudience;
 
     if (dispatch.list_id) {
       const listResult = await pool.query(`SELECT * FROM contact_lists WHERE id = $1`, [
@@ -79,27 +87,50 @@ export async function processMarketingDispatch(params: MarketingDispatchParams):
       if (listResult.rows.length === 0) {
         throw new Error(`Lista ${dispatch.list_id} não encontrada`);
       }
-      contacts = await getContactsFromList(listResult.rows[0]);
+      audience = await resolveListAudience(listResult.rows[0]);
     } else if (dispatch.contact_ids && Array.isArray(dispatch.contact_ids)) {
-      const contactsResult = await pool.query(
-        `SELECT id, phone_number, name, whatsapp_validated, opt_in, opt_out
-         FROM contacts
-         WHERE id = ANY($1::int[])
-           AND whatsapp_validated = true
-           AND opt_in = true
-           AND opt_out = false`,
-        [dispatch.contact_ids]
-      );
-      contacts = contactsResult.rows;
+      audience = await resolveContactsByIds(dispatch.contact_ids);
+    } else {
+      audience = await resolveContactsByIds([]);
     }
 
-    console.log(`   📋 ${contacts.length} contatos encontrados`);
+    const countsLog = formatAudienceCountsLog(audience.counts);
+    console.log(`   📋 Público marketing: ${countsLog}`);
+    addLog('info', `[Marketing ${dispatchId}] Público: ${countsLog}`);
+
+    if (audience.counts.needs_whatsapp_validation > 0) {
+      addLog(
+        'warning',
+        `[Marketing ${dispatchId}] ${audience.counts.needs_whatsapp_validation} pendentes WA — ` +
+          PENDING_WHATSAPP_VALIDATION_MESSAGE
+      );
+    }
+
+    const contacts = audience.eligible_now;
 
     if (contacts.length === 0) {
+      const pendingMsg =
+        audience.counts.needs_whatsapp_validation > 0
+          ? PENDING_WHATSAPP_VALIDATION_MESSAGE
+          : 'Nenhum contato elegível para enfileirar.';
+
+      console.log(`   ⚠️ ${pendingMsg}`);
+      addLog('warning', `[Marketing ${dispatchId}] ${pendingMsg}`);
+
       await pool.query(
-        `UPDATE dispatches SET status = 'completed', contacts_processed = 0, completed_at = CURRENT_TIMESTAMP WHERE id = $1`,
+        `UPDATE dispatches
+         SET status = 'completed',
+             contacts_processed = 0,
+             total_contacts = 0,
+             completed_at = CURRENT_TIMESTAMP,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $1`,
         [dispatchId]
       );
+
+      if (audience.counts.needs_whatsapp_validation > 0) {
+        throw new Error(PENDING_WHATSAPP_VALIDATION_MESSAGE);
+      }
       return;
     }
 
@@ -193,114 +224,32 @@ export async function processMarketingDispatch(params: MarketingDispatchParams):
       [contacts.length, alreadySent, dispatchId]
     );
 
-    const completeLog = `✅ Marketing ${dispatchId} enfileirado: ${enqueued} itens, ${alreadySent} já sent — worker processará`;
+    const completeLog =
+      `✅ Marketing ${dispatchId} enfileirado: ${enqueued} itens, ${alreadySent} já sent — worker processará ` +
+      `(${countsLog})`;
     console.log(`   ${completeLog}`);
     addLog('success', `[Marketing ${dispatchId}] ${completeLog}`);
 
     if (adminNotifyPhone) {
       await sendAdminWhatsAppNotification(
         adminNotifyPhone,
-        `✅ Disparo de Marketing "${dispatch.name}" enfileirado:\n📦 ${enqueued} itens no worker`
+        `✅ Disparo de Marketing "${dispatch.name}" enfileirado:\n📦 ${enqueued} itens no worker` +
+          (audience.counts.needs_whatsapp_validation > 0
+            ? `\n⚠️ ${audience.counts.needs_whatsapp_validation} pendentes de validação WhatsApp`
+            : '')
       );
     }
   } catch (error: any) {
     console.error(`❌ Erro ao processar disparo de marketing:`, error);
     if (error instanceof DispatchOperationalError) {
       addLog('error', `[Marketing ${dispatchId}] ${error.message}`);
+    } else if (error?.message === PENDING_WHATSAPP_VALIDATION_MESSAGE) {
+      addLog('warning', `[Marketing ${dispatchId}] ${error.message}`);
+      return;
     }
     await pool.query(
       `UPDATE dispatches SET status = 'failed', completed_at = CURRENT_TIMESTAMP WHERE id = $1`,
       [dispatchId]
     );
   }
-}
-
-async function getContactsFromList(list: any): Promise<any[]> {
-  let query = '';
-  let params: any[] = [];
-
-  if (list.list_type === 'static') {
-    query = `
-      SELECT DISTINCT c.id, c.phone_number, c.name
-      FROM contacts c
-      JOIN contact_list_items cli ON c.id = cli.contact_id
-      WHERE cli.list_id = $1
-        AND c.whatsapp_validated = true
-        AND c.opt_in = true
-        AND c.opt_out = false
-    `;
-    params = [list.id];
-  } else {
-    const filterConfig = list.filter_config || {};
-
-    let whereConditions = ['c.whatsapp_validated = true', 'c.opt_in = true', 'c.opt_out = false'];
-    let joinClauses = '';
-    let paramCount = 1;
-
-    if (filterConfig.tags && Array.isArray(filterConfig.tags) && filterConfig.tags.length > 0) {
-      joinClauses += ` JOIN contact_tag_relations ctr${paramCount} ON c.id = ctr${paramCount}.contact_id`;
-      whereConditions.push(`ctr${paramCount}.tag_id = ANY($${paramCount}::int[])`);
-      params.push(filterConfig.tags);
-      paramCount++;
-    }
-
-    if (filterConfig.exclude_tags && Array.isArray(filterConfig.exclude_tags) && filterConfig.exclude_tags.length > 0) {
-      whereConditions.push(`NOT EXISTS (
-        SELECT 1 FROM contact_tag_relations ctr_ex
-        JOIN contact_tags t_ex ON ctr_ex.tag_id = t_ex.id
-        WHERE ctr_ex.contact_id = c.id
-          AND t_ex.id = ANY($${paramCount}::int[])
-      )`);
-      params.push(filterConfig.exclude_tags);
-      paramCount++;
-    }
-
-    query = `
-      SELECT DISTINCT c.id, c.phone_number, c.name
-      FROM contacts c
-      ${joinClauses}
-      WHERE ${whereConditions.join(' AND ')}
-    `;
-
-    if (list.list_type === 'hybrid') {
-      const hasDynamicFilters =
-        (filterConfig.tags && Array.isArray(filterConfig.tags) && filterConfig.tags.length > 0) ||
-        (filterConfig.exclude_tags &&
-          Array.isArray(filterConfig.exclude_tags) &&
-          filterConfig.exclude_tags.length > 0);
-
-      if (!hasDynamicFilters) {
-        query = `
-          SELECT DISTINCT c.id, c.phone_number, c.name
-          FROM contacts c
-          JOIN contact_list_items cli ON c.id = cli.contact_id
-          WHERE cli.list_id = $1
-            AND c.whatsapp_validated = true
-            AND c.opt_in = true
-            AND c.opt_out = false
-        `;
-        params = [list.id];
-      } else {
-        query = `
-          SELECT DISTINCT c.id, c.phone_number, c.name
-          FROM contacts c
-          WHERE (
-            c.id IN (
-              SELECT contact_id FROM contact_list_items WHERE list_id = $${paramCount}
-            )
-            OR c.id IN (
-              SELECT DISTINCT c2.id
-              FROM contacts c2
-              ${joinClauses}
-              WHERE ${whereConditions.join(' AND ')}
-            )
-          )
-        `;
-        params.push(list.id);
-      }
-    }
-  }
-
-  const result = await pool.query(query, params);
-  return result.rows;
 }

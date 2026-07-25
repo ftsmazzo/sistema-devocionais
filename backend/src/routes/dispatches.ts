@@ -14,6 +14,11 @@ import {
   assertDispatchPipelineAllowed,
   DispatchOperationalError,
 } from '../services/dispatchRuntimeConfig';
+import {
+  formatAudienceCountsLog,
+  PENDING_WHATSAPP_VALIDATION_MESSAGE,
+  resolveListAudience,
+} from '../services/listAudienceResolver';
 import { addLog } from './logs';
 
 const router = express.Router();
@@ -918,97 +923,21 @@ async function processDevocionalDispatchManually(dispatchId: number): Promise<vo
 
     const list = listResult.rows[0];
 
-    // Buscar contatos da lista (usar mesma lógica do scheduler automático)
-    let contactsQuery = '';
-    let contactsParams: any[] = [];
+    // Mesmo resolver do automático/operação — sem forçar whatsapp_validated=true
+    const audience = await resolveListAudience(list);
+    const countsLog = formatAudienceCountsLog(audience.counts);
+    console.log(`   📋 Público manual: ${countsLog}`);
+    addLog('info', `[Devocional Manual ${dispatchId}] Público: ${countsLog}`);
 
-    if (list.list_type === 'static') {
-      contactsQuery = `
-        SELECT DISTINCT c.id, c.phone_number, c.name
-        FROM contacts c
-        JOIN contact_list_items cli ON c.id = cli.contact_id
-        WHERE cli.list_id = $1
-          AND c.whatsapp_validated = true
-          AND c.opt_in = true
-          AND c.opt_out = false
-      `;
-      contactsParams = [list.id];
-    } else {
-      const filterConfig = typeof list.filter_config === 'string' 
-        ? JSON.parse(list.filter_config) 
-        : (list.filter_config || {});
-      
-      let whereConditions = ['c.whatsapp_validated = true', 'c.opt_in = true', 'c.opt_out = false'];
-      let joinClauses = '';
-      let paramCount = 1;
-
-      if (filterConfig.tags && Array.isArray(filterConfig.tags) && filterConfig.tags.length > 0) {
-        joinClauses += ` JOIN contact_tag_relations ctr${paramCount} ON c.id = ctr${paramCount}.contact_id`;
-        whereConditions.push(`ctr${paramCount}.tag_id = ANY($${paramCount}::int[])`);
-        contactsParams.push(filterConfig.tags);
-        paramCount++;
-      }
-
-      if (filterConfig.exclude_tags && Array.isArray(filterConfig.exclude_tags) && filterConfig.exclude_tags.length > 0) {
-        whereConditions.push(`NOT EXISTS (
-          SELECT 1 FROM contact_tag_relations ctr_ex
-          JOIN contact_tags t_ex ON ctr_ex.tag_id = t_ex.id
-          WHERE ctr_ex.contact_id = c.id
-            AND t_ex.id = ANY($${paramCount}::int[])
-        )`);
-        contactsParams.push(filterConfig.exclude_tags);
-        paramCount++;
-      }
-
-      if (list.list_type === 'hybrid') {
-        const hasDynamicFilters = (filterConfig.tags && Array.isArray(filterConfig.tags) && filterConfig.tags.length > 0) ||
-                                  (filterConfig.exclude_tags && Array.isArray(filterConfig.exclude_tags) && filterConfig.exclude_tags.length > 0);
-        
-        if (!hasDynamicFilters) {
-          contactsQuery = `
-            SELECT DISTINCT c.id, c.phone_number, c.name
-            FROM contacts c
-            JOIN contact_list_items cli ON c.id = cli.contact_id
-            WHERE cli.list_id = $1
-              AND c.whatsapp_validated = true
-              AND c.opt_in = true
-              AND c.opt_out = false
-          `;
-          contactsParams = [list.id];
-        } else {
-          contactsQuery = `
-            SELECT DISTINCT c.id, c.phone_number, c.name
-            FROM contacts c
-            WHERE (
-              c.id IN (
-                SELECT contact_id FROM contact_list_items WHERE list_id = $${paramCount}
-              )
-              OR c.id IN (
-                SELECT DISTINCT c2.id
-                FROM contacts c2
-                ${joinClauses}
-                WHERE ${whereConditions.join(' AND ')}
-              )
-            )
-          `;
-          contactsParams.push(list.id);
-        }
-      } else {
-        contactsQuery = `
-          SELECT DISTINCT c.id, c.phone_number, c.name
-          FROM contacts c
-          ${joinClauses}
-          WHERE ${whereConditions.join(' AND ')}
-        `;
-      }
+    if (audience.counts.needs_whatsapp_validation > 0) {
+      addLog(
+        'warning',
+        `[Devocional Manual ${dispatchId}] ${audience.counts.needs_whatsapp_validation} pendentes WA — ` +
+          PENDING_WHATSAPP_VALIDATION_MESSAGE
+      );
     }
 
-    const contactsResult = await pool.query(contactsQuery, contactsParams);
-    const contacts = contactsResult.rows;
-
-    console.log(`   📋 ${contacts.length} contatos encontrados na lista`);
-
-    if (contacts.length === 0) {
+    if (audience.counts.total_potential === 0) {
       await pool.query(
         `UPDATE dispatches SET status = 'completed', contacts_processed = 0, completed_at = CURRENT_TIMESTAMP WHERE id = $1`,
         [dispatchId]
@@ -1016,9 +945,9 @@ async function processDevocionalDispatchManually(dispatchId: number): Promise<vo
       return;
     }
 
-    // Filtrar contatos que podem receber devocional
+    // Reforço de pontuação sobre eligible_now (resolver já exclui score/bloqueio)
     const eligibleContacts = [];
-    for (const contact of contacts) {
+    for (const contact of audience.eligible_now) {
       const canReceive = await canReceiveDevocional(contact.id);
       if (canReceive) {
         eligibleContacts.push(contact);
@@ -1028,8 +957,19 @@ async function processDevocionalDispatchManually(dispatchId: number): Promise<vo
     console.log(`   ✅ ${eligibleContacts.length} contatos elegíveis após verificação de pontuação`);
 
     if (eligibleContacts.length === 0) {
+      const pendingMsg =
+        audience.counts.needs_whatsapp_validation > 0
+          ? PENDING_WHATSAPP_VALIDATION_MESSAGE
+          : 'Nenhum contato elegível para enfileirar.';
+      console.log(`   ⚠️ ${pendingMsg}`);
+      addLog('warning', `[Devocional Manual ${dispatchId}] ${pendingMsg}`);
       await pool.query(
-        `UPDATE dispatches SET status = 'completed', contacts_processed = 0, completed_at = CURRENT_TIMESTAMP WHERE id = $1`,
+        `UPDATE dispatches
+         SET status = 'completed',
+             contacts_processed = 0,
+             total_contacts = 0,
+             completed_at = CURRENT_TIMESTAMP
+         WHERE id = $1`,
         [dispatchId]
       );
       return;
@@ -1117,10 +1057,12 @@ async function processDevocionalDispatchManually(dispatchId: number): Promise<vo
       [eligibleContacts.length, alreadySent, dispatchId]
     );
 
-    console.log(`   ✅ Enfileiramento manual: ${enqueued} itens, ${alreadySent} já sent — worker processará`);
+    console.log(
+      `   ✅ Enfileiramento manual: ${enqueued} itens, ${alreadySent} já sent — worker processará (${countsLog})`
+    );
     addLog(
       'success',
-      `[Devocional Manual ${dispatchId}] Enfileirados ${enqueued} itens (${alreadySent} já sent)`
+      `[Devocional Manual ${dispatchId}] Enfileirados ${enqueued} itens (${alreadySent} já sent). ${countsLog}`
     );
 
   } catch (error: any) {

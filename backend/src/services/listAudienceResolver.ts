@@ -305,21 +305,18 @@ function toItem(c: AudienceContact, reason: AudienceExclusionReason): AudienceIt
   };
 }
 
+export type CategorizedAudience = Omit<ResolvedAudience, 'list_id' | 'list_type'> & {
+  list_id?: number;
+  list_type?: string;
+};
+
 /**
- * Resolve público em categorias. Não some com contatos não validados.
+ * Categoriza contatos já carregados (sem forçar whatsapp_validated na existência).
  */
-export async function resolveListAudience(listOrId: any | number): Promise<ResolvedAudience> {
-  let list = listOrId;
-  if (typeof listOrId === 'number') {
-    const r = await pool.query(`SELECT * FROM contact_lists WHERE id = $1`, [listOrId]);
-    if (r.rows.length === 0) {
-      throw new Error(`Lista ${listOrId} não encontrada`);
-    }
-    list = r.rows[0];
-  }
-
-  const potential = await fetchListPotentialContacts(list);
-
+export async function categorizeAudienceContacts(
+  potential: AudienceContact[],
+  meta?: { list_id?: number; list_type?: string }
+): Promise<CategorizedAudience> {
   const eligible_now: AudienceContact[] = [];
   const needs_whatsapp_validation: AudienceContact[] = [];
   const excluded_opt_out: AudienceContact[] = [];
@@ -381,8 +378,8 @@ export async function resolveListAudience(listOrId: any | number): Promise<Resol
   };
 
   return {
-    list_id: list.id,
-    list_type: list.list_type,
+    list_id: meta?.list_id,
+    list_type: meta?.list_type,
     total_potential: potential.length,
     eligible_now,
     needs_whatsapp_validation,
@@ -394,6 +391,61 @@ export async function resolveListAudience(listOrId: any | number): Promise<Resol
     excluded_by_filter: excluded_by_score,
     items,
     counts,
+  };
+}
+
+export function formatAudienceCountsLog(counts: CategorizedAudience['counts']): string {
+  return (
+    `potencial=${counts.total_potential} elegíveis=${counts.eligible_now} ` +
+    `pendentes_wa=${counts.needs_whatsapp_validation} wa_inválido=${counts.excluded_whatsapp_invalid} ` +
+    `opt_out=${counts.excluded_opt_out} sem_opt_in=${counts.excluded_no_opt_in} ` +
+    `tel_inválido=${counts.excluded_invalid_phone} pontuação=${counts.excluded_by_score}`
+  );
+}
+
+export const PENDING_WHATSAPP_VALIDATION_MESSAGE =
+  'Existem contatos pendentes de validação WhatsApp; valide ou habilite validação automática.';
+
+/**
+ * Resolve público de IDs explícitos (disparo por contact_ids) com as mesmas regras de elegibilidade.
+ */
+export async function resolveContactsByIds(contactIds: number[]): Promise<CategorizedAudience> {
+  if (!contactIds.length) {
+    return categorizeAudienceContacts([]);
+  }
+  const result = await pool.query(
+    `SELECT DISTINCT c.id, c.phone_number, c.name, c.opt_in, c.opt_out,
+            c.whatsapp_validated, c.whatsapp_validated_at
+     FROM contacts c
+     WHERE c.id = ANY($1::int[])`,
+    [contactIds]
+  );
+  return categorizeAudienceContacts(result.rows.map(mapContactRow));
+}
+
+/**
+ * Resolve público em categorias. Não some com contatos não validados.
+ */
+export async function resolveListAudience(listOrId: any | number): Promise<ResolvedAudience> {
+  let list = listOrId;
+  if (typeof listOrId === 'number') {
+    const r = await pool.query(`SELECT * FROM contact_lists WHERE id = $1`, [listOrId]);
+    if (r.rows.length === 0) {
+      throw new Error(`Lista ${listOrId} não encontrada`);
+    }
+    list = r.rows[0];
+  }
+
+  const potential = await fetchListPotentialContacts(list);
+  const categorized = await categorizeAudienceContacts(potential, {
+    list_id: list.id,
+    list_type: list.list_type,
+  });
+
+  return {
+    ...categorized,
+    list_id: list.id,
+    list_type: list.list_type,
   };
 }
 
