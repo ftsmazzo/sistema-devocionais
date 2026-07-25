@@ -3,12 +3,16 @@
  * Apenas prepara/consulta — nunca chama Evolution.
  */
 import { pool } from '../database';
-import { canReceiveDevocional } from './devocionalScoring';
 import { formatDevocionalMessage, personalizeDevocionalMessage } from './devocionalPersonalization';
 import { ensureDispatchItem, getDispatchItemsSummary, isDispatchItemSent } from './dispatchItems';
 import { getDispatchRuntimeSnapshot } from './dispatchRuntimeConfig';
 import { maskPhone } from './evolutionSafeSender';
 import { reconcileActiveJourneyForDate } from './journeyReconcile';
+import {
+  autoValidateWhatsAppBatch,
+  isWhatsAppAutoValidateOnPrepare,
+  resolveListAudience,
+} from './listAudienceResolver';
 
 function todayInTimezone(timezone: string): string {
   return new Intl.DateTimeFormat('en-CA', {
@@ -60,102 +64,6 @@ function computeNextDispatchAt(
 
   const label = `${String(targetYear).padStart(4, '0')}-${String(targetMonth).padStart(2, '0')}-${String(targetDay).padStart(2, '0')} ${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')} (${tz})`;
   return { next_at: label, is_today: isToday };
-}
-
-async function getContactsFromList(list: any): Promise<
-  Array<{ id: number; phone_number: string; name: string | null; opt_in: boolean; opt_out: boolean; whatsapp_validated: boolean }>
-> {
-  let query = '';
-  let params: any[] = [];
-
-  if (list.list_type === 'static') {
-    query = `
-      SELECT DISTINCT c.id, c.phone_number, c.name, c.opt_in, c.opt_out, c.whatsapp_validated
-      FROM contacts c
-      JOIN contact_list_items cli ON c.id = cli.contact_id
-      WHERE cli.list_id = $1
-    `;
-    params = [list.id];
-  } else {
-    const filterConfig =
-      typeof list.filter_config === 'string' ? JSON.parse(list.filter_config || '{}') : list.filter_config || {};
-
-    let whereConditions = ['TRUE'];
-    let joinClauses = '';
-    let paramCount = 1;
-
-    if (filterConfig.tags && Array.isArray(filterConfig.tags) && filterConfig.tags.length > 0) {
-      joinClauses += ` JOIN contact_tag_relations ctr${paramCount} ON c.id = ctr${paramCount}.contact_id`;
-      whereConditions.push(`ctr${paramCount}.tag_id = ANY($${paramCount}::int[])`);
-      params.push(filterConfig.tags);
-      paramCount++;
-    }
-
-    if (filterConfig.exclude_tags && Array.isArray(filterConfig.exclude_tags) && filterConfig.exclude_tags.length > 0) {
-      whereConditions.push(`NOT EXISTS (
-        SELECT 1 FROM contact_tag_relations ctr_ex
-        JOIN contact_tags t_ex ON ctr_ex.tag_id = t_ex.id
-        WHERE ctr_ex.contact_id = c.id
-          AND t_ex.id = ANY($${paramCount}::int[])
-      )`);
-      params.push(filterConfig.exclude_tags);
-      paramCount++;
-    }
-
-    query = `
-      SELECT DISTINCT c.id, c.phone_number, c.name, c.opt_in, c.opt_out, c.whatsapp_validated
-      FROM contacts c
-      ${joinClauses}
-      WHERE ${whereConditions.join(' AND ')}
-    `;
-
-    if (list.list_type === 'hybrid') {
-      const hasDynamicFilters =
-        (filterConfig.tags && Array.isArray(filterConfig.tags) && filterConfig.tags.length > 0) ||
-        (filterConfig.exclude_tags &&
-          Array.isArray(filterConfig.exclude_tags) &&
-          filterConfig.exclude_tags.length > 0);
-
-      if (!hasDynamicFilters) {
-        query = `
-          SELECT DISTINCT c.id, c.phone_number, c.name, c.opt_in, c.opt_out, c.whatsapp_validated
-          FROM contacts c
-          JOIN contact_list_items cli ON c.id = cli.contact_id
-          WHERE cli.list_id = $1
-        `;
-        params = [list.id];
-      } else {
-        query = `
-          SELECT DISTINCT c.id, c.phone_number, c.name, c.opt_in, c.opt_out, c.whatsapp_validated
-          FROM contacts c
-          WHERE (
-            c.id IN (SELECT contact_id FROM contact_list_items WHERE list_id = $${paramCount})
-            OR c.id IN (
-              SELECT DISTINCT c2.id
-              FROM contacts c2
-              ${joinClauses.replace(/\bc\b/g, 'c2')}
-              WHERE ${whereConditions.join(' AND ').replace(/\bc\./g, 'c2.')}
-            )
-          )
-        `;
-        params.push(list.id);
-      }
-    }
-  }
-
-  const result = await pool.query(query, params);
-  return result.rows;
-}
-
-function classifyExclusion(contact: {
-  opt_in: boolean;
-  opt_out: boolean;
-  whatsapp_validated: boolean;
-}): string | null {
-  if (contact.opt_out) return 'opt_out';
-  if (!contact.opt_in) return 'sem_opt_in';
-  if (!contact.whatsapp_validated) return 'whatsapp_nao_validado';
-  return null;
 }
 
 async function loadConfigAndList() {
@@ -242,15 +150,19 @@ export async function getDevocionalOperationStatus() {
   const timezone = config?.timezone || 'America/Sao_Paulo';
   const dateYmd = todayInTimezone(timezone);
 
-  let estimatedEligible = 0;
-  let estimatedTotal = 0;
+  let audienceSummary: any = null;
   if (list) {
-    const contacts = await getContactsFromList(list);
-    estimatedTotal = contacts.length;
-    for (const c of contacts) {
-      if (classifyExclusion(c)) continue;
-      if (await canReceiveDevocional(c.id)) estimatedEligible++;
-    }
+    const audience = await resolveListAudience(list);
+    audienceSummary = {
+      total_potential: audience.counts.total_potential,
+      eligible_now: audience.counts.eligible_now,
+      needs_whatsapp_validation: audience.counts.needs_whatsapp_validation,
+      excluded_opt_out: audience.counts.excluded_opt_out,
+      excluded_no_opt_in: audience.counts.excluded_no_opt_in,
+      excluded_invalid_phone: audience.counts.excluded_invalid_phone,
+      excluded_by_filter: audience.counts.excluded_by_filter,
+      auto_validate_on_prepare: isWhatsAppAutoValidateOnPrepare(),
+    };
   }
 
   const instances = await pool.query(
@@ -326,9 +238,19 @@ export async function getDevocionalOperationStatus() {
           total_contacts_list: list.total_contacts,
         }
       : null,
-    audience: {
-      estimated_total: estimatedTotal,
-      estimated_eligible: estimatedEligible,
+    audience: audienceSummary || {
+      total_potential: 0,
+      eligible_now: 0,
+      needs_whatsapp_validation: 0,
+      excluded_opt_out: 0,
+      excluded_no_opt_in: 0,
+      excluded_invalid_phone: 0,
+      excluded_by_filter: 0,
+    },
+    // compat com tela anterior
+    audience_legacy: {
+      estimated_total: audienceSummary?.total_potential ?? 0,
+      estimated_eligible: audienceSummary?.eligible_now ?? 0,
     },
     runtime: {
       worker_enabled: runtime.workerEnabled,
@@ -373,24 +295,22 @@ export async function prepareTodayDevocionalOperation() {
     throw Object.assign(new Error(genError || 'Devocional do dia indisponível'), { status: 400 });
   }
 
-  const allContacts = await getContactsFromList(list);
-  const exclusionCounts: Record<string, number> = {};
-  const eligible: typeof allContacts = [];
+  let audience = await resolveListAudience(list);
 
-  for (const c of allContacts) {
-    const basic = classifyExclusion(c);
-    if (basic) {
-      exclusionCounts[basic] = (exclusionCounts[basic] || 0) + 1;
-      continue;
-    }
-    const ok = await canReceiveDevocional(c.id);
-    if (!ok) {
-      exclusionCounts['elegibilidade_pontuacao_ou_bloqueio'] =
-        (exclusionCounts['elegibilidade_pontuacao_ou_bloqueio'] || 0) + 1;
-      continue;
-    }
-    eligible.push(c);
+  let autoValidateResult = null;
+  if (isWhatsAppAutoValidateOnPrepare() && audience.needs_whatsapp_validation.length > 0) {
+    autoValidateResult = await autoValidateWhatsAppBatch(audience.needs_whatsapp_validation);
+    audience = await resolveListAudience(list);
   }
+
+  const eligible = audience.eligible_now;
+  const exclusionCounts = {
+    needs_whatsapp_validation: audience.counts.needs_whatsapp_validation,
+    opt_out: audience.counts.excluded_opt_out,
+    sem_opt_in: audience.counts.excluded_no_opt_in,
+    telefone_invalido: audience.counts.excluded_invalid_phone,
+    pontuacao_ou_bloqueio: audience.counts.excluded_by_filter,
+  };
 
   let dispatch = await findTodayDispatch(devocional.id, timezone, dateYmd);
   let dispatchCreated = false;
@@ -486,10 +406,12 @@ export async function prepareTodayDevocionalOperation() {
       date: dateYmd,
     },
     audience: {
-      total: allContacts.length,
+      total: audience.counts.total_potential,
       eligible: eligible.length,
-      excluded: allContacts.length - eligible.length,
+      excluded: audience.counts.total_potential - eligible.length,
+      needs_whatsapp_validation: audience.counts.needs_whatsapp_validation,
       exclusion_reasons: exclusionCounts,
+      auto_validate: autoValidateResult,
     },
     items: {
       created,

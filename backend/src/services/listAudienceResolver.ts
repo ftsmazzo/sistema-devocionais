@@ -1,0 +1,360 @@
+/**
+ * Fonte única para resolver público de listas (static / dynamic / hybrid).
+ * Não força whatsapp_validated=true na query inicial.
+ */
+import { pool } from '../database';
+import { normalizePhoneDigits } from '../utils/phoneNumber';
+import { maskPhone } from './evolutionSafeSender';
+import {
+  applyWhatsAppValidationToContact,
+  checkWhatsAppNumberDetailed,
+} from './whatsappValidation';
+
+function envFlag(name: string, defaultValue: boolean): boolean {
+  const raw = process.env[name];
+  if (raw == null || String(raw).trim() === '') return defaultValue;
+  const v = String(raw).trim().toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(v)) return true;
+  if (['0', 'false', 'no', 'off'].includes(v)) return false;
+  return defaultValue;
+}
+
+function envInt(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw == null || String(raw).trim() === '') return fallback;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback;
+}
+
+export function isWhatsAppAutoValidateOnPrepare(): boolean {
+  return envFlag('WHATSAPP_AUTO_VALIDATE_ON_PREPARE', false);
+}
+
+export function isWhatsAppAutoValidateOnWorker(): boolean {
+  return envFlag('WHATSAPP_AUTO_VALIDATE_ON_WORKER', false);
+}
+
+export function getWhatsAppValidationBatchSize(): number {
+  return envInt('WHATSAPP_VALIDATION_BATCH_SIZE', 10);
+}
+
+export interface AudienceContact {
+  id: number;
+  phone_number: string;
+  name: string | null;
+  opt_in: boolean;
+  opt_out: boolean;
+  whatsapp_validated: boolean | null;
+}
+
+export interface ResolvedAudience {
+  list_id: number;
+  list_type: string;
+  total_potential: number;
+  eligible_now: AudienceContact[];
+  needs_whatsapp_validation: AudienceContact[];
+  excluded_opt_out: AudienceContact[];
+  excluded_no_opt_in: AudienceContact[];
+  excluded_invalid_phone: AudienceContact[];
+  excluded_by_filter: AudienceContact[];
+  counts: {
+    total_potential: number;
+    eligible_now: number;
+    needs_whatsapp_validation: number;
+    excluded_opt_out: number;
+    excluded_no_opt_in: number;
+    excluded_invalid_phone: number;
+    excluded_by_filter: number;
+  };
+}
+
+function parseFilterConfig(list: any): any {
+  if (!list?.filter_config) return {};
+  return typeof list.filter_config === 'string'
+    ? JSON.parse(list.filter_config || '{}')
+    : list.filter_config || {};
+}
+
+/**
+ * Busca contatos potenciais da lista sem filtrar whatsapp_validated.
+ */
+export async function fetchListPotentialContacts(list: any): Promise<AudienceContact[]> {
+  const listType = list.list_type || 'static';
+  const filterConfig = parseFilterConfig(list);
+  let query = '';
+  const params: any[] = [];
+
+  if (listType === 'static') {
+    query = `
+      SELECT DISTINCT c.id, c.phone_number, c.name, c.opt_in, c.opt_out, c.whatsapp_validated
+      FROM contacts c
+      JOIN contact_list_items cli ON c.id = cli.contact_id
+      WHERE cli.list_id = $1
+    `;
+    params.push(list.id);
+  } else {
+    let whereConditions: string[] = [];
+    let joinClauses = '';
+    let paramCount = 1;
+
+    // Filtros opcionais do filter_config (não forçar whatsapp_validated)
+    if (filterConfig.tags && Array.isArray(filterConfig.tags) && filterConfig.tags.length > 0) {
+      joinClauses += ` JOIN contact_tag_relations ctr${paramCount} ON c.id = ctr${paramCount}.contact_id`;
+      whereConditions.push(`ctr${paramCount}.tag_id = ANY($${paramCount}::int[])`);
+      params.push(filterConfig.tags);
+      paramCount++;
+    }
+
+    if (filterConfig.exclude_tags && Array.isArray(filterConfig.exclude_tags) && filterConfig.exclude_tags.length > 0) {
+      whereConditions.push(`NOT EXISTS (
+        SELECT 1 FROM contact_tag_relations ctr_ex
+        WHERE ctr_ex.contact_id = c.id
+          AND ctr_ex.tag_id = ANY($${paramCount}::int[])
+      )`);
+      params.push(filterConfig.exclude_tags);
+      paramCount++;
+    }
+
+    if (filterConfig.opt_in !== undefined) {
+      whereConditions.push(`c.opt_in = $${paramCount}`);
+      params.push(!!filterConfig.opt_in);
+      paramCount++;
+    }
+
+    if (filterConfig.opt_out !== undefined) {
+      whereConditions.push(`c.opt_out = $${paramCount}`);
+      params.push(!!filterConfig.opt_out);
+      paramCount++;
+    }
+
+    // Só aplica whatsapp_validated se o usuário configurou explicitamente no filtro da lista
+    if (filterConfig.whatsapp_validated !== undefined) {
+      whereConditions.push(`c.whatsapp_validated = $${paramCount}`);
+      params.push(!!filterConfig.whatsapp_validated);
+      paramCount++;
+    }
+
+    if (filterConfig.last_message_sent_after) {
+      whereConditions.push(`c.last_message_sent_at >= $${paramCount}`);
+      params.push(filterConfig.last_message_sent_after);
+      paramCount++;
+    }
+
+    if (filterConfig.last_message_sent_before) {
+      whereConditions.push(`c.last_message_sent_at <= $${paramCount}`);
+      params.push(filterConfig.last_message_sent_before);
+      paramCount++;
+    }
+
+    const whereSql = whereConditions.length > 0 ? whereConditions.join(' AND ') : 'TRUE';
+
+    if (listType === 'hybrid') {
+      const hasDynamicFilters =
+        (filterConfig.tags && filterConfig.tags.length > 0) ||
+        (filterConfig.exclude_tags && filterConfig.exclude_tags.length > 0) ||
+        filterConfig.opt_in !== undefined ||
+        filterConfig.opt_out !== undefined ||
+        filterConfig.whatsapp_validated !== undefined;
+
+      if (!hasDynamicFilters) {
+        query = `
+          SELECT DISTINCT c.id, c.phone_number, c.name, c.opt_in, c.opt_out, c.whatsapp_validated
+          FROM contacts c
+          JOIN contact_list_items cli ON c.id = cli.contact_id
+          WHERE cli.list_id = $1
+        `;
+        params.length = 0;
+        params.push(list.id);
+      } else {
+        query = `
+          SELECT DISTINCT c.id, c.phone_number, c.name, c.opt_in, c.opt_out, c.whatsapp_validated
+          FROM contacts c
+          WHERE (
+            c.id IN (SELECT contact_id FROM contact_list_items WHERE list_id = $${paramCount})
+            OR c.id IN (
+              SELECT DISTINCT c2.id
+              FROM contacts c2
+              ${joinClauses.replace(/\bc\b/g, 'c2')}
+              WHERE ${whereSql.replace(/\bc\./g, 'c2.')}
+            )
+          )
+        `;
+        params.push(list.id);
+      }
+    } else {
+      // dynamic
+      query = `
+        SELECT DISTINCT c.id, c.phone_number, c.name, c.opt_in, c.opt_out, c.whatsapp_validated
+        FROM contacts c
+        ${joinClauses}
+        WHERE ${whereSql}
+      `;
+    }
+  }
+
+  const result = await pool.query(query, params);
+  return result.rows.map((r) => ({
+    id: r.id,
+    phone_number: r.phone_number,
+    name: r.name,
+    opt_in: !!r.opt_in,
+    opt_out: !!r.opt_out,
+    whatsapp_validated: r.whatsapp_validated == null ? null : !!r.whatsapp_validated,
+  }));
+}
+
+async function isExcludedByScoringOrBlock(contactId: number): Promise<boolean> {
+  const result = await pool.query(
+    `SELECT 
+       c.consecutive_devocional_failures,
+       COUNT(ctr.tag_id) FILTER (WHERE t.name = 'bloqueado') as has_bloqueado_tag
+     FROM contacts c
+     LEFT JOIN contact_tag_relations ctr ON c.id = ctr.contact_id
+     LEFT JOIN contact_tags t ON ctr.tag_id = t.id AND t.name = 'bloqueado'
+     WHERE c.id = $1
+     GROUP BY c.id, c.consecutive_devocional_failures`,
+    [contactId]
+  );
+  if (result.rows.length === 0) return true;
+  const row = result.rows[0];
+  if ((row.consecutive_devocional_failures || 0) >= 3) return true;
+  if ((row.has_bloqueado_tag || 0) > 0) return true;
+  return false;
+}
+
+function isInvalidPhone(phone: string | null | undefined): boolean {
+  const n = normalizePhoneDigits(phone || '', '55');
+  return !n || n.length < 10;
+}
+
+/**
+ * Resolve público em categorias. Não some com contatos não validados.
+ */
+export async function resolveListAudience(listOrId: any | number): Promise<ResolvedAudience> {
+  let list = listOrId;
+  if (typeof listOrId === 'number') {
+    const r = await pool.query(`SELECT * FROM contact_lists WHERE id = $1`, [listOrId]);
+    if (r.rows.length === 0) {
+      throw new Error(`Lista ${listOrId} não encontrada`);
+    }
+    list = r.rows[0];
+  }
+
+  const potential = await fetchListPotentialContacts(list);
+
+  const eligible_now: AudienceContact[] = [];
+  const needs_whatsapp_validation: AudienceContact[] = [];
+  const excluded_opt_out: AudienceContact[] = [];
+  const excluded_no_opt_in: AudienceContact[] = [];
+  const excluded_invalid_phone: AudienceContact[] = [];
+  const excluded_by_filter: AudienceContact[] = [];
+
+  for (const c of potential) {
+    if (isInvalidPhone(c.phone_number)) {
+      excluded_invalid_phone.push(c);
+      continue;
+    }
+    if (c.opt_out) {
+      excluded_opt_out.push(c);
+      continue;
+    }
+    if (!c.opt_in) {
+      excluded_no_opt_in.push(c);
+      continue;
+    }
+
+    if (await isExcludedByScoringOrBlock(c.id)) {
+      excluded_by_filter.push(c);
+      continue;
+    }
+
+    if (c.whatsapp_validated === true) {
+      eligible_now.push(c);
+    } else {
+      // false, null ou undefined
+      needs_whatsapp_validation.push(c);
+    }
+  }
+
+  const counts = {
+    total_potential: potential.length,
+    eligible_now: eligible_now.length,
+    needs_whatsapp_validation: needs_whatsapp_validation.length,
+    excluded_opt_out: excluded_opt_out.length,
+    excluded_no_opt_in: excluded_no_opt_in.length,
+    excluded_invalid_phone: excluded_invalid_phone.length,
+    excluded_by_filter: excluded_by_filter.length,
+  };
+
+  return {
+    list_id: list.id,
+    list_type: list.list_type,
+    total_potential: potential.length,
+    eligible_now,
+    needs_whatsapp_validation,
+    excluded_opt_out,
+    excluded_no_opt_in,
+    excluded_invalid_phone,
+    excluded_by_filter,
+    counts,
+  };
+}
+
+export interface AutoValidateBatchResult {
+  attempted: number;
+  validated: number;
+  invalid: number;
+  provider_errors: number;
+  newly_eligible_ids: number[];
+}
+
+/**
+ * Valida lote de contatos pendentes (prepare). Não envia mensagem.
+ */
+export async function autoValidateWhatsAppBatch(
+  contacts: AudienceContact[],
+  batchSize: number = getWhatsAppValidationBatchSize()
+): Promise<AutoValidateBatchResult> {
+  const slice = contacts.slice(0, Math.max(1, batchSize));
+  const result: AutoValidateBatchResult = {
+    attempted: 0,
+    validated: 0,
+    invalid: 0,
+    provider_errors: 0,
+    newly_eligible_ids: [],
+  };
+
+  for (const c of slice) {
+    result.attempted++;
+    try {
+      const detailed = await checkWhatsAppNumberDetailed(c.phone_number);
+      if (!detailed.ok) {
+        result.provider_errors++;
+        console.log(
+          `[Audience] Validação provider indisponível para ${maskPhone(c.phone_number)}: ${detailed.message}`
+        );
+        continue;
+      }
+      await applyWhatsAppValidationToContact(c.id, detailed.isValid);
+      if (detailed.isValid) {
+        result.validated++;
+        result.newly_eligible_ids.push(c.id);
+      } else {
+        result.invalid++;
+      }
+    } catch (e: any) {
+      result.provider_errors++;
+      console.error(`[Audience] Erro validando contato ${c.id}:`, e?.message || e);
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Contagem DISTINCT para atualizar total_contacts de listas dinâmicas/híbridas.
+ */
+export async function countListPotentialContacts(list: any): Promise<number> {
+  const contacts = await fetchListPotentialContacts(list);
+  return contacts.length;
+}

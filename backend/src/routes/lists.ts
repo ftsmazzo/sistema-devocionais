@@ -1,6 +1,7 @@
 import express from 'express';
 import { pool } from '../database';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
+import { countListPotentialContacts } from '../services/listAudienceResolver';
 
 const router = express.Router();
 
@@ -700,26 +701,8 @@ router.post('/:id/refresh', async (req: AuthRequest, res) => {
         [total, id]
       );
     } else {
-      // Para listas dinâmicas/híbridas, recalcular total_contacts baseado em filtros
-      const filterConfig = typeof list.filter_config === 'string' 
-        ? (list.filter_config ? JSON.parse(list.filter_config) : {}) 
-        : (list.filter_config || {});
-      const params: any[] = [];
-      const countQuery = buildDynamicListQuery(filterConfig, 1, params);
-      const countQueryFinal = countQuery
-        .replace(/SELECT DISTINCT[\s\S]*?FROM/, 'SELECT COUNT(DISTINCT c.id) as total FROM')
-        .replace(/GROUP BY[\s\S]*$/, '');
-      const countResult = await pool.query(countQueryFinal, params);
-      let total = parseInt(countResult.rows[0]?.total || '0', 10);
-
-      if (list.list_type === 'hybrid') {
-        const staticCountResult = await pool.query(
-          `SELECT COUNT(*) as total FROM contact_list_items WHERE list_id = $1`,
-          [id]
-        );
-        const staticCount = parseInt(staticCountResult.rows[0]?.total || '0', 10);
-        total = staticCount + total;
-      }
+      // Dinâmica/híbrida: contagem DISTINCT via resolver (sem forçar whatsapp_validated)
+      const total = await countListPotentialContacts(list);
 
       await pool.query(
         `UPDATE contact_lists 

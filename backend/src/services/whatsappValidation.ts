@@ -1,6 +1,11 @@
 import axios from 'axios';
 import { pool } from '../database';
 import { normalizePhoneDigits } from '../utils/phoneNumber';
+import { maskPhone } from './evolutionSafeSender';
+
+export type WhatsAppCheckDetailed =
+  | { ok: true; isValid: boolean; cached?: boolean }
+  | { ok: false; providerUnavailable: true; message: string };
 
 /**
  * Verifica se um número de telefone está registrado no WhatsApp usando Evolution API
@@ -11,14 +16,30 @@ export async function checkWhatsAppNumber(
   apiUrl?: string,
   apiKey?: string
 ): Promise<{ isValid: boolean; cached?: boolean }> {
+  const detailed = await checkWhatsAppNumberDetailed(phoneNumber, instanceName, apiUrl, apiKey);
+  if (!detailed.ok) {
+    return { isValid: false };
+  }
+  return { isValid: detailed.isValid, cached: detailed.cached };
+}
+
+/**
+ * Versão detalhada: distingue número inválido de falha de provider.
+ * Usa chat/whatsappNumbers — NÃO chama /message/sendText/.
+ */
+export async function checkWhatsAppNumberDetailed(
+  phoneNumber: string,
+  instanceName?: string,
+  apiUrl?: string,
+  apiKey?: string
+): Promise<WhatsAppCheckDetailed> {
   try {
     const normalizedNumber = normalizePhoneDigits(phoneNumber, '55');
-    
+
     if (!normalizedNumber || normalizedNumber.length < 10) {
-      return { isValid: false };
+      return { ok: true, isValid: false };
     }
 
-    // Verificar cache primeiro (24 horas)
     const cacheResult = await pool.query(
       `SELECT is_valid, checked_at 
        FROM number_validation_cache 
@@ -28,47 +49,48 @@ export async function checkWhatsAppNumber(
     );
 
     if (cacheResult.rows.length > 0) {
-      return { 
-        isValid: cacheResult.rows[0].is_valid,
-        cached: true
+      return {
+        ok: true,
+        isValid: !!cacheResult.rows[0].is_valid,
+        cached: true,
       };
     }
 
-    // Buscar instância conectada se não fornecida
-    let instance: any = null;
-    if (!instanceName || !apiUrl || !apiKey) {
+    let resolvedName = instanceName;
+    let resolvedUrl = apiUrl;
+    let resolvedKey = apiKey;
+
+    if (!resolvedName || !resolvedUrl || !resolvedKey) {
       const instanceResult = await pool.query(
         `SELECT instance_name, api_url, api_key 
          FROM instances 
          WHERE status = 'connected' 
          LIMIT 1`
       );
-      
+
       if (instanceResult.rows.length === 0) {
-        console.error('⚠️ Nenhuma instância conectada para validar número');
-        return { isValid: false };
+        return {
+          ok: false,
+          providerUnavailable: true,
+          message: 'Nenhuma instância conectada para validar número',
+        };
       }
-      
-      instance = instanceResult.rows[0];
-      instanceName = instance.instance_name;
-      apiUrl = instance.api_url;
-      apiKey = instance.api_key;
+
+      resolvedName = instanceResult.rows[0].instance_name;
+      resolvedUrl = instanceResult.rows[0].api_url;
+      resolvedKey = instanceResult.rows[0].api_key;
     }
 
-    // Verificar via Evolution API
-    let checkUrl = `${apiUrl}/chat/whatsappNumbers/${instanceName}`;
+    let checkUrl = `${resolvedUrl}/chat/whatsappNumbers/${resolvedName}`;
     let checkResponse: any;
-    
+
     try {
-      // Tentar endpoint POST com array de números
       checkResponse = await axios.post(
         checkUrl,
-        {
-          numbers: [normalizedNumber],
-        },
+        { numbers: [normalizedNumber] },
         {
           headers: {
-            'apikey': apiKey,
+            apikey: resolvedKey,
             'Content-Type': 'application/json',
           },
           timeout: 10000,
@@ -76,41 +98,64 @@ export async function checkWhatsAppNumber(
         }
       );
     } catch (postError: any) {
-      // Se POST falhar, tentar GET com query parameter
       if (postError.response?.status === 404 || postError.code === 'ECONNREFUSED') {
-        checkUrl = `${apiUrl}/chat/whatsappNumbers/${instanceName}?numbers=${normalizedNumber}`;
-        checkResponse = await axios.get(checkUrl, {
-          headers: {
-            'apikey': apiKey,
-          },
-          timeout: 10000,
-          validateStatus: () => true,
-        });
+        checkUrl = `${resolvedUrl}/chat/whatsappNumbers/${resolvedName}?numbers=${normalizedNumber}`;
+        try {
+          checkResponse = await axios.get(checkUrl, {
+            headers: { apikey: resolvedKey },
+            timeout: 10000,
+            validateStatus: () => true,
+          });
+        } catch (getError: any) {
+          return {
+            ok: false,
+            providerUnavailable: true,
+            message: getError?.message || 'Falha ao consultar Evolution (whatsappNumbers)',
+          };
+        }
+      } else if (
+        postError.code === 'ETIMEDOUT' ||
+        postError.code === 'ENOTFOUND' ||
+        postError.code === 'ECONNREFUSED'
+      ) {
+        return {
+          ok: false,
+          providerUnavailable: true,
+          message: postError.message || 'Provider indisponível',
+        };
       } else {
         throw postError;
       }
     }
 
+    if (checkResponse && typeof checkResponse.status === 'number' && checkResponse.status >= 500) {
+      return {
+        ok: false,
+        providerUnavailable: true,
+        message: `Evolution HTTP ${checkResponse.status}`,
+      };
+    }
+
     let isValid = false;
 
-    // Evolution API retorna array com status de cada número
     if (checkResponse && checkResponse.data) {
       if (Array.isArray(checkResponse.data)) {
-        const numberStatus = checkResponse.data.find((n: any) => 
-          n.jid === `${normalizedNumber}@s.whatsapp.net` || 
-          n.number === normalizedNumber ||
-          n.jid?.includes(normalizedNumber)
+        const numberStatus = checkResponse.data.find(
+          (n: any) =>
+            n.jid === `${normalizedNumber}@s.whatsapp.net` ||
+            n.number === normalizedNumber ||
+            n.jid?.includes(normalizedNumber)
         );
-        isValid = numberStatus?.exists === true || 
-                 numberStatus?.status === 'valid' || 
-                 numberStatus?.onWhatsApp === true ||
-                 numberStatus?.isWhatsApp === true;
+        isValid =
+          numberStatus?.exists === true ||
+          numberStatus?.status === 'valid' ||
+          numberStatus?.onWhatsApp === true ||
+          numberStatus?.isWhatsApp === true;
       } else if (checkResponse.data.exists !== undefined) {
         isValid = checkResponse.data.exists === true;
       }
     }
 
-    // Salvar no cache
     await pool.query(
       `INSERT INTO number_validation_cache (phone_number, is_valid, checked_at)
        VALUES ($1, $2, CURRENT_TIMESTAMP)
@@ -119,10 +164,54 @@ export async function checkWhatsAppNumber(
       [normalizedNumber, isValid]
     );
 
-    return { isValid };
+    return { ok: true, isValid };
   } catch (error: any) {
-    console.error('❌ Erro ao verificar número via Evolution API:', error.message);
-    return { isValid: false };
+    console.error(
+      '❌ Erro ao verificar número via Evolution API:',
+      error.message,
+      maskPhone(phoneNumber)
+    );
+    return {
+      ok: false,
+      providerUnavailable: true,
+      message: error.message || 'Erro ao validar número',
+    };
+  }
+}
+
+/**
+ * Atualiza contato após checagem bem-sucedida (não usar em providerUnavailable).
+ */
+export async function applyWhatsAppValidationToContact(
+  contactId: number,
+  isValid: boolean
+): Promise<void> {
+  const blockedTagResult = await pool.query(
+    `SELECT id FROM contact_tags WHERE LOWER(name) = 'bloqueado' LIMIT 1`
+  );
+  const blockedTagId = blockedTagResult.rows[0]?.id;
+
+  await pool.query(
+    `UPDATE contacts 
+     SET whatsapp_validated = $1, 
+         whatsapp_validated_at = ${isValid ? 'CURRENT_TIMESTAMP' : 'NULL'},
+         updated_at = CURRENT_TIMESTAMP
+     WHERE id = $2`,
+    [isValid, contactId]
+  );
+
+  if (isValid && blockedTagId) {
+    await pool.query(
+      `DELETE FROM contact_tag_relations WHERE contact_id = $1 AND tag_id = $2`,
+      [contactId, blockedTagId]
+    );
+  } else if (!isValid && blockedTagId) {
+    await pool.query(
+      `INSERT INTO contact_tag_relations (contact_id, tag_id)
+       VALUES ($1, $2)
+       ON CONFLICT (contact_id, tag_id) DO NOTHING`,
+      [contactId, blockedTagId]
+    );
   }
 }
 
@@ -133,14 +222,7 @@ export async function validateContactsWhatsApp(
   contactIds: number[]
 ): Promise<{ validated: number; invalid: number; errors: number }> {
   const results = { validated: 0, invalid: 0, errors: 0 };
-  
-  // Buscar tag "bloqueado"
-  const blockedTagResult = await pool.query(
-    `SELECT id FROM contact_tags WHERE LOWER(name) = 'bloqueado' OR LOWER(name) = 'bloqueado' LIMIT 1`
-  );
-  const blockedTagId = blockedTagResult.rows[0]?.id;
 
-  // Buscar contatos
   const contactsResult = await pool.query(
     `SELECT id, phone_number FROM contacts WHERE id = ANY($1)`,
     [contactIds]
@@ -148,40 +230,14 @@ export async function validateContactsWhatsApp(
 
   for (const contact of contactsResult.rows) {
     try {
-      const { isValid } = await checkWhatsAppNumber(contact.phone_number);
-      
-      // Atualizar contato
-      await pool.query(
-        `UPDATE contacts 
-         SET whatsapp_validated = $1, 
-             whatsapp_validated_at = ${isValid ? 'CURRENT_TIMESTAMP' : 'NULL'},
-             updated_at = CURRENT_TIMESTAMP
-         WHERE id = $2`,
-        [isValid, contact.id]
-      );
-
-      if (isValid) {
-        results.validated++;
-        // Remover tag bloqueado se tiver
-        if (blockedTagId) {
-          await pool.query(
-            `DELETE FROM contact_tag_relations 
-             WHERE contact_id = $1 AND tag_id = $2`,
-            [contact.id, blockedTagId]
-          );
-        }
-      } else {
-        results.invalid++;
-        // Adicionar tag bloqueado
-        if (blockedTagId) {
-          await pool.query(
-            `INSERT INTO contact_tag_relations (contact_id, tag_id)
-             VALUES ($1, $2)
-             ON CONFLICT (contact_id, tag_id) DO NOTHING`,
-            [contact.id, blockedTagId]
-          );
-        }
+      const detailed = await checkWhatsAppNumberDetailed(contact.phone_number);
+      if (!detailed.ok) {
+        results.errors++;
+        continue;
       }
+      await applyWhatsAppValidationToContact(contact.id, detailed.isValid);
+      if (detailed.isValid) results.validated++;
+      else results.invalid++;
     } catch (error: any) {
       console.error(`Erro ao validar contato ${contact.id}:`, error);
       results.errors++;

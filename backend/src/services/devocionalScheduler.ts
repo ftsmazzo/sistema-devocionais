@@ -12,6 +12,11 @@ import {
   DispatchOperationalError,
 } from './dispatchRuntimeConfig';
 import { sendAdminWhatsAppNotification } from './adminWhatsAppNotify';
+import {
+  autoValidateWhatsAppBatch,
+  isWhatsAppAutoValidateOnPrepare,
+  resolveListAudience,
+} from './listAudienceResolver';
 
 /**
  * Serviço de agendamento para disparo automático de devocionais
@@ -188,115 +193,48 @@ export async function executeDevocionalDispatch(): Promise<void> {
 
     const list = listResult.rows[0];
 
-    // Buscar contatos da lista (apenas os que podem receber devocional)
-    let contactsQuery = '';
-    let contactsParams: any[] = [];
+    let audience = await resolveListAudience(list);
 
-    if (list.list_type === 'static') {
-      // Lista estática
-      contactsQuery = `
-        SELECT DISTINCT c.id, c.phone_number, c.name
-        FROM contacts c
-        JOIN contact_list_items cli ON c.id = cli.contact_id
-        WHERE cli.list_id = $1
-          AND c.whatsapp_validated = true
-          AND c.opt_in = true
-          AND c.opt_out = false
-      `;
-      contactsParams = [list.id];
-    } else {
-      // Lista dinâmica ou híbrida - usar filter_config
-      const filterConfig = typeof list.filter_config === 'string' 
-        ? JSON.parse(list.filter_config) 
-        : (list.filter_config || {});
-      
-      let whereConditions = ['c.whatsapp_validated = true', 'c.opt_in = true', 'c.opt_out = false'];
-      let joinClauses = '';
-      let paramCount = 1;
-
-      // Tags incluídas
-      if (filterConfig.tags && Array.isArray(filterConfig.tags) && filterConfig.tags.length > 0) {
-        joinClauses += ` JOIN contact_tag_relations ctr${paramCount} ON c.id = ctr${paramCount}.contact_id`;
-        whereConditions.push(`ctr${paramCount}.tag_id = ANY($${paramCount}::int[])`);
-        contactsParams.push(filterConfig.tags);
-        paramCount++;
-      }
-
-      // Tags excluídas
-      if (filterConfig.exclude_tags && Array.isArray(filterConfig.exclude_tags) && filterConfig.exclude_tags.length > 0) {
-        whereConditions.push(`NOT EXISTS (
-          SELECT 1 FROM contact_tag_relations ctr_ex
-          JOIN contact_tags t_ex ON ctr_ex.tag_id = t_ex.id
-          WHERE ctr_ex.contact_id = c.id
-            AND t_ex.id = ANY($${paramCount}::int[])
-        )`);
-        contactsParams.push(filterConfig.exclude_tags);
-        paramCount++;
-      }
-
-      // Se for híbrida, também incluir contatos da lista estática
-      if (list.list_type === 'hybrid') {
-        // Se não há filtros dinâmicos (apenas básicos), buscar apenas da lista estática
-        const hasDynamicFilters = (filterConfig.tags && Array.isArray(filterConfig.tags) && filterConfig.tags.length > 0) ||
-                                  (filterConfig.exclude_tags && Array.isArray(filterConfig.exclude_tags) && filterConfig.exclude_tags.length > 0);
-        
-        if (!hasDynamicFilters) {
-          // Apenas lista estática
-          contactsQuery = `
-            SELECT DISTINCT c.id, c.phone_number, c.name
-            FROM contacts c
-            JOIN contact_list_items cli ON c.id = cli.contact_id
-            WHERE cli.list_id = $1
-              AND c.whatsapp_validated = true
-              AND c.opt_in = true
-              AND c.opt_out = false
-          `;
-          contactsParams = [list.id];
-        } else {
-          // Tem filtros dinâmicos, combinar estática + dinâmica
-          contactsQuery = `
-            SELECT DISTINCT c.id, c.phone_number, c.name
-            FROM contacts c
-            WHERE (
-              c.id IN (
-                SELECT contact_id FROM contact_list_items WHERE list_id = $${paramCount}
-              )
-              OR c.id IN (
-                SELECT DISTINCT c2.id
-                FROM contacts c2
-                ${joinClauses}
-                WHERE ${whereConditions.join(' AND ')}
-              )
-            )
-          `;
-          contactsParams.push(list.id);
-        }
-      } else {
-        // Lista dinâmica pura
-        contactsQuery = `
-          SELECT DISTINCT c.id, c.phone_number, c.name
-          FROM contacts c
-          ${joinClauses}
-          WHERE ${whereConditions.join(' AND ')}
-        `;
-      }
+    if (isWhatsAppAutoValidateOnPrepare() && audience.needs_whatsapp_validation.length > 0) {
+      addLog(
+        'info',
+        `[Devocional] Auto-validação WhatsApp no prepare: ${audience.needs_whatsapp_validation.length} pendentes`
+      );
+      const batch = await autoValidateWhatsAppBatch(audience.needs_whatsapp_validation);
+      addLog(
+        'info',
+        `[Devocional] Validação lote: ok=${batch.validated} inválidos=${batch.invalid} provider_err=${batch.provider_errors}`
+      );
+      audience = await resolveListAudience(list);
     }
 
-    const contactsResult = await pool.query(contactsQuery, contactsParams);
-    const contacts = contactsResult.rows;
+    console.log(
+      `   📋 Público: potencial=${audience.counts.total_potential} elegíveis=${audience.counts.eligible_now} ` +
+        `pendentes_wa=${audience.counts.needs_whatsapp_validation} opt_out=${audience.counts.excluded_opt_out}`
+    );
+    addLog(
+      'info',
+      `[Devocional] Público potencial=${audience.counts.total_potential}, elegíveis agora=${audience.counts.eligible_now}, ` +
+        `pendentes WhatsApp=${audience.counts.needs_whatsapp_validation}`
+    );
 
-    console.log(`   📋 ${contacts.length} contatos encontrados na lista`);
-    addLog('info', `[Devocional] ${contacts.length} contatos na lista.`);
+    if (audience.counts.needs_whatsapp_validation > 0 && !isWhatsAppAutoValidateOnPrepare()) {
+      addLog(
+        'warning',
+        `[Devocional] ${audience.counts.needs_whatsapp_validation} contatos aguardam validação WhatsApp ` +
+          `(WHATSAPP_AUTO_VALIDATE_ON_PREPARE=false)`
+      );
+    }
 
-    if (contacts.length === 0) {
-      console.log('   ⚠️ Nenhum contato na lista (ou lista vazia).');
-      addLog('warning', '[Devocional] Nenhum contato na lista. Adicione contatos à lista ou verifique filtros.');
+    if (audience.counts.total_potential === 0) {
+      console.log('   ⚠️ Nenhum contato potencial na lista.');
+      addLog('warning', '[Devocional] Nenhum contato potencial na lista. Verifique filtros.');
       return;
     }
 
-    // Filtrar contatos que podem receber devocional (verificação de pontuação)
+    // Filtrar elegíveis com pontuação adicional (já coberta no resolver; reforço)
     const eligibleContacts = [];
-    for (const contact of contacts) {
+    for (const contact of audience.eligible_now) {
       const canReceive = await canReceiveDevocional(contact.id);
       if (canReceive) {
         eligibleContacts.push(contact);
@@ -306,8 +244,12 @@ export async function executeDevocionalDispatch(): Promise<void> {
     console.log(`   ✅ ${eligibleContacts.length} contatos elegíveis após verificação de pontuação`);
 
     if (eligibleContacts.length === 0) {
-      console.log('   ⚠️ Nenhum contato elegível após verificação de pontuação');
-      addLog('warning', '[Devocional] Nenhum contato elegível (pontuação/bloqueio).');
+      console.log('   ⚠️ Nenhum contato elegível agora (podem existir pendentes de validação WhatsApp)');
+      addLog(
+        'warning',
+        `[Devocional] Nenhum elegível agora. Pendentes WA=${audience.counts.needs_whatsapp_validation}, ` +
+          `opt_out=${audience.counts.excluded_opt_out}, sem_opt_in=${audience.counts.excluded_no_opt_in}`
+      );
       return;
     }
 

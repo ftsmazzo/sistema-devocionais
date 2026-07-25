@@ -28,7 +28,18 @@ interface StatusPayload {
     list_id?: number;
   } | null;
   list: { id: number; name: string; list_type: string; total_contacts_list?: number } | null;
-  audience: { estimated_total: number; estimated_eligible: number };
+  audience: {
+    total_potential?: number;
+    eligible_now?: number;
+    needs_whatsapp_validation?: number;
+    excluded_opt_out?: number;
+    excluded_no_opt_in?: number;
+    excluded_invalid_phone?: number;
+    excluded_by_filter?: number;
+    estimated_total?: number;
+    estimated_eligible?: number;
+  };
+  audience_legacy?: { estimated_total: number; estimated_eligible: number };
   runtime: {
     worker_enabled: boolean;
     real_send_enabled: boolean;
@@ -348,13 +359,12 @@ export default function OperacaoDevocional() {
         <div className="glass-card" style={{ padding: 22 }}>
           <div style={labelStyle}>Público estimado (lista)</div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
-            <StatChip label="Total lista" value={status?.audience.estimated_total ?? 0} />
-            <StatChip label="Elegíveis" value={status?.audience.estimated_eligible ?? 0} tone="#10b981" />
-            <StatChip
-              label="Excluídos (est.)"
-              value={Math.max(0, (status?.audience.estimated_total ?? 0) - (status?.audience.estimated_eligible ?? 0))}
-              tone="#f59e0b"
-            />
+            <StatChip label="Potenciais" value={status?.audience?.total_potential ?? status?.audience_legacy?.estimated_total ?? 0} />
+            <StatChip label="Elegíveis agora" value={status?.audience?.eligible_now ?? status?.audience_legacy?.estimated_eligible ?? 0} tone="#10b981" />
+            <StatChip label="Pendentes WA" value={status?.audience?.needs_whatsapp_validation ?? 0} tone="#f59e0b" />
+            <StatChip label="Opt-out" value={status?.audience?.excluded_opt_out ?? 0} tone="#ef4444" />
+            <StatChip label="Sem opt-in" value={status?.audience?.excluded_no_opt_in ?? 0} />
+            <StatChip label="Tel. inválido" value={status?.audience?.excluded_invalid_phone ?? 0} />
           </div>
           {prepareResult?.audience && (
             <div style={{ marginTop: 14, fontSize: '0.8rem', color: 'var(--text-secondary)' }}>

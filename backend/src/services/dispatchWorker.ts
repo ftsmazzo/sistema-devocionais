@@ -29,6 +29,11 @@ import {
 } from './dispatchRuntimeConfig';
 import { updateDevocionalScore } from './devocionalScoring';
 import { recordBlindageSuccessfulSend } from './blindage';
+import {
+  applyWhatsAppValidationToContact,
+  checkWhatsAppNumberDetailed,
+} from './whatsappValidation';
+import { isWhatsAppAutoValidateOnWorker } from './listAudienceResolver';
 
 export {
   isDispatchWorkerEnabled,
@@ -190,10 +195,13 @@ async function maybeCompleteDispatch(dispatchId: number): Promise<void> {
   );
 }
 
-async function validateDestination(item: DispatchItemRow): Promise<{ ok: true } | { ok: false; reason: string }> {
+async function validateDestination(item: DispatchItemRow): Promise<
+  | { ok: true }
+  | { ok: false; reason: string; retry?: boolean; category?: string }
+> {
   const number = String(item.contact_number || '').trim();
   if (!number) {
-    return { ok: false, reason: 'Número/destino vazio' };
+    return { ok: false, reason: 'Número/destino vazio', category: 'invalid_phone' };
   }
 
   if (item.contact_id) {
@@ -207,13 +215,35 @@ async function validateDestination(item: DispatchItemRow): Promise<{ ok: true } 
     }
     const row = c.rows[0];
     if (row.opt_out === true) {
-      return { ok: false, reason: 'Contato com opt-out' };
+      return { ok: false, reason: 'Contato com opt-out', category: 'opt_out' };
     }
     if (row.opt_in === false) {
-      return { ok: false, reason: 'Contato sem opt-in' };
+      return { ok: false, reason: 'Contato sem opt-in', category: 'no_opt_in' };
     }
-    if (row.whatsapp_validated === false) {
-      return { ok: false, reason: 'WhatsApp não validado' };
+
+    const validated = row.whatsapp_validated === true;
+    if (!validated) {
+      if (isWhatsAppAutoValidateOnWorker()) {
+        const detailed = await checkWhatsAppNumberDetailed(row.phone_number || number);
+        if (!detailed.ok) {
+          return {
+            ok: false,
+            reason: detailed.message || 'Validação WhatsApp indisponível',
+            retry: true,
+            category: 'whatsapp_provider_unavailable',
+          };
+        }
+        await applyWhatsAppValidationToContact(item.contact_id, detailed.isValid);
+        if (!detailed.isValid) {
+          return { ok: false, reason: 'WHATSAPP_INVALID', category: 'WHATSAPP_INVALID' };
+        }
+      } else {
+        return {
+          ok: false,
+          reason: 'WhatsApp não validado (WHATSAPP_AUTO_VALIDATE_ON_WORKER=false)',
+          category: 'whatsapp_not_validated',
+        };
+      }
     }
   }
 
@@ -252,7 +282,30 @@ export async function processClaimedDispatchItem(item: DispatchItemRow): Promise
 
   const dest = await validateDestination(item);
   if (!dest.ok) {
+    if (dest.retry) {
+      await releaseDispatchItemToQueue({
+        itemId: item.id,
+        status: 'pending_retry',
+        errorMessage: dest.reason,
+        errorCategory: dest.category || 'whatsapp_provider_unavailable',
+        backoffMinutes: 15,
+      });
+      addLog(
+        'warning',
+        `[DispatchWorker] Item ${item.id} retry (validação WA): ${maskPhone(item.contact_number)}`
+      );
+      return { outcome: 'pending_retry', realSendAttempted: false };
+    }
+
     await markDispatchItemSkipped({ itemId: item.id, reason: dest.reason });
+    if (dest.category === 'WHATSAPP_INVALID') {
+      await pool.query(
+        `UPDATE dispatch_items
+         SET error_category = 'WHATSAPP_INVALID', error_message = 'WHATSAPP_INVALID', updated_at = CURRENT_TIMESTAMP
+         WHERE id = $1`,
+        [item.id]
+      );
+    }
     await syncDispatchContactStatus({
       dispatchId: item.dispatch_id,
       contactNumber: item.contact_number,
