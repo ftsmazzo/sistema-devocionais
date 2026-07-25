@@ -206,7 +206,7 @@ async function validateDestination(item: DispatchItemRow): Promise<
 
   if (item.contact_id) {
     const c = await pool.query(
-      `SELECT opt_out, opt_in, whatsapp_validated, phone_number
+      `SELECT opt_out, opt_in, whatsapp_validated, whatsapp_validated_at, phone_number
        FROM contacts WHERE id = $1`,
       [item.contact_id]
     );
@@ -221,29 +221,33 @@ async function validateDestination(item: DispatchItemRow): Promise<
       return { ok: false, reason: 'Contato sem opt-in', category: 'no_opt_in' };
     }
 
-    const validated = row.whatsapp_validated === true;
-    if (!validated) {
-      if (isWhatsAppAutoValidateOnWorker()) {
-        const detailed = await checkWhatsAppNumberDetailed(row.phone_number || number);
-        if (!detailed.ok) {
-          return {
-            ok: false,
-            reason: detailed.message || 'Validação WhatsApp indisponível',
-            retry: true,
-            category: 'whatsapp_provider_unavailable',
-          };
-        }
-        await applyWhatsAppValidationToContact(item.contact_id, detailed.isValid);
-        if (!detailed.isValid) {
-          return { ok: false, reason: 'WHATSAPP_INVALID', category: 'WHATSAPP_INVALID' };
-        }
-      } else {
+    if (row.whatsapp_validated === true) {
+      // ok — pode seguir
+    } else if (row.whatsapp_validated === false && row.whatsapp_validated_at != null) {
+      // Inválido confirmado (validação já ocorreu)
+      return { ok: false, reason: 'WHATSAPP_INVALID', category: 'WHATSAPP_INVALID' };
+    } else if (isWhatsAppAutoValidateOnWorker()) {
+      // Pendente: validar antes do envio (sem sendText)
+      const detailed = await checkWhatsAppNumberDetailed(row.phone_number || number);
+      if (!detailed.ok) {
         return {
           ok: false,
-          reason: 'WhatsApp não validado (WHATSAPP_AUTO_VALIDATE_ON_WORKER=false)',
-          category: 'whatsapp_not_validated',
+          reason: detailed.message || 'Validação WhatsApp indisponível',
+          retry: true,
+          category: 'whatsapp_provider_unavailable',
         };
       }
+      await applyWhatsAppValidationToContact(item.contact_id, detailed.isValid);
+      if (!detailed.isValid) {
+        return { ok: false, reason: 'WHATSAPP_INVALID', category: 'WHATSAPP_INVALID' };
+      }
+    } else {
+      // Pendente sem auto-validate — não tratar como inexistente
+      return {
+        ok: false,
+        reason: 'WhatsApp pendente de validação (WHATSAPP_AUTO_VALIDATE_ON_WORKER=false)',
+        category: 'whatsapp_not_validated',
+      };
     }
   }
 

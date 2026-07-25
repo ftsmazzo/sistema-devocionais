@@ -1,6 +1,7 @@
 /**
  * Fonte única para resolver público de listas (static / dynamic / hybrid).
  * Não força whatsapp_validated=true na query inicial.
+ * Validação WhatsApp é elegibilidade — não faz o contato “sumir” do potencial.
  */
 import { pool } from '../database';
 import { normalizePhoneDigits } from '../utils/phoneNumber';
@@ -38,6 +39,15 @@ export function getWhatsAppValidationBatchSize(): number {
   return envInt('WHATSAPP_VALIDATION_BATCH_SIZE', 10);
 }
 
+export type AudienceExclusionReason =
+  | 'eligible'
+  | 'needs_whatsapp_validation'
+  | 'excluded_opt_out'
+  | 'excluded_no_opt_in'
+  | 'excluded_invalid_phone'
+  | 'excluded_whatsapp_invalid'
+  | 'excluded_by_score';
+
 export interface AudienceContact {
   id: number;
   phone_number: string;
@@ -45,6 +55,15 @@ export interface AudienceContact {
   opt_in: boolean;
   opt_out: boolean;
   whatsapp_validated: boolean | null;
+  whatsapp_validated_at: string | Date | null;
+}
+
+export interface AudienceItemSummary {
+  contact_id: number;
+  name: string | null;
+  phone_masked: string;
+  reason: AudienceExclusionReason;
+  reason_label: string;
 }
 
 export interface ResolvedAudience {
@@ -56,7 +75,11 @@ export interface ResolvedAudience {
   excluded_opt_out: AudienceContact[];
   excluded_no_opt_in: AudienceContact[];
   excluded_invalid_phone: AudienceContact[];
+  excluded_whatsapp_invalid: AudienceContact[];
+  excluded_by_score: AudienceContact[];
+  /** Alias legado de excluded_by_score */
   excluded_by_filter: AudienceContact[];
+  items: AudienceItemSummary[];
   counts: {
     total_potential: number;
     eligible_now: number;
@@ -64,9 +87,21 @@ export interface ResolvedAudience {
     excluded_opt_out: number;
     excluded_no_opt_in: number;
     excluded_invalid_phone: number;
+    excluded_whatsapp_invalid: number;
+    excluded_by_score: number;
     excluded_by_filter: number;
   };
 }
+
+const REASON_LABELS: Record<AudienceExclusionReason, string> = {
+  eligible: 'Elegível agora',
+  needs_whatsapp_validation: 'Pendente de validação WhatsApp',
+  excluded_opt_out: 'Opt-out',
+  excluded_no_opt_in: 'Sem opt-in',
+  excluded_invalid_phone: 'Telefone inválido',
+  excluded_whatsapp_invalid: 'WhatsApp inválido (confirmado)',
+  excluded_by_score: 'Bloqueado por pontuação/tag',
+};
 
 function parseFilterConfig(list: any): any {
   if (!list?.filter_config) return {};
@@ -75,8 +110,33 @@ function parseFilterConfig(list: any): any {
     : list.filter_config || {};
 }
 
+function mapContactRow(r: any): AudienceContact {
+  return {
+    id: r.id,
+    phone_number: r.phone_number,
+    name: r.name,
+    opt_in: !!r.opt_in,
+    opt_out: !!r.opt_out,
+    whatsapp_validated: r.whatsapp_validated == null ? null : !!r.whatsapp_validated,
+    whatsapp_validated_at: r.whatsapp_validated_at ?? null,
+  };
+}
+
+function hasDynamicFilters(filterConfig: any): boolean {
+  return (
+    (filterConfig.tags && filterConfig.tags.length > 0) ||
+    (filterConfig.exclude_tags && filterConfig.exclude_tags.length > 0) ||
+    filterConfig.opt_in !== undefined ||
+    filterConfig.opt_out !== undefined ||
+    filterConfig.whatsapp_validated !== undefined ||
+    !!filterConfig.last_message_sent_after ||
+    !!filterConfig.last_message_sent_before
+  );
+}
+
 /**
- * Busca contatos potenciais da lista sem filtrar whatsapp_validated.
+ * Busca contatos potenciais da lista sem filtrar whatsapp_validated
+ * (salvo se o filter_config da lista pedir explicitamente).
  */
 export async function fetchListPotentialContacts(list: any): Promise<AudienceContact[]> {
   const listType = list.list_type || 'static';
@@ -86,7 +146,8 @@ export async function fetchListPotentialContacts(list: any): Promise<AudienceCon
 
   if (listType === 'static') {
     query = `
-      SELECT DISTINCT c.id, c.phone_number, c.name, c.opt_in, c.opt_out, c.whatsapp_validated
+      SELECT DISTINCT c.id, c.phone_number, c.name, c.opt_in, c.opt_out,
+             c.whatsapp_validated, c.whatsapp_validated_at
       FROM contacts c
       JOIN contact_list_items cli ON c.id = cli.contact_id
       WHERE cli.list_id = $1
@@ -97,7 +158,6 @@ export async function fetchListPotentialContacts(list: any): Promise<AudienceCon
     let joinClauses = '';
     let paramCount = 1;
 
-    // Filtros opcionais do filter_config (não forçar whatsapp_validated)
     if (filterConfig.tags && Array.isArray(filterConfig.tags) && filterConfig.tags.length > 0) {
       joinClauses += ` JOIN contact_tag_relations ctr${paramCount} ON c.id = ctr${paramCount}.contact_id`;
       whereConditions.push(`ctr${paramCount}.tag_id = ANY($${paramCount}::int[])`);
@@ -149,16 +209,10 @@ export async function fetchListPotentialContacts(list: any): Promise<AudienceCon
     const whereSql = whereConditions.length > 0 ? whereConditions.join(' AND ') : 'TRUE';
 
     if (listType === 'hybrid') {
-      const hasDynamicFilters =
-        (filterConfig.tags && filterConfig.tags.length > 0) ||
-        (filterConfig.exclude_tags && filterConfig.exclude_tags.length > 0) ||
-        filterConfig.opt_in !== undefined ||
-        filterConfig.opt_out !== undefined ||
-        filterConfig.whatsapp_validated !== undefined;
-
-      if (!hasDynamicFilters) {
+      if (!hasDynamicFilters(filterConfig)) {
         query = `
-          SELECT DISTINCT c.id, c.phone_number, c.name, c.opt_in, c.opt_out, c.whatsapp_validated
+          SELECT DISTINCT c.id, c.phone_number, c.name, c.opt_in, c.opt_out,
+                 c.whatsapp_validated, c.whatsapp_validated_at
           FROM contacts c
           JOIN contact_list_items cli ON c.id = cli.contact_id
           WHERE cli.list_id = $1
@@ -166,8 +220,10 @@ export async function fetchListPotentialContacts(list: any): Promise<AudienceCon
         params.length = 0;
         params.push(list.id);
       } else {
+        // Estáticos ∪ dinâmicos, DISTINCT por id
         query = `
-          SELECT DISTINCT c.id, c.phone_number, c.name, c.opt_in, c.opt_out, c.whatsapp_validated
+          SELECT DISTINCT c.id, c.phone_number, c.name, c.opt_in, c.opt_out,
+                 c.whatsapp_validated, c.whatsapp_validated_at
           FROM contacts c
           WHERE (
             c.id IN (SELECT contact_id FROM contact_list_items WHERE list_id = $${paramCount})
@@ -184,7 +240,8 @@ export async function fetchListPotentialContacts(list: any): Promise<AudienceCon
     } else {
       // dynamic
       query = `
-        SELECT DISTINCT c.id, c.phone_number, c.name, c.opt_in, c.opt_out, c.whatsapp_validated
+        SELECT DISTINCT c.id, c.phone_number, c.name, c.opt_in, c.opt_out,
+               c.whatsapp_validated, c.whatsapp_validated_at
         FROM contacts c
         ${joinClauses}
         WHERE ${whereSql}
@@ -193,14 +250,7 @@ export async function fetchListPotentialContacts(list: any): Promise<AudienceCon
   }
 
   const result = await pool.query(query, params);
-  return result.rows.map((r) => ({
-    id: r.id,
-    phone_number: r.phone_number,
-    name: r.name,
-    opt_in: !!r.opt_in,
-    opt_out: !!r.opt_out,
-    whatsapp_validated: r.whatsapp_validated == null ? null : !!r.whatsapp_validated,
-  }));
+  return result.rows.map(mapContactRow);
 }
 
 async function isExcludedByScoringOrBlock(contactId: number): Promise<boolean> {
@@ -228,6 +278,34 @@ function isInvalidPhone(phone: string | null | undefined): boolean {
 }
 
 /**
+ * WhatsApp inválido confirmado: validação já ocorreu (timestamp) e resultado é false.
+ * Pendente: nunca validado com sucesso (sem timestamp) ou null — não some do potencial.
+ */
+export function isConfirmedWhatsAppInvalid(contact: AudienceContact): boolean {
+  if (contact.whatsapp_validated === true) return false;
+  if (contact.whatsapp_validated === false && contact.whatsapp_validated_at != null) {
+    return true;
+  }
+  return false;
+}
+
+export function isPendingWhatsAppValidation(contact: AudienceContact): boolean {
+  if (contact.whatsapp_validated === true) return false;
+  if (isConfirmedWhatsAppInvalid(contact)) return false;
+  return true;
+}
+
+function toItem(c: AudienceContact, reason: AudienceExclusionReason): AudienceItemSummary {
+  return {
+    contact_id: c.id,
+    name: c.name,
+    phone_masked: maskPhone(c.phone_number),
+    reason,
+    reason_label: REASON_LABELS[reason],
+  };
+}
+
+/**
  * Resolve público em categorias. Não some com contatos não validados.
  */
 export async function resolveListAudience(listOrId: any | number): Promise<ResolvedAudience> {
@@ -247,32 +325,46 @@ export async function resolveListAudience(listOrId: any | number): Promise<Resol
   const excluded_opt_out: AudienceContact[] = [];
   const excluded_no_opt_in: AudienceContact[] = [];
   const excluded_invalid_phone: AudienceContact[] = [];
-  const excluded_by_filter: AudienceContact[] = [];
+  const excluded_whatsapp_invalid: AudienceContact[] = [];
+  const excluded_by_score: AudienceContact[] = [];
+  const items: AudienceItemSummary[] = [];
 
   for (const c of potential) {
     if (isInvalidPhone(c.phone_number)) {
       excluded_invalid_phone.push(c);
+      items.push(toItem(c, 'excluded_invalid_phone'));
       continue;
     }
     if (c.opt_out) {
       excluded_opt_out.push(c);
+      items.push(toItem(c, 'excluded_opt_out'));
       continue;
     }
     if (!c.opt_in) {
       excluded_no_opt_in.push(c);
+      items.push(toItem(c, 'excluded_no_opt_in'));
+      continue;
+    }
+
+    // Invalid WA confirmado antes de score — evita misturar com tag "bloqueado" pós-validação
+    if (isConfirmedWhatsAppInvalid(c)) {
+      excluded_whatsapp_invalid.push(c);
+      items.push(toItem(c, 'excluded_whatsapp_invalid'));
       continue;
     }
 
     if (await isExcludedByScoringOrBlock(c.id)) {
-      excluded_by_filter.push(c);
+      excluded_by_score.push(c);
+      items.push(toItem(c, 'excluded_by_score'));
       continue;
     }
 
     if (c.whatsapp_validated === true) {
       eligible_now.push(c);
+      items.push(toItem(c, 'eligible'));
     } else {
-      // false, null ou undefined
       needs_whatsapp_validation.push(c);
+      items.push(toItem(c, 'needs_whatsapp_validation'));
     }
   }
 
@@ -283,7 +375,9 @@ export async function resolveListAudience(listOrId: any | number): Promise<Resol
     excluded_opt_out: excluded_opt_out.length,
     excluded_no_opt_in: excluded_no_opt_in.length,
     excluded_invalid_phone: excluded_invalid_phone.length,
-    excluded_by_filter: excluded_by_filter.length,
+    excluded_whatsapp_invalid: excluded_whatsapp_invalid.length,
+    excluded_by_score: excluded_by_score.length,
+    excluded_by_filter: excluded_by_score.length,
   };
 
   return {
@@ -295,7 +389,10 @@ export async function resolveListAudience(listOrId: any | number): Promise<Resol
     excluded_opt_out,
     excluded_no_opt_in,
     excluded_invalid_phone,
-    excluded_by_filter,
+    excluded_whatsapp_invalid,
+    excluded_by_score,
+    excluded_by_filter: excluded_by_score,
+    items,
     counts,
   };
 }

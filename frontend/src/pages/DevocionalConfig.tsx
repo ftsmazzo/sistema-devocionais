@@ -80,6 +80,8 @@ interface OperationStatus {
     excluded_opt_out?: number;
     excluded_no_opt_in?: number;
     excluded_invalid_phone?: number;
+    excluded_whatsapp_invalid?: number;
+    excluded_by_score?: number;
     excluded_by_filter?: number;
   };
   audience_legacy?: { estimated_total: number; estimated_eligible: number };

@@ -37,6 +37,8 @@ interface StatusPayload {
     excluded_opt_out?: number;
     excluded_no_opt_in?: number;
     excluded_invalid_phone?: number;
+    excluded_whatsapp_invalid?: number;
+    excluded_by_score?: number;
     excluded_by_filter?: number;
     estimated_total?: number;
     estimated_eligible?: number;
@@ -390,9 +392,11 @@ export default function OperacaoDevocional() {
             <StatChip label="Potenciais" value={status?.audience?.total_potential ?? status?.audience_legacy?.estimated_total ?? 0} />
             <StatChip label="Elegíveis agora" value={status?.audience?.eligible_now ?? status?.audience_legacy?.estimated_eligible ?? 0} tone="#10b981" />
             <StatChip label="Pendentes WA" value={status?.audience?.needs_whatsapp_validation ?? 0} tone="#f59e0b" />
+            <StatChip label="WA inválido" value={status?.audience?.excluded_whatsapp_invalid ?? 0} tone="#ef4444" />
             <StatChip label="Opt-out" value={status?.audience?.excluded_opt_out ?? 0} tone="#ef4444" />
             <StatChip label="Sem opt-in" value={status?.audience?.excluded_no_opt_in ?? 0} />
             <StatChip label="Tel. inválido" value={status?.audience?.excluded_invalid_phone ?? 0} />
+            <StatChip label="Pontuação/bloqueio" value={status?.audience?.excluded_by_score ?? status?.audience?.excluded_by_filter ?? 0} />
           </div>
           {prepareResult?.audience && (
             <div style={{ marginTop: 14, fontSize: '0.8rem', color: 'var(--text-secondary)' }}>

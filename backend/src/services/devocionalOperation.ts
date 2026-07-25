@@ -160,6 +160,8 @@ export async function getDevocionalOperationStatus() {
       excluded_opt_out: audience.counts.excluded_opt_out,
       excluded_no_opt_in: audience.counts.excluded_no_opt_in,
       excluded_invalid_phone: audience.counts.excluded_invalid_phone,
+      excluded_whatsapp_invalid: audience.counts.excluded_whatsapp_invalid,
+      excluded_by_score: audience.counts.excluded_by_score,
       excluded_by_filter: audience.counts.excluded_by_filter,
       auto_validate_on_prepare: isWhatsAppAutoValidateOnPrepare(),
     };
@@ -245,6 +247,8 @@ export async function getDevocionalOperationStatus() {
       excluded_opt_out: 0,
       excluded_no_opt_in: 0,
       excluded_invalid_phone: 0,
+      excluded_whatsapp_invalid: 0,
+      excluded_by_score: 0,
       excluded_by_filter: 0,
     },
     // compat com tela anterior
@@ -309,7 +313,8 @@ export async function prepareTodayDevocionalOperation() {
     opt_out: audience.counts.excluded_opt_out,
     sem_opt_in: audience.counts.excluded_no_opt_in,
     telefone_invalido: audience.counts.excluded_invalid_phone,
-    pontuacao_ou_bloqueio: audience.counts.excluded_by_filter,
+    whatsapp_invalid: audience.counts.excluded_whatsapp_invalid,
+    pontuacao_ou_bloqueio: audience.counts.excluded_by_score,
   };
 
   let dispatch = await findTodayDispatch(devocional.id, timezone, dateYmd);

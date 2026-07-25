@@ -191,10 +191,11 @@ export async function applyWhatsAppValidationToContact(
   );
   const blockedTagId = blockedTagResult.rows[0]?.id;
 
+  // Sempre grava timestamp: false+at = inválido confirmado; false sem at = pendente
   await pool.query(
     `UPDATE contacts 
      SET whatsapp_validated = $1, 
-         whatsapp_validated_at = ${isValid ? 'CURRENT_TIMESTAMP' : 'NULL'},
+         whatsapp_validated_at = CURRENT_TIMESTAMP,
          updated_at = CURRENT_TIMESTAMP
      WHERE id = $2`,
     [isValid, contactId]
