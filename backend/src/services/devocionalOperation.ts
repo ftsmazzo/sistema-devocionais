@@ -169,7 +169,8 @@ export async function getDevocionalOperationStatus() {
 
   const instances = await pool.query(
     `SELECT i.id, i.instance_name, i.status, i.health_status, i.phone_number,
-            g.next_available_at, g.cooldown_until, g.last_error
+            g.next_available_at, g.cooldown_until,
+            NULL::text AS last_error
      FROM instances i
      LEFT JOIN instance_send_guard g ON g.instance_id = i.id
      ORDER BY i.id ASC`
