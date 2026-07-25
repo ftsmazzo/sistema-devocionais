@@ -1,5 +1,4 @@
 import { pool } from '../database';
-import axios from 'axios';
 import { applyBlindage, recordBlindageSuccessfulSend } from './blindage';
 import { applyMessageTemplate } from './devocionalPersonalization';
 import { withGlobalOutboundGate } from './globalOutboundGate';
@@ -11,13 +10,13 @@ import {
 import { addLog } from '../routes/logs';
 import { pingInstanceHealth } from './retryQueue';
 import {
-  assertEvolutionSendOk,
   enqueueDispatchRetry,
   isInstanceConnectivityError,
   markInstanceOfflineInDb,
   notifyAdminInstanceOffline,
   removeInstanceFromPool,
 } from './dispatchRetry';
+import { maskPhone, sendEvolutionTextSafely } from './evolutionSafeSender';
 
 /**
  * Serviço para processar disparos de marketing
@@ -158,15 +157,15 @@ export async function processMarketingDispatch(params: MarketingDispatchParams):
 
     const notifyAdmin = async (phone: string, message: string) => {
       const inst = await pool.query(
-        `SELECT instance_name, api_url, api_key FROM instances WHERE status = 'connected' LIMIT 1`
+        `SELECT id FROM instances WHERE status = 'connected' ORDER BY last_message_sent_at ASC NULLS FIRST LIMIT 1`
       );
       if (inst.rows.length === 0) return;
-      const row = inst.rows[0];
-      await axios.post(
-        `${row.api_url}/message/sendText/${row.instance_name}`,
-        { number: phone, text: message },
-        { headers: { apikey: row.api_key, 'Content-Type': 'application/json' }, timeout: 15000 }
-      );
+      await sendEvolutionTextSafely({
+        instanceId: inst.rows[0].id,
+        number: phone,
+        text: message,
+        messageType: 'notification',
+      });
     };
 
     // Verificar saúde REAL de cada instância via ping antes de usar
@@ -248,7 +247,7 @@ export async function processMarketingDispatch(params: MarketingDispatchParams):
           if (!blindageResult.canSend) {
             const blockLog = `⛔ BLOQUEADO pela blindagem: ${blindageResult.reason}`;
             console.log(`      ${blockLog}`);
-            addLog('warning', `[Marketing ${dispatchId}] ${blockLog} - Contato: ${contact.phone_number}`);
+            addLog('warning', `[Marketing ${dispatchId}] ${blockLog} - Contato: ${maskPhone(contact.phone_number)}`);
             failedCount++;
             try {
               await pool.query(
@@ -278,7 +277,7 @@ export async function processMarketingDispatch(params: MarketingDispatchParams):
             const delayStartTime = Date.now();
             const delayLog = `⏳ [DELAY] Aguardando ${delaySeconds}s (${blindageResult.delay}ms) antes de enviar...`;
             console.log(`      ${delayLog}`);
-            addLog('info', `[Marketing ${dispatchId}] ${delayLog} - Contato: ${contact.phone_number}`);
+            addLog('info', `[Marketing ${dispatchId}] ${delayLog} - Contato: ${maskPhone(contact.phone_number)}`);
             await new Promise(resolve => setTimeout(resolve, blindageResult.delay));
             const actualDelay = Date.now() - delayStartTime;
             const delayDiff = actualDelay - blindageResult.delay;
@@ -306,29 +305,21 @@ export async function processMarketingDispatch(params: MarketingDispatchParams):
             [instance.id]
           );
 
-          // Enviar mensagem
+          // Enviar mensagem (texto ou mídia) via cliente único com guard persistente
           const sendStartTime = Date.now();
-          if (mediaUrl && mediaType) {
-            // Enviar com mídia
-            console.log(`      📎 Enviando mensagem com mídia (${mediaType}): ${mediaUrl.substring(0, 50)}...`);
-            await sendMessageWithMedia(
-              instance,
-              contact.phone_number,
-              personalizedMessage,
-              mediaUrl,
-              mediaType
-            );
-          } else {
-            // Enviar apenas texto
-            console.log(`      💬 Enviando mensagem de texto (${personalizedMessage.length} caracteres)`);
-            await sendTextMessage(
-              instance,
-              contact.phone_number,
-              personalizedMessage
-            );
-          }
+          const sendResult = await sendEvolutionTextSafely({
+            instanceId: instance.id,
+            number: contact.phone_number,
+            text: personalizedMessage,
+            messageType: 'marketing',
+            metadata: { dispatchId, contactId: contact.id },
+            media:
+              mediaUrl && mediaType
+                ? { url: mediaUrl, type: String(mediaType) }
+                : undefined,
+          });
           const sendTime = Date.now() - sendStartTime;
-          console.log(`      ✅ Mensagem enviada em ${sendTime}ms`);
+          console.log(`      ✅ Mensagem enviada em ${sendTime}ms (seq=${sendResult.sequenceNumber})`);
 
           // Registrar mensagem
           const messageResult = await pool.query(
@@ -340,7 +331,7 @@ export async function processMarketingDispatch(params: MarketingDispatchParams):
             RETURNING id`,
             [
               instance.id,
-              `temp-${Date.now()}-${contact.id}`,
+              sendResult.messageId,
               `${contact.phone_number}@s.whatsapp.net`,
               true,
               mediaType || 'text',
@@ -468,27 +459,18 @@ export async function processMarketingDispatch(params: MarketingDispatchParams):
     
     if (notificationPhone) {
       try {
-        // Buscar uma instância para enviar notificação
         const instanceResult = await pool.query(
-          `SELECT instance_name, api_url, api_key FROM instances WHERE status = 'connected' LIMIT 1`
+          `SELECT id FROM instances WHERE status = 'connected' ORDER BY last_message_sent_at ASC NULLS FIRST LIMIT 1`
         );
-        
+
         if (instanceResult.rows.length > 0) {
-          const instance = instanceResult.rows[0];
-          await axios.post(
-            `${instance.api_url}/message/sendText/${instance.instance_name}`,
-            {
-              number: notificationPhone,
-              text: `✅ Disparo de Marketing "${dispatch.name}" concluído:\n\n📊 ${successCount} enviados\n❌ ${failedCount} falhas\n⏱️ Tempo total: ${totalTimeSeconds}s\n📈 Média: ${Math.ceil(totalTime / contacts.length)}ms por contato`,
-            },
-            {
-              headers: {
-                'apikey': instance.api_key,
-                'Content-Type': 'application/json',
-              },
-            }
-          );
-          console.log(`   📲 [NOTIFICAÇÃO ÚNICA] Enviada para ${notificationPhone}`);
+          await sendEvolutionTextSafely({
+            instanceId: instanceResult.rows[0].id,
+            number: notificationPhone,
+            text: `✅ Disparo de Marketing "${dispatch.name}" concluído:\n\n📊 ${successCount} enviados\n❌ ${failedCount} falhas\n⏱️ Tempo total: ${totalTimeSeconds}s\n📈 Média: ${Math.ceil(totalTime / contacts.length)}ms por contato`,
+            messageType: 'notification',
+          });
+          console.log(`   📲 [NOTIFICAÇÃO ÚNICA] Enviada para ${maskPhone(notificationPhone)}`);
         }
       } catch (error: any) {
         console.error(`   ⚠️ Erro ao enviar notificação:`, error.message);
@@ -506,88 +488,6 @@ export async function processMarketingDispatch(params: MarketingDispatchParams):
       [dispatchId]
     );
   }
-}
-
-/**
- * Enviar mensagem de texto
- */
-async function sendTextMessage(
-  instance: any,
-  phoneNumber: string,
-  message: string
-): Promise<any> {
-  const sendMessageUrl = `${instance.api_url}/message/sendText/${instance.instance_name}`;
-
-  const response = await axios.post(
-    sendMessageUrl,
-    {
-      number: phoneNumber,
-      text: message,
-    },
-    {
-      headers: {
-        'apikey': instance.api_key,
-        'Content-Type': 'application/json',
-      },
-      timeout: 20000,
-      validateStatus: () => true,
-    }
-  );
-  assertEvolutionSendOk(response);
-
-  return response.data;
-}
-
-/**
- * Enviar mensagem com mídia (imagem ou PDF)
- */
-async function sendMessageWithMedia(
-  instance: any,
-  phoneNumber: string,
-  caption: string,
-  mediaUrl: string,
-  mediaType: string
-): Promise<any> {
-  let endpoint = '';
-  let payload: any = {
-    number: phoneNumber,
-  };
-
-  if (mediaType === 'image') {
-    endpoint = `/message/sendMedia/${instance.instance_name}`;
-    payload.mediatype = 'image';
-    payload.media = mediaUrl;
-    payload.caption = caption;
-    payload.fileName = mediaUrl.split('/').pop() || 'documento.pdf';
-  } else if (mediaType === 'video') {
-    endpoint = `/message/sendMedia/${instance.instance_name}`;
-    payload.mediatype = 'video';
-    payload.media = mediaUrl;
-    payload.caption = caption;
-  } else if (mediaType === 'audio') {
-    endpoint = `/message/sendWhatsAppAudio/${instance.instance_name}`;
-    payload.audio = mediaUrl;
-  } else {
-    throw new Error(`Tipo de mídia não suportado: ${mediaType}`);
-  }
-
-  const sendMessageUrl = `${instance.api_url}${endpoint}`;
-
-  const response = await axios.post(
-    sendMessageUrl,
-    payload,
-    {
-      headers: {
-        'apikey': instance.api_key,
-        'Content-Type': 'application/json',
-      },
-      timeout: 20000,
-      validateStatus: () => true,
-    }
-  );
-  assertEvolutionSendOk(response);
-
-  return response.data;
 }
 
 /**

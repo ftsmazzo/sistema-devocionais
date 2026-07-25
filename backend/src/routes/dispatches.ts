@@ -1,5 +1,4 @@
 import express from 'express';
-import axios from 'axios';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
@@ -16,6 +15,7 @@ import {
 } from '../services/dispatchPacing';
 import { personalizeDevocionalMessage, formatDevocionalMessage } from '../services/devocionalPersonalization';
 import { canReceiveDevocional, updateDevocionalScore } from '../services/devocionalScoring';
+import { maskPhone, sendEvolutionTextSafely } from '../services/evolutionSafeSender';
 import { addLog } from './logs';
 
 const router = express.Router();
@@ -1100,10 +1100,10 @@ async function processDevocionalDispatchManually(dispatchId: number): Promise<vo
           addLog('info', `[Devocional Manual ${dispatchId}] 🛡️ Blindagem aplicada em ${blindageTime}ms`);
 
           if (!blindageResult.canSend) {
-            console.log(`   ⛔ Contato ${contact.phone_number} bloqueado pela blindagem: ${blindageResult.reason}`);
+            console.log(`   ⛔ Contato ${maskPhone(contact.phone_number)} bloqueado pela blindagem: ${blindageResult.reason}`);
             addLog(
               'warning',
-              `[Devocional Manual ${dispatchId}] ⛔ Bloqueado pela blindagem: ${blindageResult.reason} — ${contact.phone_number}`
+              `[Devocional Manual ${dispatchId}] ⛔ Bloqueado pela blindagem: ${blindageResult.reason} — ${maskPhone(contact.phone_number)}`
             );
             failedCount++;
             if (pacing.rotateEveryN <= 0) {
@@ -1123,7 +1123,7 @@ async function processDevocionalDispatchManually(dispatchId: number): Promise<vo
           if (blindageResult.delay && blindageResult.delay > 0) {
             const delaySeconds = Math.ceil(blindageResult.delay / 1000);
             const delayStartTime = Date.now();
-            const delayLog = `⏳ [DELAY] Aguardando ${delaySeconds}s (${blindageResult.delay}ms) antes de enviar para ${contact.phone_number}`;
+            const delayLog = `⏳ [DELAY] Aguardando ${delaySeconds}s (${blindageResult.delay}ms) antes de enviar para ${maskPhone(contact.phone_number)}`;
             console.log(`   ${delayLog}`);
             addLog('info', `[Devocional Manual ${dispatchId}] ${delayLog}`);
             await new Promise(resolve => setTimeout(resolve, blindageResult.delay));
@@ -1139,7 +1139,7 @@ async function processDevocionalDispatchManually(dispatchId: number): Promise<vo
               addLog('success', `[Devocional Manual ${dispatchId}] ${delayOk}`);
             }
           } else if (!blindageResult.delay || blindageResult.delay === 0) {
-            addLog('warning', `[Devocional Manual ${dispatchId}] ⚠️ Nenhum delay configurado - envio imediato para ${contact.phone_number}`);
+            addLog('warning', `[Devocional Manual ${dispatchId}] ⚠️ Nenhum delay configurado - envio imediato para ${maskPhone(contact.phone_number)}`);
           }
 
           await pool.query(
@@ -1149,20 +1149,13 @@ async function processDevocionalDispatchManually(dispatchId: number): Promise<vo
             [instance.id]
           );
 
-          const sendMessageUrl = `${instance.api_url}/message/sendText/${instance.instance_name}`;
-          const response = await axios.post(
-            sendMessageUrl,
-            {
-              number: contact.phone_number,
-              text: personalizedMessage,
-            },
-            {
-              headers: {
-                'apikey': instance.api_key,
-                'Content-Type': 'application/json',
-              },
-            }
-          );
+          const sendResult = await sendEvolutionTextSafely({
+            instanceId: instance.id,
+            number: contact.phone_number,
+            text: personalizedMessage,
+            messageType: 'devocional',
+            metadata: { dispatchId, contactId: contact.id, manual: true },
+          });
 
           const messageResult = await pool.query(
             `INSERT INTO messages (
@@ -1173,7 +1166,7 @@ async function processDevocionalDispatchManually(dispatchId: number): Promise<vo
             RETURNING id`,
             [
               instance.id,
-              response.data?.key?.id || `temp-${Date.now()}`,
+              sendResult.messageId,
               `${contact.phone_number}@s.whatsapp.net`,
               true,
               'text',
@@ -1206,10 +1199,10 @@ async function processDevocionalDispatchManually(dispatchId: number): Promise<vo
 
           successCount++;
           const contactTotalMs = Date.now() - contactStartTime;
-          console.log(`   ✅ Enviado para ${contact.phone_number} (${successCount}/${eligibleContacts.length})`);
+          console.log(`   ✅ Enviado para ${maskPhone(contact.phone_number)} (${successCount}/${eligibleContacts.length})`);
           addLog(
             'success',
-            `[Devocional Manual ${dispatchId}] ✅ SUCESSO! Tempo total: ${contactTotalMs}ms — ${contact.phone_number}`
+            `[Devocional Manual ${dispatchId}] ✅ SUCESSO! Tempo total: ${contactTotalMs}ms — ${maskPhone(contact.phone_number)}`
           );
           addLog(
             'info',
@@ -1237,10 +1230,10 @@ async function processDevocionalDispatchManually(dispatchId: number): Promise<vo
         await maybeDispatchPacingPause(pacing, successCount, `Devocional Manual ${dispatchId}`);
 
       } catch (error: any) {
-        console.error(`   ❌ Erro ao enviar para ${contact.phone_number}:`, error.message);
+        console.error(`   ❌ Erro ao enviar para ${maskPhone(contact.phone_number)}:`, error.message);
         addLog(
           'error',
-          `[Devocional Manual ${dispatchId}] ❌ Erro ao enviar para ${contact.phone_number}: ${error.message || error}`
+          `[Devocional Manual ${dispatchId}] ❌ Erro ao enviar para ${maskPhone(contact.phone_number)}: ${error.message || error}`
         );
         failedCount++;
         // Só contar como falha se a mensagem foi realmente enviada mas falhou

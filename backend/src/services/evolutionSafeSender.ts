@@ -41,6 +41,11 @@ export interface SendEvolutionTextParams {
   messageType?: string;
   /** Metadados opcionais (não logados em detalhe) */
   metadata?: Record<string, unknown>;
+  /** Se presente, envia mídia (mesmo guard/slot da instância) em vez de só texto */
+  media?: {
+    url: string;
+    type: string;
+  };
 }
 
 export interface SendEvolutionTextResult {
@@ -304,12 +309,12 @@ async function markSendSuccess(
 }
 
 /**
- * Envia texto via Evolution com serialização persistente por instância.
+ * Envia texto (ou mídia com caption) via Evolution com serialização persistente por instância.
  */
 export async function sendEvolutionTextSafely(
   params: SendEvolutionTextParams
 ): Promise<SendEvolutionTextResult> {
-  const { instanceId, number, text, messageType } = params;
+  const { instanceId, number, text, messageType, media } = params;
   const masked = maskPhone(number);
 
   const instanceResult = await pool.query(
@@ -362,30 +367,74 @@ export async function sendEvolutionTextSafely(
 
   const evolutionApiUrl = process.env.EVOLUTION_API_URL || instance.api_url;
   const evolutionApiKey = process.env.EVOLUTION_API_KEY || instance.api_key;
-  const sendUrl = `${evolutionApiUrl}/message/sendText/${instance.instance_name}`;
   const timeoutMs = envInt('EVOLUTION_SEND_TIMEOUT_MS', 20_000);
 
+  let sendUrl: string;
+  let body: Record<string, unknown>;
+
+  if (media?.url) {
+    const mediaType = String(media.type || '').toLowerCase();
+    if (mediaType === 'image') {
+      sendUrl = `${evolutionApiUrl}/message/sendMedia/${instance.instance_name}`;
+      body = {
+        number,
+        mediatype: 'image',
+        media: media.url,
+        caption: text,
+        fileName: media.url.split('/').pop() || 'image.jpg',
+      };
+    } else if (mediaType === 'video') {
+      sendUrl = `${evolutionApiUrl}/message/sendMedia/${instance.instance_name}`;
+      body = {
+        number,
+        mediatype: 'video',
+        media: media.url,
+        caption: text,
+      };
+    } else if (mediaType === 'audio') {
+      sendUrl = `${evolutionApiUrl}/message/sendWhatsAppAudio/${instance.instance_name}`;
+      body = {
+        number,
+        audio: media.url,
+      };
+    } else if (mediaType === 'pdf' || mediaType === 'document') {
+      sendUrl = `${evolutionApiUrl}/message/sendMedia/${instance.instance_name}`;
+      body = {
+        number,
+        mediatype: 'document',
+        media: media.url,
+        caption: text,
+        fileName: media.url.split('/').pop() || 'document.pdf',
+      };
+    } else {
+      throw new EvolutionSafeSendError(`Tipo de mídia não suportado: ${media.type}`, {
+        kind: 'unknown',
+        instanceId,
+      });
+    }
+  } else {
+    sendUrl = `${evolutionApiUrl}/message/sendText/${instance.instance_name}`;
+    body = { number, text };
+  }
+
   try {
-    const response = await axios.post(
-      sendUrl,
-      { number, text },
-      {
-        headers: {
-          apikey: evolutionApiKey,
-          'Content-Type': 'application/json',
-        },
-        timeout: timeoutMs,
-        validateStatus: () => true,
-      }
-    );
+    const response = await axios.post(sendUrl, body, {
+      headers: {
+        apikey: evolutionApiKey,
+        'Content-Type': 'application/json',
+      },
+      timeout: timeoutMs,
+      validateStatus: () => true,
+    });
 
     if (response.status >= 400) {
       const kind = classifyHttpError(response.status, null);
       await applyCooldown(instanceId, kind);
-      throw new EvolutionSafeSendError(
-        `Evolution HTTP ${response.status}`,
-        { kind, instanceId, httpStatus: response.status }
-      );
+      throw new EvolutionSafeSendError(`Evolution HTTP ${response.status}`, {
+        kind,
+        instanceId,
+        httpStatus: response.status,
+      });
     }
 
     await markSendSuccess(instanceId, slot.reservationToken);
@@ -397,7 +446,7 @@ export async function sendEvolutionTextSafely(
 
     addLog(
       'success',
-      `[EvolutionSafeSender] Enviado inst=${instanceId} seq=${slot.sequenceNumber} to=${masked} wait=${slot.waitedMs}ms gap=${slot.delayAppliedMs}ms`
+      `[EvolutionSafeSender] Enviado inst=${instanceId} seq=${slot.sequenceNumber} to=${masked} wait=${slot.waitedMs}ms gap=${slot.delayAppliedMs}ms media=${media ? 'yes' : 'no'}`
     );
 
     return {
@@ -419,9 +468,10 @@ export async function sendEvolutionTextSafely(
     const kind = classifyHttpError(status, error);
     await applyCooldown(instanceId, kind);
 
-    throw new EvolutionSafeSendError(
-      error?.message || 'Falha no envio Evolution',
-      { kind, instanceId, httpStatus: status }
-    );
+    throw new EvolutionSafeSendError(error?.message || 'Falha no envio Evolution', {
+      kind,
+      instanceId,
+      httpStatus: status,
+    });
   }
 }
