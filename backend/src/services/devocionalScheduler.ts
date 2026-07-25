@@ -23,6 +23,15 @@ import {
   sendEvolutionTextSafely,
   EvolutionSafeSendError,
 } from './evolutionSafeSender';
+import {
+  ensureDispatchItem,
+  isDispatchItemSent,
+  markDispatchItemFailed,
+  markDispatchItemProcessing,
+  markDispatchItemSent,
+  markDispatchItemSkipped,
+  syncDispatchContactStatus,
+} from './dispatchItems';
 
 /**
  * Serviço de agendamento para disparo automático de devocionais
@@ -397,10 +406,33 @@ export async function executeDevocionalDispatch(): Promise<void> {
         config.timezone
       );
 
+      const dispatchItem = await ensureDispatchItem({
+        dispatchId,
+        contactId: contact.id,
+        contactNumber: contact.phone_number,
+        contactName: contact.name,
+        messageType: 'devocional',
+        messageSnapshot: personalizedMessage,
+        maxAttempts: 1,
+      });
+
+      if (dispatchItem.status === 'sent' || (await isDispatchItemSent(dispatchId, contact.phone_number))) {
+        addLog('info', `[Devocional] Item já sent — skip ${maskPhone(contact.phone_number)}`);
+        successCount++;
+        continue;
+      }
+
       if (instances.length === 0) {
         failedCount++;
         const instId = lastOfflineInstanceId ?? instancesResult.rows[0]?.id;
         if (instId) {
+          await markDispatchItemFailed({
+            itemId: dispatchItem.id,
+            errorMessage: 'Todas as instâncias offline durante o disparo',
+            errorCategory: 'instance_offline',
+            instanceId: instId,
+            asPendingRetry: true,
+          });
           await enqueueDispatchRetry({
             dispatchId,
             instanceId: instId,
@@ -441,26 +473,21 @@ export async function executeDevocionalDispatch(): Promise<void> {
           });
 
           if (!blindageResult.canSend) {
-            console.log(`   ⛔ Contato ${contact.phone_number} bloqueado pela blindagem: ${blindageResult.reason}`);
+            console.log(`   ⛔ Contato ${maskPhone(contact.phone_number)} bloqueado pela blindagem: ${blindageResult.reason}`);
             failedCount++;
-            try {
-              await pool.query(
-                `INSERT INTO dispatch_contacts (
-                  dispatch_id, instance_id, contact_number, contact_name,
-                  status, failed_reason
-                ) VALUES ($1, $2, $3, $4, 'failed', $5)`,
-                [
-                  dispatchId,
-                  instance.id,
-                  contact.phone_number,
-                  contact.name,
-                  `Blindagem: ${blindageResult.reason || 'bloqueado'}`.slice(0, 500)
-                ]
-              );
-              console.log(`   📝 Falha (blindagem) registrada em dispatch_contacts: ${contact.phone_number}`);
-            } catch (insertErr: any) {
-              console.error(`   ⚠️ Erro ao registrar bloqueio em dispatch_contacts:`, insertErr.message);
-            }
+            await markDispatchItemSkipped({
+              itemId: dispatchItem.id,
+              reason: `Blindagem: ${blindageResult.reason || 'bloqueado'}`,
+              instanceId: instance.id,
+            });
+            await syncDispatchContactStatus({
+              dispatchId,
+              contactNumber: contact.phone_number,
+              contactName: contact.name,
+              instanceId: instance.id,
+              status: 'failed',
+              failedReason: `Blindagem: ${blindageResult.reason || 'bloqueado'}`,
+            });
             aborted = true;
             return;
           }
@@ -469,7 +496,7 @@ export async function executeDevocionalDispatch(): Promise<void> {
           if (blindageResult.delay && blindageResult.delay > 0) {
             const delaySeconds = Math.ceil(blindageResult.delay / 1000);
             const delayStartTime = Date.now();
-            const delayLog = `⏳ [DELAY] Aguardando ${delaySeconds}s (${blindageResult.delay}ms) antes de enviar para ${contact.phone_number}`;
+            const delayLog = `⏳ [DELAY] Aguardando ${delaySeconds}s (${blindageResult.delay}ms) antes de enviar para ${maskPhone(contact.phone_number)}`;
             console.log(`   ${delayLog}`);
             addLog('info', `[Devocional] ${delayLog}`);
             await new Promise(resolve => setTimeout(resolve, blindageResult.delay));
@@ -485,10 +512,18 @@ export async function executeDevocionalDispatch(): Promise<void> {
               addLog('success', `[Devocional] ${delayOk}`);
             }
           } else {
-            const noDelayWarn = `⚠️ [DELAY] NENHUM DELAY CONFIGURADO - Enviando imediatamente para ${contact.phone_number}!`;
+            const noDelayWarn = `⚠️ [DELAY] NENHUM DELAY CONFIGURADO - Enviando imediatamente para ${maskPhone(contact.phone_number)}!`;
             console.log(`   ${noDelayWarn}`);
             addLog('warning', `[Devocional] ${noDelayWarn}`);
           }
+
+          if (await isDispatchItemSent(dispatchId, contact.phone_number)) {
+            aborted = true;
+            contactSent = true;
+            return;
+          }
+
+          await markDispatchItemProcessing(dispatchItem.id, instance.id);
 
           // CRÍTICO: Atualizar last_message_sent_at ANTES de enviar para que o próximo cálculo de delay seja correto
           // Isso garante que o delay global seja respeitado mesmo com rotação de instâncias
@@ -504,7 +539,7 @@ export async function executeDevocionalDispatch(): Promise<void> {
             number: contact.phone_number,
             text: personalizedMessage,
             messageType: 'devocional',
-            metadata: { dispatchId, contactId: contact.id },
+            metadata: { dispatchId, contactId: contact.id, dispatchItemId: dispatchItem.id },
           });
 
           // Registrar mensagem
@@ -534,24 +569,22 @@ export async function executeDevocionalDispatch(): Promise<void> {
           // Atualizar pontuação (enviado)
           await updateDevocionalScore(contact.id, 'sent');
 
-          // Registrar no dispatch_contacts
-          await pool.query(
-            `INSERT INTO dispatch_contacts (
-              dispatch_id, instance_id, contact_number, contact_name,
-              message_sent_id, status, sent_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)`,
-            [
-              dispatchId,
-              instance.id,
-              contact.phone_number,
-              contact.name,
-              messageResult.rows[0].id,
-              'sent',
-            ]
-          );
+          await markDispatchItemSent({
+            itemId: dispatchItem.id,
+            providerMessageId: sendResult.messageId,
+            instanceId: instance.id,
+          });
+          await syncDispatchContactStatus({
+            dispatchId,
+            contactNumber: contact.phone_number,
+            contactName: contact.name,
+            instanceId: instance.id,
+            status: 'sent',
+            messageSentId: messageResult.rows[0].id,
+          });
 
           successCount++;
-          console.log(`   ✅ Enviado para ${contact.phone_number} (${successCount}/${eligibleContacts.length})`);
+          console.log(`   ✅ Enviado para ${maskPhone(contact.phone_number)} (${successCount}/${eligibleContacts.length})`);
 
           // Atualizar última mensagem enviada da instância
           await pool.query(
@@ -601,23 +634,20 @@ export async function executeDevocionalDispatch(): Promise<void> {
           continue;
         }
 
-        try {
-          await pool.query(
-            `INSERT INTO dispatch_contacts (
-              dispatch_id, instance_id, contact_number, contact_name,
-              status, failed_reason
-            ) VALUES ($1, $2, $3, $4, 'failed', $5)`,
-            [
-              dispatchId,
-              instance.id,
-              contact.phone_number,
-              contact.name,
-              (error.message || String(error)).slice(0, 500),
-            ]
-          );
-        } catch (insertErr: any) {
-          console.error(`   ⚠️ Erro ao registrar falha em dispatch_contacts:`, insertErr.message);
-        }
+        await markDispatchItemFailed({
+          itemId: dispatchItem.id,
+          errorMessage: error.message || String(error),
+          errorCategory: 'send_error',
+          instanceId: instance.id,
+        });
+        await syncDispatchContactStatus({
+          dispatchId,
+          contactNumber: contact.phone_number,
+          contactName: contact.name,
+          instanceId: instance.id,
+          status: 'failed',
+          failedReason: error.message || String(error),
+        });
         failedCount++;
         contactSent = true;
       }
@@ -627,6 +657,13 @@ export async function executeDevocionalDispatch(): Promise<void> {
         failedCount++;
         const instId = lastOfflineInstanceId ?? instances[0]?.id ?? instancesResult.rows[0]?.id;
         if (instId) {
+          await markDispatchItemFailed({
+            itemId: dispatchItem.id,
+            errorMessage: 'Falha em todas as instâncias tentadas no disparo',
+            errorCategory: 'instance_offline',
+            instanceId: instId,
+            asPendingRetry: true,
+          });
           const queued = await enqueueDispatchRetry({
             dispatchId,
             instanceId: instId,
@@ -635,8 +672,8 @@ export async function executeDevocionalDispatch(): Promise<void> {
             failedReason: 'Falha em todas as instâncias tentadas no disparo',
           });
           if (queued) {
-            console.log(`   🔄 Lead ${contact.phone_number} na fila de retry (1 tentativa posterior)`);
-            addLog('info', `[Devocional] ${contact.phone_number} enfileirado para retry único`);
+            console.log(`   🔄 Lead ${maskPhone(contact.phone_number)} na fila de retry (1 tentativa posterior)`);
+            addLog('info', `[Devocional] ${maskPhone(contact.phone_number)} enfileirado para retry único`);
           }
         }
       }

@@ -1202,6 +1202,47 @@ export async function initializeDatabase() {
         ON instance_send_guard(cooldown_until);
     `);
 
+    // ============================================
+    // Itens persistentes de disparo (idempotência por contato)
+    // ============================================
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS dispatch_items (
+        id SERIAL PRIMARY KEY,
+        dispatch_id INTEGER NOT NULL REFERENCES dispatches(id) ON DELETE CASCADE,
+        contact_id INTEGER,
+        contact_number VARCHAR(30) NOT NULL,
+        contact_name VARCHAR(255),
+        instance_id INTEGER REFERENCES instances(id) ON DELETE SET NULL,
+        message_type VARCHAR(50),
+        message_snapshot TEXT,
+        status VARCHAR(50) NOT NULL DEFAULT 'pending',
+        attempt_count INTEGER NOT NULL DEFAULT 0,
+        max_attempts INTEGER NOT NULL DEFAULT 1,
+        scheduled_at TIMESTAMP,
+        started_at TIMESTAMP,
+        sent_at TIMESTAMP,
+        failed_at TIMESTAMP,
+        next_retry_at TIMESTAMP,
+        provider_message_id VARCHAR(255),
+        error_category VARCHAR(100),
+        error_message TEXT,
+        lock_token VARCHAR(100),
+        locked_at TIMESTAMP,
+        lock_expires_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (dispatch_id, contact_number)
+      )
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_dispatch_items_dispatch ON dispatch_items(dispatch_id);
+      CREATE INDEX IF NOT EXISTS idx_dispatch_items_status ON dispatch_items(status);
+      CREATE INDEX IF NOT EXISTS idx_dispatch_items_next_retry ON dispatch_items(next_retry_at);
+      CREATE INDEX IF NOT EXISTS idx_dispatch_items_contact_number ON dispatch_items(contact_number);
+      CREATE INDEX IF NOT EXISTS idx_dispatch_items_instance ON dispatch_items(instance_id);
+    `);
+
     console.log('✅ Tabelas criadas/verificadas');
   } finally {
     client.release();

@@ -1,5 +1,6 @@
 import { pool } from '../database';
 import { addLog } from '../routes/logs';
+import { maskPhone } from './evolutionSafeSender';
 import axios from 'axios';
 
 /** Uma única tentativa na fila de retry (além do envio imediato com failover no disparo). */
@@ -32,13 +33,21 @@ export async function alreadySentInDispatch(
   dispatchId: number,
   contactNumber: string
 ): Promise<boolean> {
-  const r = await pool.query(
+  const legacy = await pool.query(
     `SELECT 1 FROM dispatch_contacts
      WHERE dispatch_id = $1 AND contact_number = $2 AND status = 'sent'
      LIMIT 1`,
     [dispatchId, contactNumber]
   );
-  return r.rows.length > 0;
+  if (legacy.rows.length > 0) return true;
+
+  const item = await pool.query(
+    `SELECT 1 FROM dispatch_items
+     WHERE dispatch_id = $1 AND contact_number = $2 AND status = 'sent'
+     LIMIT 1`,
+    [dispatchId, contactNumber]
+  );
+  return item.rows.length > 0;
 }
 
 /**
@@ -56,7 +65,7 @@ export async function enqueueDispatchRetry(params: {
   if (await alreadySentInDispatch(dispatchId, contactNumber)) {
     addLog(
       'info',
-      `[Retry] Ignorado enqueue — já enviado: dispatch=${dispatchId} ${contactNumber}`
+      `[Retry] Ignorado enqueue — já enviado: dispatch=${dispatchId} ${maskPhone(contactNumber)}`
     );
     return false;
   }

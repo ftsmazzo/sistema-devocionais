@@ -15,6 +15,14 @@ import {
   isInstanceConnectivityError,
 } from './dispatchRetry';
 import { maskPhone, sendEvolutionTextSafely } from './evolutionSafeSender';
+import {
+  ensureDispatchItem,
+  isDispatchItemSent,
+  markDispatchItemFailed,
+  markDispatchItemProcessing,
+  markDispatchItemSent,
+  markDispatchItemSkipped,
+} from './dispatchItems';
 
 let retryQueueRunning = false;
 
@@ -136,13 +144,13 @@ export async function processRetryQueue(): Promise<void> {
           );
           addLog(
             'info',
-            `[RetryQueue] ${item.contact_number} já tinha envio no disparo ${item.dispatch_id} — fila cancelada.`
+            `[RetryQueue] ${maskPhone(item.contact_number)} já tinha envio no disparo ${item.dispatch_id} — fila cancelada.`
           );
           continue;
         }
 
         console.log(
-          `   🔄 Retentando lead: ${item.contact_number} (tentativa ${item.retry_count + 1}/${MAX_DISPATCH_RETRY_ATTEMPTS})`
+          `   🔄 Retentando lead: ${maskPhone(item.contact_number)} (tentativa ${item.retry_count + 1}/${MAX_DISPATCH_RETRY_ATTEMPTS})`
         );
 
         const availableInstances = instances.filter((i) => i.id !== item.retry_instance_id);
@@ -159,7 +167,7 @@ export async function processRetryQueue(): Promise<void> {
         }
 
         if (!selectedInstance) {
-          addLog('warning', `[RetryQueue] Nenhuma instância online para retry de ${item.contact_number}`);
+          addLog('warning', `[RetryQueue] Nenhuma instância online para retry de ${maskPhone(item.contact_number)}`);
           await pool.query(
             `UPDATE dispatch_contacts
              SET last_retry_at = CURRENT_TIMESTAMP,
@@ -188,6 +196,23 @@ export async function processRetryQueue(): Promise<void> {
           }
         }
 
+        const dispatchItem = await ensureDispatchItem({
+          dispatchId: item.dispatch_id,
+          contactNumber: item.contact_number,
+          contactName: item.contact_name,
+          messageType: item.dispatch_type || 'avulsa',
+          messageSnapshot: message,
+          maxAttempts: MAX_DISPATCH_RETRY_ATTEMPTS + 1,
+        });
+
+        if (dispatchItem.status === 'sent' || (await isDispatchItemSent(item.dispatch_id, item.contact_number))) {
+          await pool.query(
+            `UPDATE dispatch_contacts SET status = 'sent', sent_at = COALESCE(sent_at, CURRENT_TIMESTAMP) WHERE id = $1`,
+            [item.id]
+          );
+          continue;
+        }
+
         let skipLead = false;
         await withGlobalOutboundGate(async () => {
           const blindageResult = await applyBlindage({
@@ -198,6 +223,11 @@ export async function processRetryQueue(): Promise<void> {
           });
 
           if (!blindageResult.canSend) {
+            await markDispatchItemSkipped({
+              itemId: dispatchItem.id,
+              reason: `Blindagem (retry): ${blindageResult.reason}`,
+              instanceId: selectedInstance.id,
+            });
             await pool.query(
               `UPDATE dispatch_contacts
                SET status = 'failed',
@@ -224,6 +254,8 @@ export async function processRetryQueue(): Promise<void> {
             return;
           }
 
+          await markDispatchItemProcessing(dispatchItem.id, selectedInstance.id);
+
           await pool.query(
             `UPDATE instances SET last_message_sent_at = CURRENT_TIMESTAMP WHERE id = $1`,
             [selectedInstance.id]
@@ -234,7 +266,7 @@ export async function processRetryQueue(): Promise<void> {
             number: item.contact_number,
             text: message,
             messageType: item.dispatch_type || 'avulsa',
-            metadata: { dispatchId: item.dispatch_id, retry: true },
+            metadata: { dispatchId: item.dispatch_id, retry: true, dispatchItemId: dispatchItem.id },
           });
 
           const msgResult = await pool.query(
@@ -257,6 +289,12 @@ export async function processRetryQueue(): Promise<void> {
               item.dispatch_type,
             ]
           );
+
+          await markDispatchItemSent({
+            itemId: dispatchItem.id,
+            providerMessageId: sendResult.messageId,
+            instanceId: selectedInstance.id,
+          });
 
           await pool.query(
             `UPDATE dispatch_contacts
@@ -300,9 +338,26 @@ export async function processRetryQueue(): Promise<void> {
           continue;
         }
       } catch (error: any) {
-        console.error(`   ❌ Retry falhou para ${item.contact_number}:`, error.message);
+        console.error(`   ❌ Retry falhou para ${maskPhone(item.contact_number)}:`, error.message);
 
         const newRetryCount = item.retry_count + 1;
+
+        try {
+          const di = await ensureDispatchItem({
+            dispatchId: item.dispatch_id,
+            contactNumber: item.contact_number,
+            contactName: item.contact_name,
+            messageType: item.dispatch_type || 'avulsa',
+          });
+          await markDispatchItemFailed({
+            itemId: di.id,
+            errorMessage: error.message || String(error),
+            errorCategory: 'retry_error',
+            asPendingRetry: newRetryCount < MAX_DISPATCH_RETRY_ATTEMPTS && isInstanceConnectivityError(error),
+          });
+        } catch {
+          /* ignore */
+        }
 
         if (newRetryCount >= MAX_DISPATCH_RETRY_ATTEMPTS || !isInstanceConnectivityError(error)) {
           await pool.query(
@@ -318,7 +373,7 @@ export async function processRetryQueue(): Promise<void> {
               item.id,
             ]
           );
-          addLog('error', `[RetryQueue] ❌ Falha definitiva: ${item.contact_number}`);
+          addLog('error', `[RetryQueue] ❌ Falha definitiva: ${maskPhone(item.contact_number)}`);
         } else {
           await pool.query(
             `UPDATE dispatch_contacts

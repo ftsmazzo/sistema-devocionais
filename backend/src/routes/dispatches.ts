@@ -16,6 +16,15 @@ import {
 import { personalizeDevocionalMessage, formatDevocionalMessage } from '../services/devocionalPersonalization';
 import { canReceiveDevocional, updateDevocionalScore } from '../services/devocionalScoring';
 import { maskPhone, sendEvolutionTextSafely } from '../services/evolutionSafeSender';
+import {
+  ensureDispatchItem,
+  isDispatchItemSent,
+  markDispatchItemFailed,
+  markDispatchItemProcessing,
+  markDispatchItemSent,
+  markDispatchItemSkipped,
+  syncDispatchContactStatus,
+} from '../services/dispatchItems';
 import { addLog } from './logs';
 
 const router = express.Router();
@@ -1087,6 +1096,22 @@ async function processDevocionalDispatchManually(dispatchId: number): Promise<vo
           timezone
         );
 
+        const dispatchItem = await ensureDispatchItem({
+          dispatchId,
+          contactId: contact.id,
+          contactNumber: contact.phone_number,
+          contactName: contact.name,
+          messageType: 'devocional',
+          messageSnapshot: personalizedMessage,
+          maxAttempts: 1,
+        });
+
+        if (dispatchItem.status === 'sent' || (await isDispatchItemSent(dispatchId, contact.phone_number))) {
+          addLog('info', `[Devocional Manual ${dispatchId}] Item já sent — skip ${maskPhone(contact.phone_number)}`);
+          successCount++;
+          continue;
+        }
+
         let abortContact = false;
         await withGlobalOutboundGate(async () => {
           const blindageStartTime = Date.now();
@@ -1106,6 +1131,19 @@ async function processDevocionalDispatchManually(dispatchId: number): Promise<vo
               `[Devocional Manual ${dispatchId}] ⛔ Bloqueado pela blindagem: ${blindageResult.reason} — ${maskPhone(contact.phone_number)}`
             );
             failedCount++;
+            await markDispatchItemSkipped({
+              itemId: dispatchItem.id,
+              reason: `Blindagem: ${blindageResult.reason || 'bloqueado'}`,
+              instanceId: preferredInstanceId,
+            });
+            await syncDispatchContactStatus({
+              dispatchId,
+              contactNumber: contact.phone_number,
+              contactName: contact.name,
+              instanceId: preferredInstanceId,
+              status: 'failed',
+              failedReason: `Blindagem: ${blindageResult.reason || 'bloqueado'}`,
+            });
             if (pacing.rotateEveryN <= 0) {
               instanceIndex++;
             }
@@ -1142,6 +1180,13 @@ async function processDevocionalDispatchManually(dispatchId: number): Promise<vo
             addLog('warning', `[Devocional Manual ${dispatchId}] ⚠️ Nenhum delay configurado - envio imediato para ${maskPhone(contact.phone_number)}`);
           }
 
+          if (await isDispatchItemSent(dispatchId, contact.phone_number)) {
+            abortContact = true;
+            return;
+          }
+
+          await markDispatchItemProcessing(dispatchItem.id, instance.id);
+
           await pool.query(
             `UPDATE instances 
              SET last_message_sent_at = CURRENT_TIMESTAMP 
@@ -1154,7 +1199,7 @@ async function processDevocionalDispatchManually(dispatchId: number): Promise<vo
             number: contact.phone_number,
             text: personalizedMessage,
             messageType: 'devocional',
-            metadata: { dispatchId, contactId: contact.id, manual: true },
+            metadata: { dispatchId, contactId: contact.id, manual: true, dispatchItemId: dispatchItem.id },
           });
 
           const messageResult = await pool.query(
@@ -1182,20 +1227,19 @@ async function processDevocionalDispatchManually(dispatchId: number): Promise<vo
 
           await updateDevocionalScore(contact.id, 'sent');
 
-          await pool.query(
-            `INSERT INTO dispatch_contacts (
-              dispatch_id, instance_id, contact_number, contact_name,
-              message_sent_id, status, sent_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)`,
-            [
-              dispatchId,
-              instance.id,
-              contact.phone_number,
-              contact.name,
-              messageResult.rows[0].id,
-              'sent',
-            ]
-          );
+          await markDispatchItemSent({
+            itemId: dispatchItem.id,
+            providerMessageId: sendResult.messageId,
+            instanceId: instance.id,
+          });
+          await syncDispatchContactStatus({
+            dispatchId,
+            contactNumber: contact.phone_number,
+            contactName: contact.name,
+            instanceId: instance.id,
+            status: 'sent',
+            messageSentId: messageResult.rows[0].id,
+          });
 
           successCount++;
           const contactTotalMs = Date.now() - contactStartTime;
@@ -1236,9 +1280,23 @@ async function processDevocionalDispatchManually(dispatchId: number): Promise<vo
           `[Devocional Manual ${dispatchId}] ❌ Erro ao enviar para ${maskPhone(contact.phone_number)}: ${error.message || error}`
         );
         failedCount++;
-        // Só contar como falha se a mensagem foi realmente enviada mas falhou
-        // Se deu erro antes de enviar, não contar como falha de devocional
-        // (updateDevocionalScore só deve ser chamado quando a mensagem foi enviada mas não entregue/lida)
+        try {
+          await markDispatchItemFailed({
+            itemId: (
+              await ensureDispatchItem({
+                dispatchId,
+                contactId: contact.id,
+                contactNumber: contact.phone_number,
+                contactName: contact.name,
+                messageType: 'devocional',
+              })
+            ).id,
+            errorMessage: error.message || String(error),
+            errorCategory: 'send_error',
+          });
+        } catch {
+          /* ignore */
+        }
       }
     }
 

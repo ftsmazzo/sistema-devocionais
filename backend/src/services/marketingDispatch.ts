@@ -17,6 +17,15 @@ import {
   removeInstanceFromPool,
 } from './dispatchRetry';
 import { maskPhone, sendEvolutionTextSafely } from './evolutionSafeSender';
+import {
+  ensureDispatchItem,
+  isDispatchItemSent,
+  markDispatchItemFailed,
+  markDispatchItemProcessing,
+  markDispatchItemSent,
+  markDispatchItemSkipped,
+  syncDispatchContactStatus,
+} from './dispatchItems';
 
 /**
  * Serviço para processar disparos de marketing
@@ -224,10 +233,28 @@ export async function processMarketingDispatch(params: MarketingDispatchParams):
         instances.length
       );
       let instance = instances[preferredIdx];
+      let currentItemId: number | null = null;
       try {
-        console.log(`\n   📤 [${contactIndex}/${contacts.length}] Processando contato: ${contact.phone_number} (${contact.name || 'Sem nome'})`);
+        console.log(`\n   📤 [${contactIndex}/${contacts.length}] Processando contato: ${maskPhone(contact.phone_number)} (${contact.name || 'Sem nome'})`);
 
         const personalizedMessage = applyMessageTemplate(dispatch.message_template, contact.name);
+
+        const dispatchItem = await ensureDispatchItem({
+          dispatchId,
+          contactId: contact.id,
+          contactNumber: contact.phone_number,
+          contactName: contact.name,
+          messageType: 'marketing',
+          messageSnapshot: personalizedMessage,
+          maxAttempts: 1,
+        });
+        currentItemId = dispatchItem.id;
+
+        if (dispatchItem.status === 'sent' || (await isDispatchItemSent(dispatchId, contact.phone_number))) {
+          addLog('info', `[Marketing ${dispatchId}] Item já sent — skip ${maskPhone(contact.phone_number)}`);
+          successCount++;
+          continue;
+        }
 
         let abortContact = false;
         await withGlobalOutboundGate(async () => {
@@ -249,13 +276,19 @@ export async function processMarketingDispatch(params: MarketingDispatchParams):
             console.log(`      ${blockLog}`);
             addLog('warning', `[Marketing ${dispatchId}] ${blockLog} - Contato: ${maskPhone(contact.phone_number)}`);
             failedCount++;
-            try {
-              await pool.query(
-                `INSERT INTO dispatch_contacts (dispatch_id, instance_id, contact_number, contact_name, status, failed_reason)
-                 VALUES ($1, $2, $3, $4, 'failed', $5)`,
-                [dispatchId, instance.id, contact.phone_number, contact.name, `Blindagem: ${blindageResult.reason || 'bloqueado'}`.slice(0, 500)]
-              );
-            } catch (e) { /* ignore */ }
+            await markDispatchItemSkipped({
+              itemId: dispatchItem.id,
+              reason: `Blindagem: ${blindageResult.reason || 'bloqueado'}`,
+              instanceId: instance?.id,
+            });
+            await syncDispatchContactStatus({
+              dispatchId,
+              contactNumber: contact.phone_number,
+              contactName: contact.name,
+              instanceId: instance?.id,
+              status: 'failed',
+              failedReason: `Blindagem: ${blindageResult.reason || 'bloqueado'}`,
+            });
             if (pacing.rotateEveryN <= 0) {
               instanceIndex++;
             }
@@ -296,6 +329,13 @@ export async function processMarketingDispatch(params: MarketingDispatchParams):
             addLog('warning', `[Marketing ${dispatchId}] ${noDelayWarn}`);
           }
 
+          if (await isDispatchItemSent(dispatchId, contact.phone_number)) {
+            abortContact = true;
+            return;
+          }
+
+          await markDispatchItemProcessing(dispatchItem.id, instance.id);
+
           // CRÍTICO: Atualizar last_message_sent_at ANTES de enviar para que o próximo cálculo de delay seja correto
           // Isso garante que o delay global seja respeitado mesmo com rotação de instâncias
           await pool.query(
@@ -312,7 +352,7 @@ export async function processMarketingDispatch(params: MarketingDispatchParams):
             number: contact.phone_number,
             text: personalizedMessage,
             messageType: 'marketing',
-            metadata: { dispatchId, contactId: contact.id },
+            metadata: { dispatchId, contactId: contact.id, dispatchItemId: dispatchItem.id },
             media:
               mediaUrl && mediaType
                 ? { url: mediaUrl, type: String(mediaType) }
@@ -344,21 +384,19 @@ export async function processMarketingDispatch(params: MarketingDispatchParams):
             ]
           );
 
-          // Registrar no dispatch_contacts
-          await pool.query(
-            `INSERT INTO dispatch_contacts (
-              dispatch_id, instance_id, contact_number, contact_name,
-              message_sent_id, status, sent_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)`,
-            [
-              dispatchId,
-              instance.id,
-              contact.phone_number,
-              contact.name,
-              messageResult.rows[0].id,
-              'sent',
-            ]
-          );
+          await markDispatchItemSent({
+            itemId: dispatchItem.id,
+            providerMessageId: sendResult.messageId,
+            instanceId: instance.id,
+          });
+          await syncDispatchContactStatus({
+            dispatchId,
+            contactNumber: contact.phone_number,
+            contactName: contact.name,
+            instanceId: instance.id,
+            status: 'sent',
+            messageSentId: messageResult.rows[0].id,
+          });
 
           successCount++;
           const contactTotalTime = Date.now() - contactStartTime;
@@ -370,7 +408,7 @@ export async function processMarketingDispatch(params: MarketingDispatchParams):
           const progressLog = `📊 Progresso: ${successCount}/${contacts.length} enviados | Tempo médio: ${Math.ceil(avgTimePerContact)}ms | Estimativa restante: ~${estimatedRemaining}s`;
           console.log(`      ${successLog}`);
           console.log(`      ${progressLog}`);
-          addLog('success', `[Marketing ${dispatchId}] ${successLog} - Contato: ${contact.phone_number}`);
+          addLog('success', `[Marketing ${dispatchId}] ${successLog} - Contato: ${maskPhone(contact.phone_number)}`);
           addLog('info', `[Marketing ${dispatchId}] ${progressLog}`);
 
           // Atualizar última mensagem enviada da instância
@@ -395,7 +433,7 @@ export async function processMarketingDispatch(params: MarketingDispatchParams):
         await maybeDispatchPacingPause(pacing, successCount, `Marketing ${dispatchId}`);
 
       } catch (error: any) {
-        console.error(`   ❌ Erro ao enviar para ${contact.phone_number}:`, error.message);
+        console.error(`   ❌ Erro ao enviar para ${maskPhone(contact.phone_number)}:`, error.message);
         failedCount++;
         try {
           if (isInstanceConnectivityError(error)) {
@@ -407,6 +445,15 @@ export async function processMarketingDispatch(params: MarketingDispatchParams):
               notifyAdmin
             );
             instances = removeInstanceFromPool(instances, instance.id);
+            if (currentItemId) {
+              await markDispatchItemFailed({
+                itemId: currentItemId,
+                errorMessage: `Instância offline: ${error.message}`,
+                errorCategory: 'instance_offline',
+                instanceId: instance.id,
+                asPendingRetry: true,
+              });
+            }
             await enqueueDispatchRetry({
               dispatchId,
               instanceId: instance.id,
@@ -414,13 +461,24 @@ export async function processMarketingDispatch(params: MarketingDispatchParams):
               contactName: contact.name,
               failedReason: `Instância offline: ${error.message}`,
             });
-            addLog('info', `[Mensagem ${dispatchId}] ${contact.phone_number} — retry único enfileirado`);
+            addLog('info', `[Mensagem ${dispatchId}] ${maskPhone(contact.phone_number)} — retry único enfileirado`);
           } else {
-            await pool.query(
-              `INSERT INTO dispatch_contacts (dispatch_id, instance_id, contact_number, contact_name, status, failed_reason)
-               VALUES ($1, $2, $3, $4, 'failed', $5)`,
-              [dispatchId, instance.id, contact.phone_number, contact.name, (error.message || String(error)).slice(0, 500)]
-            );
+            if (currentItemId) {
+              await markDispatchItemFailed({
+                itemId: currentItemId,
+                errorMessage: error.message || String(error),
+                errorCategory: 'send_error',
+                instanceId: instance?.id,
+              });
+            }
+            await syncDispatchContactStatus({
+              dispatchId,
+              contactNumber: contact.phone_number,
+              contactName: contact.name,
+              instanceId: instance?.id,
+              status: 'failed',
+              failedReason: error.message || String(error),
+            });
           }
         } catch (e) { /* ignore */ }
       }
