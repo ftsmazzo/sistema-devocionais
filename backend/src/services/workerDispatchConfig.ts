@@ -69,8 +69,8 @@ export const WORKER_DISPATCH_PROFILES: Record<
   { label: string; description: string; values: Partial<WorkerDispatchConfigRow> }
 > = {
   simulacao: {
-    label: 'Simulação',
-    description: 'Worker ligado, sem envio real. Ideal para testar fila.',
+    label: 'Simulação segura',
+    description: 'Worker ligado, sem envio real.',
     values: {
       enabled: true,
       real_send_enabled: false,
@@ -85,7 +85,7 @@ export const WORKER_DISPATCH_PROFILES: Record<
     },
   },
   conservador: {
-    label: 'Conservador',
+    label: 'Conservador recomendado',
     description: 'Envio real com validação WA e delays altos.',
     values: {
       enabled: true,

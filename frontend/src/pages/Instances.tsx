@@ -487,7 +487,7 @@ export default function Instances() {
 
               {/* Card Footer Action */}
               <button
-                onClick={() => navigate('/blindage')}
+                onClick={() => navigate('/worker-config')}
                 style={{
                   width: '100%', padding: '16px', background: 'rgba(167, 139, 250, 0.05)', border: 'none',
                   borderTop: '1px solid var(--border)', color: '#a78bfa', fontWeight: 600, fontSize: '0.85rem',

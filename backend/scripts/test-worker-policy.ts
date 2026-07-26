@@ -71,7 +71,7 @@ function assert(cond: boolean, msg: string) {
   assert(r.can_send_real, 'cenário 4');
 }
 
-// 5) real + WA off mas todos validados → allowed
+// 5) real + WA off → blocked (mesmo com todos validados)
 {
   const r = evaluateOperationalPolicy({
     workerEnabled: true,
@@ -83,8 +83,9 @@ function assert(cond: boolean, msg: string) {
     allCurrentContactsValidated: true,
     hasConnectedInstance: true,
   });
-  assert(r.operational_mode === 'real_send', 'cenário 5: real_send com todos validados');
-  assert(r.can_send_real, 'cenário 5');
+  assert(r.operational_mode === 'blocked', 'cenário 5: esperava blocked sem validação WA');
+  assert(r.blocking_reasons.some((x) => x.code === 'WHATSAPP_VALIDATION_REQUIRED'), 'cenário 5: WA required');
+  assert(!r.can_send_real, 'cenário 5');
 }
 
 console.log('SUCESSO: política operacional do worker (5 cenários) OK — sem Evolution.');

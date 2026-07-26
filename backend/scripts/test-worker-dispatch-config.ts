@@ -136,6 +136,12 @@ async function main() {
   assert(getCachedEffectiveWorkerPolicy().real_send_enabled === true, 'cache atualizado');
   console.log('OK perfil conservador');
 
+  const mod = await applyWorkerDispatchProfile('moderado');
+  assert(mod.profile === 'moderado', 'perfil moderado');
+  assert(mod.worker_interval_ms === 20_000, 'moderado: interval');
+  assert(mod.min_delay_ms === 60_000, 'moderado: min delay');
+  console.log('OK perfil moderado');
+
   // Updates inválidos
   await expectUpdateError(
     { real_send_enabled: true, dry_run_enabled: true },

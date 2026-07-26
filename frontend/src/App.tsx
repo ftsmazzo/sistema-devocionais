@@ -3,7 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useAuthStore } from './store/authStore';
 import Login from './pages/Login';
 import Instances from './pages/Instances';
-import Blindage from './pages/Blindage';
+import WorkerConfig from './pages/WorkerConfig';
 import Contacts from './pages/Contacts';
 import Tags from './pages/Tags';
 import Lists from './pages/Lists';
@@ -63,8 +63,9 @@ function App() {
         <Route path="/receber-devocional" element={<LandingDevocional />} />
         <Route path="/login" element={<Login />} />
         <Route path="/" element={<PrivateRoute><Instances /></PrivateRoute>} />
-        <Route path="/blindage/:instanceId?" element={<PrivateRoute><Blindage /></PrivateRoute>} />
-        <Route path="/worker-config" element={<Navigate to="/blindage" replace />} />
+        <Route path="/worker-config" element={<PrivateRoute><WorkerConfig /></PrivateRoute>} />
+        <Route path="/blindage/:instanceId?" element={<Navigate to="/worker-config" replace />} />
+        <Route path="/blindage" element={<Navigate to="/worker-config" replace />} />
         <Route path="/contacts" element={<PrivateRoute><Contacts /></PrivateRoute>} />
         <Route path="/tags" element={<PrivateRoute><Tags /></PrivateRoute>} />
         <Route path="/lists" element={<PrivateRoute><Lists /></PrivateRoute>} />

@@ -78,11 +78,16 @@ router.post('/worker-config/profile', async (req: AuthRequest, res) => {
 });
 
 /**
- * Listar perfis de blindagem (Fase A — presets globais estilo MassFlow).
- * GET /api/blindage/profiles
+ * DEPRECATED (legado): rotas de regras blindage_rules / profiles.
+ * A UI oficial usa apenas /worker-config (GET/PUT/POST profile).
+ * Estes endpoints permanecem por compatibilidade de API, mas não devem ser usados pela tela.
  */
 router.get('/profiles', (_req: AuthRequest, res) => {
+  res.setHeader('Deprecation', 'true');
+  res.setHeader('Sunset', 'worker-config');
   res.json({
+    deprecated: true,
+    message: 'Use GET/PUT /api/blindage/worker-config e POST /api/blindage/worker-config/profile',
     profiles: BLINDAGE_PROFILES_META,
     profileIds: ['conservative', 'moderate', 'aggressive'],
     apply: { method: 'POST', path: '/api/blindage/profiles/apply', body: { profileId: 'moderate', dryRun: false } },

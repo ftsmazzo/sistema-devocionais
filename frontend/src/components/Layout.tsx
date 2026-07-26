@@ -28,7 +28,7 @@ const navSections = [
     label: 'WhatsApp',
     items: [
       { name: 'Instâncias', href: '/', icon: Smartphone },
-      { name: 'Configurações do Worker', href: '/blindage', icon: Settings },
+      { name: 'Configurações do Worker', href: '/worker-config', icon: Settings },
     ],
   },
   {

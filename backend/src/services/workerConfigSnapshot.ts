@@ -80,7 +80,7 @@ export function evaluateOperationalPolicy(input: {
   if (input.realSendEnabled && input.dryRunEnabled) {
     reasons.push({
       code: 'REAL_SEND_AND_DRY_RUN_ENABLED',
-      message: 'Envio real e simulação estão ligados ao mesmo tempo. Desligue um dos dois.',
+      message: 'Envio real e simulação não podem ficar ligados juntos',
     });
     return {
       operational_mode: 'invalid_config',
@@ -93,31 +93,35 @@ export function evaluateOperationalPolicy(input: {
   if (!input.workerEnabled) {
     reasons.push({
       code: 'WORKER_DISABLED',
-      message: 'Worker desligado. A fila não será processada.',
+      message: 'Worker desligado',
     });
   }
 
   if (!input.realSendEnabled && !input.dryRunEnabled) {
     reasons.push({
       code: 'SEND_MODE_OFF',
-      message: 'Nem envio real nem simulação estão ligados.',
+      message: 'Nem envio real nem simulação estão ligados',
     });
   }
 
   if (input.hasConnectedInstance === false) {
     reasons.push({
       code: 'NO_CONNECTED_INSTANCE',
-      message: 'Nenhuma instância WhatsApp conectada.',
+      message: 'Nenhuma instância WhatsApp conectada',
     });
   }
 
-  // Envio real exige validação automática OU todos os contatos do dispatch já validados
+  // Envio real: validação WA obrigatória; pendentes bloqueiam
   if (input.realSendEnabled && !input.dryRunEnabled) {
-    if (!waAutoOn && (hasPending || !input.allCurrentContactsValidated)) {
+    if (!waAutoOn) {
       reasons.push({
         code: 'WHATSAPP_VALIDATION_REQUIRED',
-        message:
-          'Validação WhatsApp automática desligada e há contatos pendentes. Ligue a validação ou valide todos antes do envio real.',
+        message: 'Validação WhatsApp está desligada',
+      });
+    } else if (hasPending || !input.allCurrentContactsValidated) {
+      reasons.push({
+        code: 'WHATSAPP_VALIDATION_REQUIRED',
+        message: 'Há contatos pendentes de validação',
       });
     }
   }
@@ -126,8 +130,9 @@ export function evaluateOperationalPolicy(input: {
     input.workerEnabled &&
     input.realSendEnabled &&
     !input.dryRunEnabled &&
-    (waAutoOn || input.allCurrentContactsValidated) &&
+    waAutoOn &&
     !hasPending &&
+    input.allCurrentContactsValidated &&
     input.hasConnectedInstance !== false &&
     !reasons.some((r) => r.code === 'WHATSAPP_VALIDATION_REQUIRED');
 
@@ -381,6 +386,7 @@ export async function getWorkerConfigSnapshot() {
       })),
     },
     path: 'dispatch_items → dispatchWorker → evolutionSafeSender → instance_send_guard → Evolution',
-    note: 'Alterações salvas no banco passam a valer no worker sem editar ENV (salvo override explícito).',
+    config_source: effective.source,
+    env_override_active: effective.locked_fields.length > 0,
   };
 }

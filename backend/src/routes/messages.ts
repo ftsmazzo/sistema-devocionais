@@ -1,162 +1,102 @@
+/**
+ * Envio avulso — NÃO é caminho de campanha.
+ * Por padrão bloqueado. Campanha usa: Disparos / personalizada / Operação Devocional → worker.
+ * Não usa applyBlindage.
+ */
 import express from 'express';
 import { pool } from '../database';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
-import { applyBlindage, recordBlindageSuccessfulSend } from '../services/blindage';
-import { withGlobalOutboundGate } from '../services/globalOutboundGate';
 import { sendEvolutionTextSafely } from '../services/evolutionSafeSender';
 
 const router = express.Router();
 
-// Todas as rotas requerem autenticação
 router.use(authenticateToken);
 
+function isDirectOperationalMessagesAllowed(): boolean {
+  const v = String(process.env.ALLOW_DIRECT_OPERATIONAL_MESSAGES || '').trim().toLowerCase();
+  return ['1', 'true', 'yes', 'on'].includes(v);
+}
+
 /**
- * Enviar mensagem com blindagem automática
  * POST /api/messages/send
- * 
- * Body:
- * {
- *   to: string (número do WhatsApp)
- *   message: string (texto da mensagem)
- *   instanceId?: number (opcional - instância preferida)
- *   messageType?: string (opcional - tipo: 'devocional', 'marketing', 'avulsa', etc.)
- * }
+ * Bloqueado por padrão (ALLOW_DIRECT_OPERATIONAL_MESSAGES=false).
+ * Se liberado via ENV, exige instanceId e envia só via evolutionSafeSender.
  */
 router.post('/send', async (req: AuthRequest, res) => {
   try {
-    const { to, message, instanceId, messageType } = req.body;
-
-    if (!to || !message) {
-      return res.status(400).json({ 
-        error: 'Campos obrigatórios: to, message' 
+    if (!isDirectOperationalMessagesAllowed()) {
+      return res.status(403).json({
+        error: 'Envio avulso desativado',
+        message:
+          'Use Disparos, Mensagens Personalizadas ou Operação Devocional. O worker é o caminho oficial de campanha.',
+        code: 'DIRECT_SEND_DISABLED',
+        allow_direct_operational_messages: false,
       });
     }
 
-    type SendOutcome =
-      | { kind: 'blocked'; reason?: string; blockedBy?: string }
-      | { kind: 'ok'; payload: Record<string, unknown> };
-
-    const outcome = await withGlobalOutboundGate(async (): Promise<SendOutcome> => {
-      const blindageResult = await applyBlindage({
-        to,
-        message,
-        instanceId,
-        messageType: messageType || 'avulsa',
+    const { to, message, instanceId, messageType } = req.body;
+    if (!to || !message) {
+      return res.status(400).json({ error: 'Campos obrigatórios: to, message' });
+    }
+    if (!instanceId) {
+      return res.status(400).json({
+        error: 'instanceId obrigatório para envio avulso (quando liberado)',
       });
+    }
 
-      if (!blindageResult.canSend) {
-        return {
-          kind: 'blocked',
-          reason: blindageResult.reason,
-          blockedBy: blindageResult.blockedBy,
-        };
-      }
-
-      if (blindageResult.delay && blindageResult.delay > 0) {
-        await new Promise(resolve => setTimeout(resolve, blindageResult.delay));
-      }
-
-      if (!blindageResult.selectedInstanceId) {
-        throw Object.assign(new Error('Nenhuma instância selecionada pela blindagem'), { statusCode: 400 });
-      }
-
-      const sendResult = await sendEvolutionTextSafely({
-        instanceId: blindageResult.selectedInstanceId,
-        number: to,
-        text: message,
-        messageType: messageType || 'avulsa',
-      });
-
-      const instanceRow = await pool.query(
-        `SELECT id, phone_number FROM instances WHERE id = $1`,
-        [sendResult.instanceId]
-      );
-      const instancePhone = instanceRow.rows[0]?.phone_number || 'unknown';
-
-      const messageResult = await pool.query(
-        `INSERT INTO messages (
-          instance_id, 
-          message_id, 
-          from_number, 
-          to_number, 
-          message_text, 
-          message_type,
-          from_me, 
-          status, 
-          timestamp
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-        RETURNING id`,
-        [
-          sendResult.instanceId,
-          sendResult.messageId,
-          instancePhone,
-          to,
-          message,
-          messageType || 'avulsa',
-          true,
-          'sent',
-          new Date(),
-        ]
-      );
-
-      await recordBlindageSuccessfulSend({
-        to,
-        message,
-        messageType: messageType || 'avulsa',
-      });
-
-      return {
-        kind: 'ok',
-        payload: {
-          success: true,
-          message: {
-            id: messageResult.rows[0].id,
-            instanceId: sendResult.instanceId,
-            to,
-            message,
-            status: 'sent',
-            evolutionResponse: sendResult.evolutionData,
-          },
-          blindage: {
-            delayApplied: blindageResult.delay || 0,
-            instanceSelected: blindageResult.selectedInstanceId,
-          },
-          sendGuard: {
-            waitedMs: sendResult.waitedMs,
-            delayAppliedMs: sendResult.delayAppliedMs,
-            sequenceNumber: sendResult.sequenceNumber,
-          },
-        },
-      };
+    const sendResult = await sendEvolutionTextSafely({
+      instanceId: Number(instanceId),
+      number: to,
+      text: message,
+      messageType: messageType || 'avulsa',
     });
 
-    if (outcome.kind === 'blocked') {
-      return res.status(403).json({
-        error: 'Mensagem bloqueada pela blindagem',
-        reason: outcome.reason,
-        blockedBy: outcome.blockedBy,
-      });
-    }
+    const instanceRow = await pool.query(`SELECT id, phone_number FROM instances WHERE id = $1`, [
+      sendResult.instanceId,
+    ]);
+    const instancePhone = instanceRow.rows[0]?.phone_number || 'unknown';
 
-    return res.json(outcome.payload);
+    const messageResult = await pool.query(
+      `INSERT INTO messages (
+        instance_id, message_id, from_number, to_number, message_text,
+        message_type, from_me, status, timestamp
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      RETURNING id`,
+      [
+        sendResult.instanceId,
+        sendResult.messageId,
+        instancePhone,
+        to,
+        message,
+        messageType || 'avulsa',
+        true,
+        'sent',
+        new Date(),
+      ]
+    );
+
+    return res.json({
+      success: true,
+      message: {
+        id: messageResult.rows[0].id,
+        instanceId: sendResult.instanceId,
+        to,
+        status: 'sent',
+      },
+      sendGuard: {
+        waitedMs: sendResult.waitedMs,
+        delayAppliedMs: sendResult.delayAppliedMs,
+        sequenceNumber: sendResult.sequenceNumber,
+      },
+    });
   } catch (error: any) {
-    console.error('Erro ao enviar mensagem:', error);
-
+    console.error('Erro ao enviar mensagem avulsa:', error);
     if (error.statusCode === 404) {
       return res.status(404).json({ error: error.message || 'Instância não encontrada' });
     }
     if (error.statusCode === 400) {
       return res.status(400).json({ error: error.message || 'Requisição inválida' });
     }
-
-    // Se a mensagem foi bloqueada pela blindagem, não é erro do sistema
-    if (error.response?.status === 403 && error.response?.data?.error?.includes('bloqueada')) {
-      return res.status(403).json({
-        error: 'Mensagem bloqueada pela blindagem',
-        reason: error.response.data.reason,
-      });
-    }
-
     res.status(500).json({
       error: 'Erro ao enviar mensagem',
       message: error.message,
