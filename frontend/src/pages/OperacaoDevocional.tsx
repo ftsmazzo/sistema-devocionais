@@ -16,12 +16,16 @@ import {
   Users,
 } from 'lucide-react';
 
-type OperationalMode = 'bloqueado' | 'dry_run' | 'envio_real';
+type OperationalMode = 'bloqueado' | 'dry_run' | 'envio_real' | 'config_invalida';
 
 interface StatusPayload {
   date: string;
   timezone: string;
   operational_mode: OperationalMode;
+  can_send_real?: boolean;
+  cannot_send_reasons?: Array<{ code: string; message: string }>;
+  pending_whatsapp_validation_count?: number;
+  status_label?: string;
   config: {
     enabled: boolean;
     dispatch_hour: number;
@@ -135,12 +139,14 @@ const modeLabel: Record<OperationalMode, string> = {
   bloqueado: 'Bloqueado',
   dry_run: 'Dry-run (sem Evolution)',
   envio_real: 'Envio real',
+  config_invalida: 'Configuração inválida',
 };
 
 const modeColor: Record<OperationalMode, string> = {
   bloqueado: '#ef4444',
   dry_run: '#f59e0b',
   envio_real: '#10b981',
+  config_invalida: '#f97316',
 };
 
 function pad2(n: number) {

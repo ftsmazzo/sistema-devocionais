@@ -270,13 +270,20 @@ async function validateDestination(item: DispatchItemRow): Promise<
         return { ok: false, reason: 'WHATSAPP_INVALID', category: 'WHATSAPP_INVALID' };
       }
     } else {
-      // Pendente sem auto-validate — não tratar como inexistente
+      // Pendente sem auto-validate — nunca enviar
       return {
         ok: false,
-        reason: 'WhatsApp pendente de validação (WHATSAPP_AUTO_VALIDATE_ON_WORKER=false)',
-        category: 'whatsapp_not_validated',
+        reason: 'WHATSAPP_VALIDATION_REQUIRED',
+        category: 'WHATSAPP_VALIDATION_REQUIRED',
       };
     }
+  } else {
+    // Sem contact_id não dá para garantir validação — bloquear envio real
+    return {
+      ok: false,
+      reason: 'WHATSAPP_VALIDATION_REQUIRED',
+      category: 'WHATSAPP_VALIDATION_REQUIRED',
+    };
   }
 
   return { ok: true };
@@ -330,12 +337,12 @@ export async function processClaimedDispatchItem(item: DispatchItemRow): Promise
     }
 
     await markDispatchItemSkipped({ itemId: item.id, reason: dest.reason });
-    if (dest.category === 'WHATSAPP_INVALID') {
+    if (dest.category === 'WHATSAPP_INVALID' || dest.category === 'WHATSAPP_VALIDATION_REQUIRED') {
       await pool.query(
         `UPDATE dispatch_items
-         SET error_category = 'WHATSAPP_INVALID', error_message = 'WHATSAPP_INVALID', updated_at = CURRENT_TIMESTAMP
+         SET error_category = $2, error_message = $3, updated_at = CURRENT_TIMESTAMP
          WHERE id = $1`,
-        [item.id]
+        [item.id, dest.category, dest.reason]
       );
     }
     await syncDispatchContactStatus({
@@ -365,6 +372,22 @@ export async function processClaimedDispatchItem(item: DispatchItemRow): Promise
   }
 
   // --- Dry-run / real-send gates (sem Evolution) ---
+  // Config inválida: real + dry-run juntos → nunca envia
+  if (isDispatchRealSendEnabled() && isDispatchDryRunEnabled()) {
+    await releaseDispatchItemToQueue({
+      itemId: item.id,
+      status: 'pending',
+      errorMessage: 'REAL_SEND_AND_DRY_RUN_ENABLED',
+      errorCategory: 'invalid_config',
+      backoffMinutes: 60,
+    });
+    addLog(
+      'error',
+      `[DispatchWorker] Item ${item.id} bloqueado: envio real e simulação ligados juntos`
+    );
+    return { outcome: 'deferred', realSendAttempted: false };
+  }
+
   if (!isDispatchRealSendEnabled()) {
     if (isDispatchDryRunEnabled()) {
       await releaseDispatchItemToQueue({

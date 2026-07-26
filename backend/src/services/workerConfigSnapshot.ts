@@ -1,12 +1,8 @@
 /**
- * Snapshot autenticado das configurações reais do motor de disparo.
+ * Política operacional do worker (linguagem de produto).
+ * ENV fica só em campos técnicos opcionais — não é a UI principal.
  *
- * Classificação por item:
- * - MANTER_SOMENTE_LEITURA: ENV ou estado de instance_send_guard (afeta worker/guard).
- * - MOVER_PARA_COMPATIBILIDADE: blindage_rules ainda usadas por applyBlindage (mensagens avulsas).
- * - REMOVER_DA_TELA / deprecated_or_inactive: não governa o caminho worker → evolutionSafeSender.
- *
- * Caminho real: dispatch_items → dispatchWorker → evolutionSafeSender → instance_send_guard → Evolution
+ * Caminho real: dispatch_items → dispatchWorker → evolutionSafeSender → instance_send_guard
  */
 import { pool } from '../database';
 import { getDispatchRuntimeSnapshot } from './dispatchRuntimeConfig';
@@ -15,44 +11,260 @@ import {
   getWhatsAppValidationBatchSize,
   isWhatsAppAutoValidateOnPrepare,
   isWhatsAppAutoValidateOnWorker,
+  resolveListAudience,
 } from './listAudienceResolver';
 
-export type ConfigClassification =
-  | 'MANTER_EDITAVEL'
-  | 'MANTER_SOMENTE_LEITURA'
-  | 'MOVER_PARA_COMPATIBILIDADE'
-  | 'REMOVER_DA_TELA';
+export type OperationalMode = 'blocked' | 'dry_run' | 'real_send' | 'invalid_config';
 
-export type ConfigSource = 'env' | 'database' | 'runtime';
+export type BlockingReasonCode =
+  | 'WORKER_DISABLED'
+  | 'SEND_MODE_OFF'
+  | 'REAL_SEND_AND_DRY_RUN_ENABLED'
+  | 'WHATSAPP_VALIDATION_REQUIRED'
+  | 'NO_CONNECTED_INSTANCE';
 
-export interface ConfigEntry {
-  key: string;
-  label: string;
-  value: string | number | boolean | null;
-  source: ConfigSource;
-  editable: boolean;
-  classification: ConfigClassification;
-  note?: string;
+export interface BlockingReason {
+  code: BlockingReasonCode;
+  message: string;
 }
 
-function envEntry(
-  key: string,
-  label: string,
-  value: string | number | boolean,
-  note?: string
-): ConfigEntry {
-  return {
-    key,
-    label,
-    value,
-    source: 'env',
-    editable: false,
-    classification: 'MANTER_SOMENTE_LEITURA',
-    note,
+export interface SafetyChecks {
+  worker_enabled: boolean;
+  real_send_enabled: boolean;
+  dry_run_enabled: boolean;
+  whatsapp_validation_on_prepare: boolean;
+  whatsapp_validation_on_worker: boolean;
+  has_pending_whatsapp_validation: boolean;
+  all_current_dispatch_contacts_validated: boolean;
+  pending_whatsapp_validation_count: number;
+}
+
+export interface EffectivePolicy {
+  min_delay_ms: number;
+  max_delay_ms: number;
+  send_timeout_ms: number;
+  worker_batch_size: number;
+  worker_interval_ms: number;
+  cooldowns: {
+    rate_limit_ms: number;
+    forbidden_ms: number;
+    server_error_ms: number;
+    network_ms: number;
+    default_ms: number;
   };
 }
 
-/** Regras de blindage_rules usadas por applyBlindage (não pelo worker de campanha). */
+/** Avaliação pura — usada por snapshot, operação e testes secos. */
+export function evaluateOperationalPolicy(input: {
+  workerEnabled: boolean;
+  realSendEnabled: boolean;
+  dryRunEnabled: boolean;
+  waValidateOnPrepare: boolean;
+  waValidateOnWorker: boolean;
+  pendingWhatsAppCount: number;
+  allCurrentContactsValidated: boolean;
+  hasConnectedInstance?: boolean;
+}): {
+  operational_mode: OperationalMode;
+  blocking_reasons: BlockingReason[];
+  can_send_real: boolean;
+  status_label: string;
+} {
+  const reasons: BlockingReason[] = [];
+  const waAutoOn = input.waValidateOnPrepare || input.waValidateOnWorker;
+  const hasPending = input.pendingWhatsAppCount > 0;
+
+  if (input.realSendEnabled && input.dryRunEnabled) {
+    reasons.push({
+      code: 'REAL_SEND_AND_DRY_RUN_ENABLED',
+      message: 'Envio real e simulação estão ligados ao mesmo tempo. Desligue um dos dois.',
+    });
+    return {
+      operational_mode: 'invalid_config',
+      blocking_reasons: reasons,
+      can_send_real: false,
+      status_label: 'Configuração inválida',
+    };
+  }
+
+  if (!input.workerEnabled) {
+    reasons.push({
+      code: 'WORKER_DISABLED',
+      message: 'Worker desligado. A fila não será processada.',
+    });
+  }
+
+  if (!input.realSendEnabled && !input.dryRunEnabled) {
+    reasons.push({
+      code: 'SEND_MODE_OFF',
+      message: 'Nem envio real nem simulação estão ligados.',
+    });
+  }
+
+  if (input.hasConnectedInstance === false) {
+    reasons.push({
+      code: 'NO_CONNECTED_INSTANCE',
+      message: 'Nenhuma instância WhatsApp conectada.',
+    });
+  }
+
+  // Envio real exige validação automática OU todos os contatos do dispatch já validados
+  if (input.realSendEnabled && !input.dryRunEnabled) {
+    if (!waAutoOn && (hasPending || !input.allCurrentContactsValidated)) {
+      reasons.push({
+        code: 'WHATSAPP_VALIDATION_REQUIRED',
+        message:
+          'Validação WhatsApp automática desligada e há contatos pendentes. Ligue a validação ou valide todos antes do envio real.',
+      });
+    }
+  }
+
+  const canSendReal =
+    input.workerEnabled &&
+    input.realSendEnabled &&
+    !input.dryRunEnabled &&
+    (waAutoOn || input.allCurrentContactsValidated) &&
+    !hasPending &&
+    input.hasConnectedInstance !== false &&
+    !reasons.some((r) => r.code === 'WHATSAPP_VALIDATION_REQUIRED');
+
+  if (!input.workerEnabled || (!input.realSendEnabled && !input.dryRunEnabled)) {
+    return {
+      operational_mode: 'blocked',
+      blocking_reasons: reasons,
+      can_send_real: false,
+      status_label: 'Bloqueado',
+    };
+  }
+
+  if (input.realSendEnabled && reasons.some((r) => r.code === 'WHATSAPP_VALIDATION_REQUIRED')) {
+    return {
+      operational_mode: 'blocked',
+      blocking_reasons: reasons,
+      can_send_real: false,
+      status_label: 'Bloqueado',
+    };
+  }
+
+  if (input.realSendEnabled && canSendReal) {
+    return {
+      operational_mode: 'real_send',
+      blocking_reasons: reasons.filter((r) => r.code === 'NO_CONNECTED_INSTANCE'), // still show instance if any
+      can_send_real: reasons.every((r) => r.code !== 'NO_CONNECTED_INSTANCE'),
+      status_label: 'Envio real pronto',
+    };
+  }
+
+  if (input.realSendEnabled && !canSendReal) {
+    return {
+      operational_mode: 'blocked',
+      blocking_reasons: reasons,
+      can_send_real: false,
+      status_label: 'Bloqueado',
+    };
+  }
+
+  // dry_run
+  return {
+    operational_mode: 'dry_run',
+    blocking_reasons: reasons.filter((r) => r.code !== 'SEND_MODE_OFF'),
+    can_send_real: false,
+    status_label: 'Simulação',
+  };
+}
+
+async function resolvePendingWhatsAppForDevocional(): Promise<{
+  pendingCount: number;
+  allValidated: boolean;
+  dispatchId: number | null;
+}> {
+  const configR = await pool.query(
+    `SELECT list_id, timezone FROM devocional_config ORDER BY id DESC LIMIT 1`
+  );
+  const config = configR.rows[0];
+  const timezone = config?.timezone || 'America/Sao_Paulo';
+  const dateYmd = new Intl.DateTimeFormat('en-CA', {
+    timeZone: timezone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date());
+
+  let pendingFromAudience = 0;
+  let eligibleValidated = 0;
+  let eligibleTotal = 0;
+
+  if (config?.list_id) {
+    try {
+      const audience = await resolveListAudience(config.list_id);
+      pendingFromAudience = audience.counts.needs_whatsapp_validation;
+      eligibleValidated = audience.counts.eligible_now;
+      eligibleTotal = audience.counts.eligible_now + audience.counts.needs_whatsapp_validation;
+    } catch {
+      /* lista inválida — ignora */
+    }
+  }
+
+  const devR = await pool.query(`SELECT id FROM devocionais WHERE date = $1 LIMIT 1`, [dateYmd]);
+  if (devR.rows.length === 0) {
+    return {
+      pendingCount: pendingFromAudience,
+      allValidated: pendingFromAudience === 0 && (eligibleTotal === 0 || eligibleValidated === eligibleTotal),
+      dispatchId: null,
+    };
+  }
+
+  const dispatchR = await pool.query(
+    `SELECT id FROM dispatches
+     WHERE dispatch_type = 'devocional'
+       AND devocional_id = $1
+       AND DATE(created_at AT TIME ZONE 'UTC' AT TIME ZONE $2) = $3
+     ORDER BY created_at DESC
+     LIMIT 1`,
+    [devR.rows[0].id, timezone, dateYmd]
+  );
+
+  if (dispatchR.rows.length === 0) {
+    return {
+      pendingCount: pendingFromAudience,
+      allValidated: pendingFromAudience === 0 && eligibleTotal > 0
+        ? eligibleValidated === eligibleTotal
+        : pendingFromAudience === 0,
+      dispatchId: null,
+    };
+  }
+
+  const dispatchId = dispatchR.rows[0].id as number;
+  const pendingItems = await pool.query(
+    `SELECT COUNT(*)::int AS c
+     FROM dispatch_items di
+     LEFT JOIN contacts c ON c.id = di.contact_id
+     WHERE di.dispatch_id = $1
+       AND di.status IN ('pending', 'pending_retry', 'processing', 'scheduled')
+       AND (
+         c.id IS NULL
+         OR c.whatsapp_validated IS DISTINCT FROM TRUE
+       )`,
+    [dispatchId]
+  );
+  const pendingInDispatch = pendingItems.rows[0]?.c ?? 0;
+
+  const openTotal = await pool.query(
+    `SELECT COUNT(*)::int AS c
+     FROM dispatch_items
+     WHERE dispatch_id = $1
+       AND status IN ('pending', 'pending_retry', 'processing', 'scheduled')`,
+    [dispatchId]
+  );
+  const open = openTotal.rows[0]?.c ?? 0;
+
+  return {
+    pendingCount: Math.max(pendingFromAudience, pendingInDispatch),
+    allValidated: pendingInDispatch === 0 && (open === 0 ? pendingFromAudience === 0 : true),
+    dispatchId,
+  };
+}
+
 const COMPAT_RULE_TYPES = new Set([
   'message_delay',
   'message_limit',
@@ -63,9 +275,7 @@ const COMPAT_RULE_TYPES = new Set([
   'number_validation',
   'instance_selection',
 ]);
-
-/** Presentes no banco/UI antiga, mas sem efeito no worker nem em applyBlindage. */
-const INACTIVE_FOR_WORKER_RULE_TYPES = new Set(['dispatch_pacing']);
+const INACTIVE_RULE_TYPES = new Set(['dispatch_pacing']);
 
 function parseConfig(config: unknown): Record<string, unknown> {
   if (config == null) return {};
@@ -85,75 +295,10 @@ function parseConfig(config: unknown): Record<string, unknown> {
 export async function getWorkerConfigSnapshot() {
   const runtime = getDispatchRuntimeSnapshot();
   const cadence = getEvolutionCadenceSnapshot();
+  const waPrepare = isWhatsAppAutoValidateOnPrepare();
+  const waWorker = isWhatsAppAutoValidateOnWorker();
 
-  const runtime_flags: ConfigEntry[] = [
-    envEntry('DISPATCH_WORKER_ENABLED', 'Worker ligado', runtime.workerEnabled),
-    envEntry('DISPATCH_REAL_SEND_ENABLED', 'Envio real', runtime.realSendEnabled),
-    envEntry('DISPATCH_DRY_RUN_ENABLED', 'Dry-run', runtime.dryRunEnabled),
-    envEntry('DISPATCH_WORKER_BATCH_SIZE', 'Tamanho do lote', runtime.batchSize, 'Itens claimados por tick'),
-    envEntry(
-      'DISPATCH_WORKER_INTERVAL_MS',
-      'Intervalo do worker (ms)',
-      runtime.intervalMs,
-      'Pausa entre ticks do worker'
-    ),
-  ];
-
-  const cadence_flags: ConfigEntry[] = [
-    envEntry('EVOLUTION_MIN_DELAY_MS', 'Delay mínimo entre envios (ms)', cadence.min_delay_ms),
-    envEntry('EVOLUTION_MAX_DELAY_MS', 'Delay máximo entre envios (ms)', cadence.max_delay_ms),
-    envEntry('EVOLUTION_SEND_TIMEOUT_MS', 'Timeout de envio (ms)', cadence.send_timeout_ms),
-    envEntry(
-      'EVOLUTION_COOLDOWN_RATE_LIMIT_MS',
-      'Cooldown após rate limit (ms)',
-      cadence.cooldown_rate_limit_ms
-    ),
-    envEntry(
-      'EVOLUTION_COOLDOWN_FORBIDDEN_MS',
-      'Cooldown após 403 (ms)',
-      cadence.cooldown_forbidden_ms
-    ),
-    envEntry('EVOLUTION_COOLDOWN_5XX_MS', 'Cooldown após 5xx (ms)', cadence.cooldown_5xx_ms),
-    envEntry(
-      'EVOLUTION_COOLDOWN_NETWORK_MS',
-      'Cooldown após erro de rede (ms)',
-      cadence.cooldown_network_ms
-    ),
-    envEntry(
-      'EVOLUTION_COOLDOWN_DEFAULT_MS',
-      'Cooldown padrão (ms)',
-      cadence.cooldown_default_ms
-    ),
-    envEntry(
-      'DISPATCH_WORKER_BATCH_SIZE',
-      'Limite por lote (worker)',
-      runtime.batchSize,
-      'Mesmo valor do runtime — worker não usa pacing de blindage_rules'
-    ),
-    envEntry(
-      'DISPATCH_WORKER_INTERVAL_MS',
-      'Pausa entre lotes/ticks (worker)',
-      runtime.intervalMs
-    ),
-  ];
-
-  const whatsapp_validation: ConfigEntry[] = [
-    envEntry(
-      'WHATSAPP_AUTO_VALIDATE_ON_PREPARE',
-      'Auto-validar no prepare',
-      isWhatsAppAutoValidateOnPrepare()
-    ),
-    envEntry(
-      'WHATSAPP_AUTO_VALIDATE_ON_WORKER',
-      'Auto-validar no worker',
-      isWhatsAppAutoValidateOnWorker()
-    ),
-    envEntry(
-      'WHATSAPP_VALIDATION_BATCH_SIZE',
-      'Tamanho do lote de validação',
-      getWhatsAppValidationBatchSize()
-    ),
-  ];
+  const pending = await resolvePendingWhatsAppForDevocional();
 
   const instances = await pool.query(
     `SELECT i.id, i.instance_name, i.name, i.status, i.health_status, i.phone_number,
@@ -163,26 +308,60 @@ export async function getWorkerConfigSnapshot() {
      LEFT JOIN instance_send_guard g ON g.instance_id = i.id
      ORDER BY i.id ASC`
   );
+  const connectedCount = instances.rows.filter((r) => r.status === 'connected').length;
 
-  const instance_guards = instances.rows.map((row) => ({
-    classification: 'MANTER_SOMENTE_LEITURA' as ConfigClassification,
-    source: 'database' as ConfigSource,
-    editable: false,
-    id: row.id,
-    instance_name: row.instance_name,
-    name: row.name,
-    status: row.status,
-    health_status: row.health_status,
-    phone_masked: row.phone_number ? maskPhone(row.phone_number) : null,
-    next_available_at: row.next_available_at,
-    last_sent_at: row.last_sent_at,
-    cooldown_until: row.cooldown_until,
-    daily_sent_count: row.daily_sent_count ?? 0,
-    hourly_sent_count: row.hourly_sent_count ?? 0,
-    violation_count: row.violation_count ?? 0,
-    // instance_send_guard não tem last_error — não inventar coluna
-    last_error: null as string | null,
-  }));
+  const safety_checks: SafetyChecks = {
+    worker_enabled: runtime.workerEnabled,
+    real_send_enabled: runtime.realSendEnabled,
+    dry_run_enabled: runtime.dryRunEnabled,
+    whatsapp_validation_on_prepare: waPrepare,
+    whatsapp_validation_on_worker: waWorker,
+    has_pending_whatsapp_validation: pending.pendingCount > 0,
+    all_current_dispatch_contacts_validated: pending.allValidated,
+    pending_whatsapp_validation_count: pending.pendingCount,
+  };
+
+  const policyEval = evaluateOperationalPolicy({
+    workerEnabled: runtime.workerEnabled,
+    realSendEnabled: runtime.realSendEnabled,
+    dryRunEnabled: runtime.dryRunEnabled,
+    waValidateOnPrepare: waPrepare,
+    waValidateOnWorker: waWorker,
+    pendingWhatsAppCount: pending.pendingCount,
+    allCurrentContactsValidated: pending.allValidated,
+    hasConnectedInstance: connectedCount > 0,
+  });
+
+  const effective_policy: EffectivePolicy = {
+    min_delay_ms: cadence.min_delay_ms,
+    max_delay_ms: cadence.max_delay_ms,
+    send_timeout_ms: cadence.send_timeout_ms,
+    worker_batch_size: runtime.batchSize,
+    worker_interval_ms: runtime.intervalMs,
+    cooldowns: {
+      rate_limit_ms: cadence.cooldown_rate_limit_ms,
+      forbidden_ms: cadence.cooldown_forbidden_ms,
+      server_error_ms: cadence.cooldown_5xx_ms,
+      network_ms: cadence.cooldown_network_ms,
+      default_ms: cadence.cooldown_default_ms,
+    },
+  };
+
+  const technical_details = {
+    note: 'Chaves internas (ENV). Não são a linguagem operacional.',
+    env_keys: [
+      { label: 'Worker', env_key: 'DISPATCH_WORKER_ENABLED', value: runtime.workerEnabled },
+      { label: 'Envio real', env_key: 'DISPATCH_REAL_SEND_ENABLED', value: runtime.realSendEnabled },
+      { label: 'Simulação', env_key: 'DISPATCH_DRY_RUN_ENABLED', value: runtime.dryRunEnabled },
+      { label: 'Lote', env_key: 'DISPATCH_WORKER_BATCH_SIZE', value: runtime.batchSize },
+      { label: 'Intervalo', env_key: 'DISPATCH_WORKER_INTERVAL_MS', value: runtime.intervalMs },
+      { label: 'Delay mín.', env_key: 'EVOLUTION_MIN_DELAY_MS', value: cadence.min_delay_ms },
+      { label: 'Delay máx.', env_key: 'EVOLUTION_MAX_DELAY_MS', value: cadence.max_delay_ms },
+      { label: 'Validação prepare', env_key: 'WHATSAPP_AUTO_VALIDATE_ON_PREPARE', value: waPrepare },
+      { label: 'Validação worker', env_key: 'WHATSAPP_AUTO_VALIDATE_ON_WORKER', value: waWorker },
+      { label: 'Lote validação', env_key: 'WHATSAPP_VALIDATION_BATCH_SIZE', value: getWhatsAppValidationBatchSize() },
+    ],
+  };
 
   const rulesResult = await pool.query(
     `SELECT br.id, br.rule_type, br.rule_name, br.enabled, br.instance_id, br.config,
@@ -192,56 +371,28 @@ export async function getWorkerConfigSnapshot() {
      ORDER BY br.instance_id NULLS FIRST, br.rule_type, br.id`
   );
 
-  const inherited_rules: Array<{
-    classification: ConfigClassification;
-    id: number;
-    rule_type: string;
-    rule_name: string;
-    enabled: boolean;
-    instance_id: number | null;
-    instance_name: string | null;
-    config_summary: Record<string, unknown>;
-    note: string;
-  }> = [];
-
-  const deprecated_or_inactive_rules: Array<{
-    classification: ConfigClassification;
-    id: number;
-    rule_type: string;
-    rule_name: string;
-    enabled: boolean;
-    note: string;
-  }> = [];
-
+  const inherited_rules = [];
+  const deprecated_or_inactive_rules = [];
   for (const row of rulesResult.rows) {
     const cfg = parseConfig(row.config);
-    // Evitar payload enorme: só chaves top-level
     const config_summary: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(cfg)) {
-      if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') {
-        config_summary[k] = v;
-      } else if (Array.isArray(v)) {
-        config_summary[k] = `array(${v.length})`;
-      } else if (v && typeof v === 'object') {
-        config_summary[k] = 'object';
-      }
+      if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') config_summary[k] = v;
+      else if (Array.isArray(v)) config_summary[k] = `array(${v.length})`;
+      else if (v && typeof v === 'object') config_summary[k] = 'object';
     }
-
-    if (INACTIVE_FOR_WORKER_RULE_TYPES.has(row.rule_type)) {
+    if (INACTIVE_RULE_TYPES.has(row.rule_type)) {
       deprecated_or_inactive_rules.push({
-        classification: 'REMOVER_DA_TELA',
         id: row.id,
         rule_type: row.rule_type,
         rule_name: row.rule_name,
         enabled: !!row.enabled,
-        note: 'Não aplicada pelo worker nem por applyBlindage no caminho de campanha. loadDispatchPacingRuntime existe, mas o worker não a chama.',
+        note: 'Sem efeito no worker de campanha.',
       });
       continue;
     }
-
     if (COMPAT_RULE_TYPES.has(row.rule_type)) {
       inherited_rules.push({
-        classification: 'MOVER_PARA_COMPATIBILIDADE',
         id: row.id,
         rule_type: row.rule_type,
         rule_name: row.rule_name,
@@ -249,36 +400,54 @@ export async function getWorkerConfigSnapshot() {
         instance_id: row.instance_id,
         instance_name: row.instance_name,
         config_summary,
-        note: 'Usada apenas se applyBlindage for chamado (ex.: mensagem avulsa). Não governa dispatchWorker → evolutionSafeSender.',
+        note: 'Só vale em mensagem avulsa (applyBlindage).',
       });
-      continue;
+    } else {
+      deprecated_or_inactive_rules.push({
+        id: row.id,
+        rule_type: row.rule_type,
+        rule_name: row.rule_name,
+        enabled: !!row.enabled,
+        note: 'Tipo não usado no motor novo.',
+      });
     }
-
-    deprecated_or_inactive_rules.push({
-      classification: 'REMOVER_DA_TELA',
-      id: row.id,
-      rule_type: row.rule_type,
-      rule_name: row.rule_name,
-      enabled: !!row.enabled,
-      note: 'Tipo de regra não reconhecido no motor novo de campanha.',
-    });
   }
 
   return {
-    path: 'dispatch_items → dispatchWorker → evolutionSafeSender → instance_send_guard → Evolution',
-    classification_legend: {
-      MANTER_EDITAVEL: 'Persistível e usada pelo worker/guard (nenhuma nesta tela — tudo ENV)',
-      MANTER_SOMENTE_LEITURA: 'Afeta worker/guard; vem de ENV ou estado no banco',
-      MOVER_PARA_COMPATIBILIDADE: 'blindage_rules ainda usadas por applyBlindage (avulsas)',
-      REMOVER_DA_TELA: 'Sem efeito no caminho real de campanha',
+    operational_mode: policyEval.operational_mode,
+    status_label: policyEval.status_label,
+    blocking_reasons: policyEval.blocking_reasons,
+    can_send_real: policyEval.can_send_real,
+    safety_checks,
+    effective_policy,
+    whatsapp_safety: {
+      validation_on_prepare: waPrepare,
+      validation_on_worker: waWorker,
+      pending_count: pending.pendingCount,
+      can_send_safely: policyEval.can_send_real || policyEval.operational_mode === 'dry_run',
+      all_current_dispatch_contacts_validated: pending.allValidated,
+      current_dispatch_id: pending.dispatchId,
     },
-    runtime: runtime_flags,
-    cadence: cadence_flags,
-    whatsapp_validation,
-    instances: instance_guards,
+    instances: {
+      connected_count: connectedCount,
+      items: instances.rows.map((row) => ({
+        id: row.id,
+        instance_name: row.instance_name,
+        name: row.name,
+        status: row.status,
+        health_status: row.health_status,
+        phone_masked: row.phone_number ? maskPhone(row.phone_number) : null,
+        next_available_at: row.next_available_at,
+        last_sent_at: row.last_sent_at,
+        cooldown_until: row.cooldown_until,
+        daily_sent_count: row.daily_sent_count ?? 0,
+        hourly_sent_count: row.hourly_sent_count ?? 0,
+        violation_count: row.violation_count ?? 0,
+      })),
+    },
     inherited_rules,
     deprecated_or_inactive_rules,
-    editable_count: 0,
-    note: 'Todas as flags operacionais do worker são ENV (redeploy). Não há edição fake nesta API.',
+    technical_details,
+    path: 'dispatch_items → dispatchWorker → evolutionSafeSender → instance_send_guard → Evolution',
   };
 }

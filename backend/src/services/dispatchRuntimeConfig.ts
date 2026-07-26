@@ -51,14 +51,19 @@ export function getDispatchWorkerIntervalMs(): number {
  * Bloqueia novo disparo se a configuração operacional for insegura/incompleta.
  */
 export function assertDispatchPipelineAllowed(): void {
+  if (isDispatchRealSendEnabled() && isDispatchDryRunEnabled()) {
+    throw new DispatchOperationalError(
+      'Configuração inválida: envio real e simulação (dry-run) estão ligados juntos. Desligue um dos dois.'
+    );
+  }
   if (!isDispatchWorkerEnabled()) {
     throw new DispatchOperationalError(
-      'Disparo bloqueado: DISPATCH_WORKER_ENABLED=false. O worker PostgreSQL é o único caminho de envio — ative-o para enfileirar disparos.'
+      'Disparo bloqueado: worker desligado. Ative o worker para enfileirar disparos.'
     );
   }
   if (!isDispatchRealSendEnabled() && !isDispatchDryRunEnabled()) {
     throw new DispatchOperationalError(
-      'Disparo bloqueado: envio real e dry-run estão desligados. Defina DISPATCH_REAL_SEND_ENABLED=true (produção) ou DISPATCH_DRY_RUN_ENABLED=true (simulação sem Evolution).'
+      'Disparo bloqueado: envio real e simulação estão desligados. Ative simulação ou envio real.'
     );
   }
 }

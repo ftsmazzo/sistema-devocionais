@@ -15,10 +15,12 @@ import { reconcileActiveJourneyForDate } from './journeyReconcile';
 import {
   autoValidateWhatsAppBatch,
   isWhatsAppAutoValidateOnPrepare,
+  isWhatsAppAutoValidateOnWorker,
   resolveListAudience,
 } from './listAudienceResolver';
 import { addLog } from '../routes/logs';
 import { normalizePhoneDigits } from '../utils/phoneNumber';
+import { evaluateOperationalPolicy } from './workerConfigSnapshot';
 
 function todayInTimezone(timezone: string): string {
   return new Intl.DateTimeFormat('en-CA', {
@@ -201,31 +203,78 @@ export async function getDevocionalOperationStatus() {
   if (!runtime.workerEnabled) {
     blocks.push({
       code: 'WORKER_OFF',
-      message: 'DISPATCH_WORKER_ENABLED=false — worker desligado; envio não processará a fila',
+      message: 'Worker desligado — a fila não será processada',
+    });
+  }
+  if (runtime.realSendEnabled && runtime.dryRunEnabled) {
+    blocks.push({
+      code: 'REAL_SEND_AND_DRY_RUN_ENABLED',
+      message: 'Envio real e simulação ligados juntos — configuração inválida',
     });
   }
   if (!runtime.realSendEnabled && !runtime.dryRunEnabled) {
     blocks.push({
       code: 'SEND_MODE_OFF',
-      message: 'Envio real e dry-run desligados — ative DISPATCH_REAL_SEND_ENABLED ou DISPATCH_DRY_RUN_ENABLED',
+      message: 'Nem envio real nem simulação estão ligados',
     });
   }
   if (connected.length === 0) {
     blocks.push({ code: 'NO_INSTANCE', message: 'Nenhuma instância WhatsApp conectada' });
   }
 
-  let operationalMode: 'bloqueado' | 'dry_run' | 'envio_real' = 'bloqueado';
-  if (runtime.workerEnabled && runtime.realSendEnabled) operationalMode = 'envio_real';
-  else if (runtime.workerEnabled && runtime.dryRunEnabled) operationalMode = 'dry_run';
+  const pendingWa = audienceSummary?.needs_whatsapp_validation ?? 0;
+  const eligibleNow = audienceSummary?.eligible_now ?? 0;
+  const allValidated = pendingWa === 0 && eligibleNow >= 0;
+  const waPrepare = isWhatsAppAutoValidateOnPrepare();
+  const waWorker = isWhatsAppAutoValidateOnWorker();
+
+  if (
+    runtime.realSendEnabled &&
+    !runtime.dryRunEnabled &&
+    !waPrepare &&
+    !waWorker &&
+    pendingWa > 0
+  ) {
+    blocks.push({
+      code: 'WHATSAPP_VALIDATION_REQUIRED',
+      message: `Validação WhatsApp desligada e ${pendingWa} contato(s) pendente(s)`,
+    });
+  }
+
+  const policy = evaluateOperationalPolicy({
+    workerEnabled: runtime.workerEnabled,
+    realSendEnabled: runtime.realSendEnabled,
+    dryRunEnabled: runtime.dryRunEnabled,
+    waValidateOnPrepare: waPrepare,
+    waValidateOnWorker: waWorker,
+    pendingWhatsAppCount: pendingWa,
+    allCurrentContactsValidated: allValidated && pendingWa === 0,
+    hasConnectedInstance: connected.length > 0,
+  });
+
+  let operationalMode: 'bloqueado' | 'dry_run' | 'envio_real' | 'config_invalida' = 'bloqueado';
+  if (policy.operational_mode === 'invalid_config') operationalMode = 'config_invalida';
+  else if (policy.operational_mode === 'real_send') operationalMode = 'envio_real';
+  else if (policy.operational_mode === 'dry_run') operationalMode = 'dry_run';
+  else operationalMode = 'bloqueado';
 
   const next = config
     ? computeNextDispatchAt(config.dispatch_hour ?? 6, config.dispatch_minute ?? 0, timezone)
     : null;
 
+  const cannot_send_reasons = policy.blocking_reasons.map((r) => ({
+    code: r.code,
+    message: r.message,
+  }));
+
   return {
     date: dateYmd,
     timezone,
     operational_mode: operationalMode,
+    can_send_real: policy.can_send_real,
+    cannot_send_reasons,
+    pending_whatsapp_validation_count: pendingWa,
+    status_label: policy.status_label,
     config: config
       ? {
           id: config.id,
