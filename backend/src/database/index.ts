@@ -1243,6 +1243,35 @@ export async function initializeDatabase() {
       CREATE INDEX IF NOT EXISTS idx_dispatch_items_instance ON dispatch_items(instance_id);
     `);
 
+    // ============================================
+    // Configuração persistente do worker (editável pela UI)
+    // ============================================
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS worker_dispatch_config (
+        id SERIAL PRIMARY KEY,
+        enabled BOOLEAN DEFAULT true,
+        real_send_enabled BOOLEAN DEFAULT false,
+        dry_run_enabled BOOLEAN DEFAULT true,
+        whatsapp_auto_validate_on_prepare BOOLEAN DEFAULT true,
+        whatsapp_auto_validate_on_worker BOOLEAN DEFAULT true,
+        whatsapp_validation_batch_size INTEGER DEFAULT 10,
+        min_delay_ms INTEGER DEFAULT 60000,
+        max_delay_ms INTEGER DEFAULT 120000,
+        send_timeout_ms INTEGER DEFAULT 20000,
+        worker_batch_size INTEGER DEFAULT 1,
+        worker_interval_ms INTEGER DEFAULT 30000,
+        cooldown_rate_limit_ms INTEGER DEFAULT 900000,
+        cooldown_forbidden_ms INTEGER DEFAULT 1800000,
+        cooldown_5xx_ms INTEGER DEFAULT 600000,
+        cooldown_network_ms INTEGER DEFAULT 300000,
+        cooldown_default_ms INTEGER DEFAULT 300000,
+        profile VARCHAR(50) DEFAULT 'conservador',
+        updated_by INTEGER NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
     console.log('✅ Tabelas criadas/verificadas');
   } finally {
     client.release();

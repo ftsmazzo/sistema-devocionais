@@ -3,6 +3,11 @@ import { pool } from '../database';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { createDefaultRules, reconcileBlindageRuleConfigs, applyBlindageGlobalProfile, BLINDAGE_PROFILES_META, getBlindageProfilePackage } from '../services/blindage';
 import { getWorkerConfigSnapshot } from '../services/workerConfigSnapshot';
+import {
+  applyWorkerDispatchProfile,
+  updateWorkerDispatchConfig,
+  WorkerConfigValidationError,
+} from '../services/workerDispatchConfig';
 
 const router = express.Router();
 
@@ -10,9 +15,8 @@ const router = express.Router();
 router.use(authenticateToken);
 
 /**
- * Configurações reais do motor de disparo (worker + guard).
+ * Configurações do worker (política efetiva + config editável).
  * GET /api/blindage/worker-config
- * Somente leitura — não chama Evolution.
  */
 router.get('/worker-config', async (_req: AuthRequest, res) => {
   try {
@@ -24,6 +28,52 @@ router.get('/worker-config', async (_req: AuthRequest, res) => {
       error: 'Erro ao carregar configurações do worker',
       message: error?.message || String(error),
     });
+  }
+});
+
+/**
+ * Salva configuração editável do worker.
+ * PUT /api/blindage/worker-config
+ */
+router.put('/worker-config', async (req: AuthRequest, res) => {
+  try {
+    await updateWorkerDispatchConfig(req.body || {}, req.user?.id ?? null);
+    const snapshot = await getWorkerConfigSnapshot();
+    res.json({
+      message: 'Configuração do worker salva',
+      ...snapshot,
+    });
+  } catch (error: any) {
+    if (error instanceof WorkerConfigValidationError) {
+      return res.status(400).json({ error: error.message });
+    }
+    console.error('Erro ao salvar worker-config:', error);
+    res.status(500).json({ error: 'Erro ao salvar configurações do worker', message: error?.message });
+  }
+});
+
+/**
+ * Aplica perfil seguro: simulacao | conservador | moderado
+ * POST /api/blindage/worker-config/profile
+ */
+router.post('/worker-config/profile', async (req: AuthRequest, res) => {
+  try {
+    const profileId = req.body?.profile || req.body?.profileId;
+    if (!profileId || typeof profileId !== 'string') {
+      return res.status(400).json({ error: 'Informe profile: simulacao | conservador | moderado' });
+    }
+    await applyWorkerDispatchProfile(profileId, req.user?.id ?? null);
+    const snapshot = await getWorkerConfigSnapshot();
+    res.json({
+      message: `Perfil "${profileId}" aplicado`,
+      ...snapshot,
+    });
+  } catch (error: any) {
+    if (error instanceof WorkerConfigValidationError) {
+      return res.status(400).json({ error: error.message });
+    }
+    console.error('Erro ao aplicar perfil worker:', error);
+    res.status(500).json({ error: 'Erro ao aplicar perfil', message: error?.message });
   }
 });
 

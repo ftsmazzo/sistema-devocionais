@@ -6,6 +6,7 @@ import { randomBytes } from 'crypto';
 import axios from 'axios';
 import { pool } from '../database';
 import { addLog } from '../routes/logs';
+import { getCachedEffectiveWorkerPolicy } from './workerDispatchConfig';
 
 export type EvolutionSendErrorKind =
   | 'rate_limit'
@@ -59,24 +60,18 @@ export interface SendEvolutionTextResult {
   sequenceNumber: number;
 }
 
-function envInt(name: string, fallback: number): number {
-  const raw = process.env[name];
-  if (raw == null || String(raw).trim() === '') return fallback;
-  const n = Number(raw);
-  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : fallback;
-}
-
 /** Defaults conservadores: 60–120s entre reservas da mesma instância */
 function getDelayBounds(): { minMs: number; maxMs: number } {
-  let minMs = envInt('EVOLUTION_MIN_DELAY_MS', 60_000);
-  let maxMs = envInt('EVOLUTION_MAX_DELAY_MS', 120_000);
+  const p = getCachedEffectiveWorkerPolicy();
+  let minMs = p.min_delay_ms || 60_000;
+  let maxMs = p.max_delay_ms || 120_000;
   if (minMs <= 0) minMs = 60_000;
   if (maxMs <= 0) maxMs = 120_000;
   if (maxMs < minMs) maxMs = minMs;
   return { minMs, maxMs };
 }
 
-/** Snapshot somente leitura da cadência efetiva do guard (ENV). Sem efeito colateral. */
+/** Snapshot da cadência efetiva (banco / fallback). Sem efeito colateral. */
 export function getEvolutionCadenceSnapshot(): {
   min_delay_ms: number;
   max_delay_ms: number;
@@ -87,16 +82,17 @@ export function getEvolutionCadenceSnapshot(): {
   cooldown_network_ms: number;
   cooldown_default_ms: number;
 } {
+  const p = getCachedEffectiveWorkerPolicy();
   const { minMs, maxMs } = getDelayBounds();
   return {
     min_delay_ms: minMs,
     max_delay_ms: maxMs,
-    send_timeout_ms: envInt('EVOLUTION_SEND_TIMEOUT_MS', 20_000),
-    cooldown_rate_limit_ms: envInt('EVOLUTION_COOLDOWN_RATE_LIMIT_MS', 15 * 60_000),
-    cooldown_forbidden_ms: envInt('EVOLUTION_COOLDOWN_FORBIDDEN_MS', 30 * 60_000),
-    cooldown_5xx_ms: envInt('EVOLUTION_COOLDOWN_5XX_MS', 10 * 60_000),
-    cooldown_network_ms: envInt('EVOLUTION_COOLDOWN_NETWORK_MS', 5 * 60_000),
-    cooldown_default_ms: envInt('EVOLUTION_COOLDOWN_DEFAULT_MS', 5 * 60_000),
+    send_timeout_ms: p.send_timeout_ms || 20_000,
+    cooldown_rate_limit_ms: p.cooldown_rate_limit_ms || 900_000,
+    cooldown_forbidden_ms: p.cooldown_forbidden_ms || 1_800_000,
+    cooldown_5xx_ms: p.cooldown_5xx_ms || 600_000,
+    cooldown_network_ms: p.cooldown_network_ms || 300_000,
+    cooldown_default_ms: p.cooldown_default_ms || 300_000,
   };
 }
 
@@ -128,18 +124,19 @@ function classifyHttpError(status: number | undefined, err: any): EvolutionSendE
 }
 
 function cooldownMsForKind(kind: EvolutionSendErrorKind): number {
+  const p = getCachedEffectiveWorkerPolicy();
   switch (kind) {
     case 'rate_limit':
-      return envInt('EVOLUTION_COOLDOWN_RATE_LIMIT_MS', 15 * 60_000);
+      return p.cooldown_rate_limit_ms || 900_000;
     case 'forbidden':
-      return envInt('EVOLUTION_COOLDOWN_FORBIDDEN_MS', 30 * 60_000);
+      return p.cooldown_forbidden_ms || 1_800_000;
     case 'provider_unavailable':
-      return envInt('EVOLUTION_COOLDOWN_5XX_MS', 10 * 60_000);
+      return p.cooldown_5xx_ms || 600_000;
     case 'timeout':
     case 'network':
-      return envInt('EVOLUTION_COOLDOWN_NETWORK_MS', 5 * 60_000);
+      return p.cooldown_network_ms || 300_000;
     default:
-      return envInt('EVOLUTION_COOLDOWN_DEFAULT_MS', 5 * 60_000);
+      return p.cooldown_default_ms || 300_000;
   }
 }
 
@@ -391,7 +388,7 @@ export async function sendEvolutionTextSafely(
 
   const evolutionApiUrl = process.env.EVOLUTION_API_URL || instance.api_url;
   const evolutionApiKey = process.env.EVOLUTION_API_KEY || instance.api_key;
-  const timeoutMs = envInt('EVOLUTION_SEND_TIMEOUT_MS', 20_000);
+  const timeoutMs = getCachedEffectiveWorkerPolicy().send_timeout_ms || 20_000;
 
   let sendUrl: string;
   let body: Record<string, unknown>;

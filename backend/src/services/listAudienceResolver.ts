@@ -10,33 +10,18 @@ import {
   applyWhatsAppValidationToContact,
   checkWhatsAppNumberDetailed,
 } from './whatsappValidation';
-
-function envFlag(name: string, defaultValue: boolean): boolean {
-  const raw = process.env[name];
-  if (raw == null || String(raw).trim() === '') return defaultValue;
-  const v = String(raw).trim().toLowerCase();
-  if (['1', 'true', 'yes', 'on'].includes(v)) return true;
-  if (['0', 'false', 'no', 'off'].includes(v)) return false;
-  return defaultValue;
-}
-
-function envInt(name: string, fallback: number): number {
-  const raw = process.env[name];
-  if (raw == null || String(raw).trim() === '') return fallback;
-  const n = Number(raw);
-  return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback;
-}
+import { getCachedEffectiveWorkerPolicy } from './workerDispatchConfig';
 
 export function isWhatsAppAutoValidateOnPrepare(): boolean {
-  return envFlag('WHATSAPP_AUTO_VALIDATE_ON_PREPARE', false);
+  return !!getCachedEffectiveWorkerPolicy().whatsapp_auto_validate_on_prepare;
 }
 
 export function isWhatsAppAutoValidateOnWorker(): boolean {
-  return envFlag('WHATSAPP_AUTO_VALIDATE_ON_WORKER', false);
+  return !!getCachedEffectiveWorkerPolicy().whatsapp_auto_validate_on_worker;
 }
 
 export function getWhatsAppValidationBatchSize(): number {
-  return envInt('WHATSAPP_VALIDATION_BATCH_SIZE', 10);
+  return Math.max(1, getCachedEffectiveWorkerPolicy().whatsapp_validation_batch_size || 10);
 }
 
 export type AudienceExclusionReason =

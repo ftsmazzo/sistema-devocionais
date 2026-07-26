@@ -1,5 +1,5 @@
 /**
- * Configurações do Worker — política operacional (não tabela de ENV).
+ * Configurações do Worker — editáveis (banco), com perfis seguros.
  */
 import { useCallback, useEffect, useState, type CSSProperties } from 'react';
 import api from '@/lib/api';
@@ -7,10 +7,10 @@ import Toast from '@/components/ui/Toast';
 import {
   AlertCircle,
   CheckCircle2,
-  ChevronDown,
-  ChevronRight,
   Clock,
+  Lock,
   RefreshCw,
+  Save,
   Server,
   Settings,
   Shield,
@@ -18,39 +18,39 @@ import {
 } from 'lucide-react';
 
 type OperationalMode = 'blocked' | 'dry_run' | 'real_send' | 'invalid_config';
+type ProfileId = 'simulacao' | 'conservador' | 'moderado' | string;
+
+interface EditableConfig {
+  enabled: boolean;
+  real_send_enabled: boolean;
+  dry_run_enabled: boolean;
+  whatsapp_auto_validate_on_prepare: boolean;
+  whatsapp_auto_validate_on_worker: boolean;
+  whatsapp_validation_batch_size: number;
+  min_delay_ms: number;
+  max_delay_ms: number;
+  send_timeout_ms: number;
+  worker_batch_size: number;
+  worker_interval_ms: number;
+  cooldown_rate_limit_ms: number;
+  cooldown_forbidden_ms: number;
+  cooldown_5xx_ms: number;
+  cooldown_network_ms: number;
+  cooldown_default_ms: number;
+  profile: ProfileId;
+  updated_at?: string;
+}
 
 interface WorkerConfigPayload {
   operational_mode: OperationalMode;
   status_label: string;
   blocking_reasons: Array<{ code: string; message: string }>;
   can_send_real: boolean;
-  safety_checks: {
-    worker_enabled: boolean;
-    real_send_enabled: boolean;
-    dry_run_enabled: boolean;
-    whatsapp_validation_on_prepare: boolean;
-    whatsapp_validation_on_worker: boolean;
-    has_pending_whatsapp_validation: boolean;
-    all_current_dispatch_contacts_validated: boolean;
-    pending_whatsapp_validation_count: number;
-  };
-  effective_policy: {
-    min_delay_ms: number;
-    max_delay_ms: number;
-    send_timeout_ms: number;
-    worker_batch_size: number;
-    worker_interval_ms: number;
-    cooldowns: {
-      rate_limit_ms: number;
-      forbidden_ms: number;
-      server_error_ms: number;
-      network_ms: number;
-      default_ms: number;
-    };
-  };
+  config: EditableConfig;
+  locked_fields?: string[];
+  source?: string;
+  profiles?: Array<{ id: string; label: string; description: string }>;
   whatsapp_safety: {
-    validation_on_prepare: boolean;
-    validation_on_worker: boolean;
     pending_count: number;
     can_send_safely: boolean;
     all_current_dispatch_contacts_validated: boolean;
@@ -62,19 +62,12 @@ interface WorkerConfigPayload {
       instance_name: string;
       status: string;
       next_available_at?: string | null;
-      last_sent_at?: string | null;
       cooldown_until?: string | null;
       daily_sent_count: number;
       hourly_sent_count: number;
-      violation_count: number;
-      phone_masked?: string | null;
     }>;
   };
-  inherited_rules?: Array<{ id: number; rule_type: string; rule_name: string; enabled: boolean; note: string }>;
-  deprecated_or_inactive_rules?: Array<{ id: number; rule_type: string; rule_name: string; note: string }>;
-  technical_details?: {
-    env_keys: Array<{ label: string; env_key: string; value: string | number | boolean }>;
-  };
+  note?: string;
 }
 
 const modeMeta: Record<OperationalMode, { color: string; label: string }> = {
@@ -84,11 +77,7 @@ const modeMeta: Record<OperationalMode, { color: string; label: string }> = {
   invalid_config: { color: '#f97316', label: 'Configuração inválida' },
 };
 
-function msLabel(ms: number): string {
-  if (ms >= 60_000) return `${Math.round(ms / 6000) / 10} min`;
-  if (ms >= 1000) return `${Math.round(ms / 100) / 10} s`;
-  return `${ms} ms`;
-}
+const PROFILE_ORDER: ProfileId[] = ['simulacao', 'conservador', 'moderado'];
 
 function formatTs(v?: string | null): string {
   if (!v) return '—';
@@ -99,30 +88,26 @@ function formatTs(v?: string | null): string {
   }
 }
 
-function OnOff({ on }: { on: boolean }) {
-  return (
-    <span style={{ fontWeight: 800, color: on ? '#34d399' : '#f87171', fontFamily: 'Outfit, sans-serif' }}>
-      {on ? 'Ligado' : 'Desligado'}
-    </span>
-  );
-}
-
-function Row({ label, value }: { label: string; value: React.ReactNode }) {
-  return (
-    <div
-      style={{
-        display: 'flex',
-        justifyContent: 'space-between',
-        gap: 12,
-        padding: '8px 0',
-        borderBottom: '1px solid rgba(255,255,255,0.05)',
-        fontSize: '0.85rem',
-      }}
-    >
-      <span style={{ color: 'var(--text-secondary)' }}>{label}</span>
-      <span style={{ color: 'var(--text-primary)', fontWeight: 600, textAlign: 'right' }}>{value}</span>
-    </div>
-  );
+function defaultForm(): EditableConfig {
+  return {
+    enabled: true,
+    real_send_enabled: false,
+    dry_run_enabled: true,
+    whatsapp_auto_validate_on_prepare: true,
+    whatsapp_auto_validate_on_worker: true,
+    whatsapp_validation_batch_size: 10,
+    min_delay_ms: 60_000,
+    max_delay_ms: 120_000,
+    send_timeout_ms: 20_000,
+    worker_batch_size: 1,
+    worker_interval_ms: 30_000,
+    cooldown_rate_limit_ms: 900_000,
+    cooldown_forbidden_ms: 1_800_000,
+    cooldown_5xx_ms: 600_000,
+    cooldown_network_ms: 300_000,
+    cooldown_default_ms: 300_000,
+    profile: 'conservador',
+  };
 }
 
 const sectionStyle: CSSProperties = {
@@ -133,49 +118,214 @@ const sectionStyle: CSSProperties = {
   background: 'rgba(255,255,255,0.02)',
 };
 
+const inputStyle: CSSProperties = {
+  width: '100%',
+  maxWidth: 160,
+  padding: '8px 10px',
+  borderRadius: 8,
+  border: '1px solid var(--border)',
+  background: 'rgba(0,0,0,0.25)',
+  color: 'var(--text-primary)',
+  fontSize: '0.85rem',
+};
+
+function ToggleRow({
+  label,
+  checked,
+  onChange,
+  locked,
+}: {
+  label: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  locked?: boolean;
+}) {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        gap: 12,
+        padding: '10px 0',
+        borderBottom: '1px solid rgba(255,255,255,0.05)',
+      }}
+    >
+      <div>
+        <div style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--text-primary)' }}>{label}</div>
+        {locked && (
+          <div style={{ fontSize: '0.72rem', color: '#fbbf24', display: 'flex', alignItems: 'center', gap: 4, marginTop: 2 }}>
+            <Lock size={12} /> Este valor está travado pelo ambiente
+          </div>
+        )}
+      </div>
+      <label className="toggle" style={{ opacity: locked ? 0.5 : 1 }}>
+        <input
+          type="checkbox"
+          checked={checked}
+          disabled={locked}
+          onChange={(e) => onChange(e.target.checked)}
+        />
+        <span className="toggle-slider" />
+      </label>
+    </div>
+  );
+}
+
+function NumberRow({
+  label,
+  value,
+  onChange,
+  locked,
+  disabled,
+  hint,
+}: {
+  label: string;
+  value: number;
+  onChange: (v: number) => void;
+  locked?: boolean;
+  disabled?: boolean;
+  hint?: string;
+}) {
+  const readOnly = locked || disabled;
+  return (
+    <div
+      style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        gap: 12,
+        padding: '10px 0',
+        borderBottom: '1px solid rgba(255,255,255,0.05)',
+        flexWrap: 'wrap',
+      }}
+    >
+      <div style={{ flex: 1, minWidth: 160 }}>
+        <div style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--text-primary)' }}>{label}</div>
+        {hint && <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: 2 }}>{hint}</div>}
+        {locked && (
+          <div style={{ fontSize: '0.72rem', color: '#fbbf24', display: 'flex', alignItems: 'center', gap: 4, marginTop: 2 }}>
+            <Lock size={12} /> Este valor está travado pelo ambiente
+          </div>
+        )}
+      </div>
+      <input
+        type="number"
+        style={{ ...inputStyle, opacity: readOnly ? 0.55 : 1 }}
+        value={value}
+        disabled={readOnly}
+        onChange={(e) => onChange(Number(e.target.value))}
+      />
+    </div>
+  );
+}
+
 export default function Blindage() {
   const [data, setData] = useState<WorkerConfigPayload | null>(null);
+  const [form, setForm] = useState<EditableConfig>(defaultForm);
   const [loading, setLoading] = useState(true);
-  const [techOpen, setTechOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [applyingProfile, setApplyingProfile] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
-  const load = useCallback(async (silent?: boolean) => {
-    try {
-      if (!silent) setLoading(true);
-      const { data: payload } = await api.get('/blindage/worker-config');
-      setData(payload);
-    } catch (error: any) {
-      setToast({
-        type: 'error',
-        message: error.response?.data?.message || error.response?.data?.error || 'Erro ao carregar',
-      });
-    } finally {
-      if (!silent) setLoading(false);
+  const locked = new Set(data?.locked_fields || []);
+
+  const applyPayload = useCallback((payload: WorkerConfigPayload) => {
+    setData(payload);
+    if (payload.config) {
+      setForm({ ...defaultForm(), ...payload.config });
     }
   }, []);
+
+  const load = useCallback(
+    async (silent?: boolean) => {
+      try {
+        if (!silent) setLoading(true);
+        const { data: payload } = await api.get('/blindage/worker-config');
+        applyPayload(payload);
+      } catch (error: any) {
+        setToast({
+          type: 'error',
+          message: error.response?.data?.message || error.response?.data?.error || 'Erro ao carregar',
+        });
+      } finally {
+        if (!silent) setLoading(false);
+      }
+    },
+    [applyPayload]
+  );
 
   useEffect(() => {
     load();
   }, [load]);
 
+  const patch = <K extends keyof EditableConfig>(key: K, value: EditableConfig[K]) => {
+    setForm((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const save = async () => {
+    try {
+      setSaving(true);
+      const { data: payload } = await api.put('/blindage/worker-config', {
+        enabled: form.enabled,
+        real_send_enabled: form.real_send_enabled,
+        dry_run_enabled: form.dry_run_enabled,
+        whatsapp_auto_validate_on_prepare: form.whatsapp_auto_validate_on_prepare,
+        whatsapp_auto_validate_on_worker: form.whatsapp_auto_validate_on_worker,
+        whatsapp_validation_batch_size: form.whatsapp_validation_batch_size,
+        min_delay_ms: form.min_delay_ms,
+        max_delay_ms: form.max_delay_ms,
+        send_timeout_ms: form.send_timeout_ms,
+        worker_batch_size: 1,
+        worker_interval_ms: form.worker_interval_ms,
+        cooldown_rate_limit_ms: form.cooldown_rate_limit_ms,
+        cooldown_forbidden_ms: form.cooldown_forbidden_ms,
+        cooldown_5xx_ms: form.cooldown_5xx_ms,
+        cooldown_network_ms: form.cooldown_network_ms,
+        cooldown_default_ms: form.cooldown_default_ms,
+      });
+      applyPayload(payload);
+      setToast({ type: 'success', message: 'Configuração salva. O worker passa a usar estes valores.' });
+    } catch (error: any) {
+      setToast({
+        type: 'error',
+        message: error.response?.data?.error || error.response?.data?.message || 'Erro ao salvar',
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const applyProfile = async (profile: string) => {
+    try {
+      setApplyingProfile(profile);
+      const { data: payload } = await api.post('/blindage/worker-config/profile', { profile });
+      applyPayload(payload);
+      setToast({ type: 'success', message: `Perfil "${profile}" aplicado` });
+    } catch (error: any) {
+      setToast({
+        type: 'error',
+        message: error.response?.data?.error || error.response?.data?.message || 'Erro ao aplicar perfil',
+      });
+    } finally {
+      setApplyingProfile(null);
+    }
+  };
+
   if (loading && !data) {
-    return <div style={{ padding: 32, color: 'var(--text-secondary)' }}>Carregando política do worker…</div>;
+    return <div style={{ padding: 32, color: 'var(--text-secondary)' }}>Carregando configurações do worker…</div>;
   }
 
   const mode = data?.operational_mode || 'blocked';
   const meta = modeMeta[mode];
-  const s = data?.safety_checks;
-  const alerts: string[] = [];
-  if (s?.real_send_enabled && s?.dry_run_enabled) {
-    alerts.push('Envio real e simulação estão ligados juntos — configuração inválida.');
-  }
-  if (!s?.worker_enabled) alerts.push('Worker desligado.');
-  if (!s?.whatsapp_validation_on_prepare && !s?.whatsapp_validation_on_worker) {
-    alerts.push('Validação WhatsApp automática desligada.');
-  }
-  if (s?.has_pending_whatsapp_validation) {
-    alerts.push(`${s.pending_whatsapp_validation_count} contato(s) pendente(s) de validação WhatsApp.`);
-  }
+  const currentProfile = form.profile || data?.config?.profile || 'custom';
+  const profileMeta = (data?.profiles || []).reduce<Record<string, { label: string; description: string }>>(
+    (acc, p) => {
+      acc[p.id] = { label: p.label, description: p.description };
+      return acc;
+    },
+    {}
+  );
 
   return (
     <div style={{ maxWidth: 880 }}>
@@ -201,36 +351,75 @@ export default function Blindage() {
               Configurações do Worker
             </h1>
             <p style={{ margin: '4px 0 0', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-              Política operacional do motor de envio
+              Alterações afetam o worker sem precisar editar ENV
             </p>
           </div>
         </div>
-        <button type="button" className="btn-secondary" onClick={() => load()} style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-          <RefreshCw size={16} /> Atualizar
-        </button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button type="button" className="btn-secondary" onClick={() => load()} style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+            <RefreshCw size={16} /> Atualizar
+          </button>
+          <button
+            type="button"
+            className="btn-primary"
+            disabled={saving}
+            onClick={save}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}
+          >
+            <Save size={16} /> {saving ? 'Salvando…' : 'Salvar'}
+          </button>
+        </div>
       </div>
 
-      {/* Status geral */}
+      {/* Topo: perfil + status + botões */}
       <div style={{ ...sectionStyle, borderColor: `${meta.color}55` }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-          {mode === 'real_send' ? <CheckCircle2 size={22} color={meta.color} /> : <ShieldAlert size={22} color={meta.color} />}
-          <span style={{ fontSize: '1.2rem', fontWeight: 800, color: meta.color, fontFamily: 'Outfit, sans-serif' }}>
-            {data?.status_label || meta.label}
-          </span>
+        <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', gap: 12, marginBottom: 12 }}>
+          <div>
+            <div style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 4 }}>
+              Perfil atual
+            </div>
+            <div style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--text-primary)', fontFamily: 'Outfit, sans-serif' }}>
+              {profileMeta[currentProfile]?.label || currentProfile}
+            </div>
+          </div>
+          <div style={{ textAlign: 'right' }}>
+            <div style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 4 }}>
+              Status operacional
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'flex-end' }}>
+              {mode === 'real_send' ? <CheckCircle2 size={20} color={meta.color} /> : <ShieldAlert size={20} color={meta.color} />}
+              <span style={{ fontSize: '1.05rem', fontWeight: 800, color: meta.color, fontFamily: 'Outfit, sans-serif' }}>
+                {data?.status_label || meta.label}
+              </span>
+            </div>
+          </div>
         </div>
-        <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-          Pode enviar com segurança (real):{' '}
-          <strong style={{ color: data?.can_send_real ? '#34d399' : '#f87171' }}>
-            {data?.can_send_real ? 'Sim' : 'Não'}
-          </strong>
+
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+          {PROFILE_ORDER.map((id) => {
+            const active = currentProfile === id;
+            return (
+              <button
+                key={id}
+                type="button"
+                className={active ? 'btn-primary' : 'btn-secondary'}
+                disabled={!!applyingProfile}
+                onClick={() => applyProfile(id)}
+                style={{ opacity: applyingProfile && applyingProfile !== id ? 0.6 : 1 }}
+                title={profileMeta[id]?.description}
+              >
+                {applyingProfile === id ? 'Aplicando…' : profileMeta[id]?.label || id}
+              </button>
+            );
+          })}
         </div>
       </div>
 
-      {alerts.length > 0 && (
+      {(data?.blocking_reasons || []).length > 0 && (
         <div style={{ marginBottom: 18, display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {alerts.map((a) => (
+          {(data?.blocking_reasons || []).map((r) => (
             <div
-              key={a}
+              key={r.code}
               style={{
                 display: 'flex',
                 gap: 10,
@@ -243,70 +432,157 @@ export default function Blindage() {
               }}
             >
               <AlertCircle size={16} style={{ flexShrink: 0, marginTop: 2 }} />
-              {a}
+              <span>
+                <strong>{r.code}</strong> — {r.message}
+              </span>
             </div>
           ))}
         </div>
       )}
 
-      {(data?.blocking_reasons || []).length > 0 && (
-        <div style={sectionStyle}>
-          <div style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 8 }}>
-            Motivos
-          </div>
-          {(data?.blocking_reasons || []).map((r) => (
-            <div key={r.code} style={{ fontSize: '0.85rem', color: '#fcd34d', marginBottom: 6 }}>
-              <strong>{r.code}</strong> — {r.message}
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Segurança WhatsApp */}
+      {/* Switches operacionais */}
       <div style={sectionStyle}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
           <Shield size={18} color="#fbbf24" />
           <h2 style={{ margin: 0, fontSize: '1rem', fontWeight: 800, color: 'var(--text-primary)', fontFamily: 'Outfit, sans-serif' }}>
-            Segurança WhatsApp
+            Operação
           </h2>
         </div>
-        <Row label="Validação no prepare" value={<OnOff on={!!data?.whatsapp_safety.validation_on_prepare} />} />
-        <Row label="Validação no worker" value={<OnOff on={!!data?.whatsapp_safety.validation_on_worker} />} />
-        <Row label="Pendentes WA no envio atual" value={data?.whatsapp_safety.pending_count ?? 0} />
-        <Row
-          label="Todos os elegíveis já validados"
-          value={data?.whatsapp_safety.all_current_dispatch_contacts_validated ? 'Sim' : 'Não'}
+        <ToggleRow label="Worker ligado" checked={form.enabled} locked={locked.has('enabled')} onChange={(v) => patch('enabled', v)} />
+        <ToggleRow
+          label="Envio real"
+          checked={form.real_send_enabled}
+          locked={locked.has('real_send_enabled')}
+          onChange={(v) => patch('real_send_enabled', v)}
         />
-        <Row
-          label="Pode enviar com segurança"
-          value={
-            <span style={{ color: data?.whatsapp_safety.can_send_safely ? '#34d399' : '#f87171', fontWeight: 800 }}>
-              {data?.whatsapp_safety.can_send_safely ? 'Sim' : 'Não'}
-            </span>
-          }
+        <ToggleRow
+          label="Dry-run (simulação)"
+          checked={form.dry_run_enabled}
+          locked={locked.has('dry_run_enabled')}
+          onChange={(v) => patch('dry_run_enabled', v)}
+        />
+        <ToggleRow
+          label="Validar WhatsApp no prepare"
+          checked={form.whatsapp_auto_validate_on_prepare}
+          locked={locked.has('whatsapp_auto_validate_on_prepare')}
+          onChange={(v) => patch('whatsapp_auto_validate_on_prepare', v)}
+        />
+        <ToggleRow
+          label="Validar WhatsApp no worker"
+          checked={form.whatsapp_auto_validate_on_worker}
+          locked={locked.has('whatsapp_auto_validate_on_worker')}
+          onChange={(v) => patch('whatsapp_auto_validate_on_worker', v)}
         />
       </div>
 
-      {/* Cadência */}
+      {/* Cadência / números */}
       <div style={sectionStyle}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
           <Clock size={18} color="#38bdf8" />
           <h2 style={{ margin: 0, fontSize: '1rem', fontWeight: 800, color: 'var(--text-primary)', fontFamily: 'Outfit, sans-serif' }}>
-            Cadência
+            Cadência e cooldowns
           </h2>
         </div>
-        <Row label="Delay mínimo" value={msLabel(data?.effective_policy.min_delay_ms ?? 0)} />
-        <Row label="Delay máximo" value={msLabel(data?.effective_policy.max_delay_ms ?? 0)} />
-        <Row label="Timeout de envio" value={msLabel(data?.effective_policy.send_timeout_ms ?? 0)} />
-        <Row label="Lote do worker" value={data?.effective_policy.worker_batch_size ?? '—'} />
-        <Row label="Intervalo do worker" value={msLabel(data?.effective_policy.worker_interval_ms ?? 0)} />
-        <Row label="Cooldown (rate limit)" value={msLabel(data?.effective_policy.cooldowns.rate_limit_ms ?? 0)} />
-        <Row label="Cooldown (403)" value={msLabel(data?.effective_policy.cooldowns.forbidden_ms ?? 0)} />
-        <Row label="Cooldown (erro servidor)" value={msLabel(data?.effective_policy.cooldowns.server_error_ms ?? 0)} />
-        <Row label="Cooldown (rede)" value={msLabel(data?.effective_policy.cooldowns.network_ms ?? 0)} />
+        <NumberRow
+          label="Lote de validação WhatsApp"
+          value={form.whatsapp_validation_batch_size}
+          locked={locked.has('whatsapp_validation_batch_size')}
+          onChange={(v) => patch('whatsapp_validation_batch_size', v)}
+        />
+        <NumberRow
+          label="Delay mínimo (ms)"
+          hint="Com envio real, mínimo 60000"
+          value={form.min_delay_ms}
+          locked={locked.has('min_delay_ms')}
+          onChange={(v) => patch('min_delay_ms', v)}
+        />
+        <NumberRow
+          label="Delay máximo (ms)"
+          value={form.max_delay_ms}
+          locked={locked.has('max_delay_ms')}
+          onChange={(v) => patch('max_delay_ms', v)}
+        />
+        <NumberRow
+          label="Timeout de envio (ms)"
+          value={form.send_timeout_ms}
+          locked={locked.has('send_timeout_ms')}
+          onChange={(v) => patch('send_timeout_ms', v)}
+        />
+        <NumberRow
+          label="Intervalo do worker (ms)"
+          value={form.worker_interval_ms}
+          locked={locked.has('worker_interval_ms')}
+          onChange={(v) => patch('worker_interval_ms', v)}
+        />
+        <NumberRow
+          label="Lote do worker"
+          hint="Fixo em 1 por enquanto"
+          value={1}
+          disabled
+          onChange={() => undefined}
+        />
+        <NumberRow
+          label="Cooldown rate limit (ms)"
+          value={form.cooldown_rate_limit_ms}
+          locked={locked.has('cooldown_rate_limit_ms')}
+          onChange={(v) => patch('cooldown_rate_limit_ms', v)}
+        />
+        <NumberRow
+          label="Cooldown 403 (ms)"
+          value={form.cooldown_forbidden_ms}
+          locked={locked.has('cooldown_forbidden_ms')}
+          onChange={(v) => patch('cooldown_forbidden_ms', v)}
+        />
+        <NumberRow
+          label="Cooldown 5xx (ms)"
+          value={form.cooldown_5xx_ms}
+          locked={locked.has('cooldown_5xx_ms')}
+          onChange={(v) => patch('cooldown_5xx_ms', v)}
+        />
+        <NumberRow
+          label="Cooldown rede (ms)"
+          value={form.cooldown_network_ms}
+          locked={locked.has('cooldown_network_ms')}
+          onChange={(v) => patch('cooldown_network_ms', v)}
+        />
+        <NumberRow
+          label="Cooldown padrão (ms)"
+          value={form.cooldown_default_ms}
+          locked={locked.has('cooldown_default_ms')}
+          onChange={(v) => patch('cooldown_default_ms', v)}
+        />
       </div>
 
-      {/* Instâncias */}
+      <div style={{ marginBottom: 18, display: 'flex', justifyContent: 'flex-end' }}>
+        <button
+          type="button"
+          className="btn-primary"
+          disabled={saving}
+          onClick={save}
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}
+        >
+          <Save size={16} /> {saving ? 'Salvando…' : 'Salvar'}
+        </button>
+      </div>
+
+      {/* Segurança / instâncias (leitura) */}
+      <div style={sectionStyle}>
+        <h2 style={{ margin: '0 0 8px', fontSize: '1rem', fontWeight: 800, color: 'var(--text-primary)', fontFamily: 'Outfit, sans-serif' }}>
+          Segurança WhatsApp (status)
+        </h2>
+        <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+          Pendentes: <strong>{data?.whatsapp_safety.pending_count ?? 0}</strong>
+          {' · '}
+          Elegíveis validados:{' '}
+          <strong>{data?.whatsapp_safety.all_current_dispatch_contacts_validated ? 'Sim' : 'Não'}</strong>
+          {' · '}
+          Pode enviar com segurança:{' '}
+          <strong style={{ color: data?.whatsapp_safety.can_send_safely ? '#34d399' : '#f87171' }}>
+            {data?.whatsapp_safety.can_send_safely ? 'Sim' : 'Não'}
+          </strong>
+        </p>
+      </div>
+
       <div style={sectionStyle}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
           <Server size={18} color="#a78bfa" />
@@ -345,61 +621,6 @@ export default function Blindage() {
           </div>
         )}
       </div>
-
-      {/* Herdadas (secundário) */}
-      {(data?.inherited_rules || []).length > 0 && (
-        <div style={{ ...sectionStyle, opacity: 0.85, borderStyle: 'dashed' }}>
-          <h2 style={{ margin: '0 0 8px', fontSize: '0.95rem', fontWeight: 700, color: 'var(--text-secondary)' }}>
-            Regras herdadas
-          </h2>
-          <p style={{ margin: '0 0 10px', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-            Só valem em mensagem avulsa — não governam o worker de campanha.
-          </p>
-          {(data?.inherited_rules || []).slice(0, 12).map((r) => (
-            <div key={r.id} style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 4 }}>
-              {r.rule_name} ({r.rule_type}) — {r.enabled ? 'ON' : 'OFF'}
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Detalhes técnicos */}
-      <button
-        type="button"
-        onClick={() => setTechOpen((v) => !v)}
-        style={{
-          width: '100%',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          padding: '12px 14px',
-          borderRadius: 10,
-          border: '1px solid rgba(255,255,255,0.08)',
-          background: 'transparent',
-          color: 'var(--text-muted)',
-          cursor: 'pointer',
-          fontSize: '0.82rem',
-          fontWeight: 600,
-        }}
-      >
-        {techOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-        Detalhes técnicos
-      </button>
-      {techOpen && (
-        <div style={{ ...sectionStyle, marginTop: 8 }}>
-          {(data?.technical_details?.env_keys || []).map((e) => (
-            <Row
-              key={e.env_key}
-              label={e.label}
-              value={
-                <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: '0.75rem' }}>
-                  {e.env_key} = {String(e.value)}
-                </span>
-              }
-            />
-          ))}
-        </div>
-      )}
     </div>
   );
 }

@@ -11,7 +11,8 @@
     "test:audience-classify": "tsx scripts/test-list-audience-classify.ts",
     "test:audience-resolver": "tsx scripts/test-list-audience-resolver.ts",
     "test:dispatch-completion": "tsx scripts/test-dispatch-completion.ts",
-    "test:worker-policy": "tsx scripts/test-worker-policy.ts"
+    "test:worker-policy": "tsx scripts/test-worker-policy.ts",
+    "test:worker-dispatch-config": "tsx scripts/test-worker-dispatch-config.ts"
   },
   "keywords": [
     "evolution-api",

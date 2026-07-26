@@ -1,7 +1,12 @@
 /**
- * Flags operacionais do pipeline de disparo (worker PostgreSQL).
- * Defaults seguros: tudo desligado.
+ * Flags operacionais do pipeline de disparo.
+ * Fonte efetiva: worker_dispatch_config (banco). ENV = fallback/override opcional.
  */
+import {
+  getCachedEffectiveWorkerPolicy,
+  getEffectiveWorkerPolicy,
+} from './workerDispatchConfig';
+
 export class DispatchOperationalError extends Error {
   readonly code = 'DISPATCH_CONFIG_BLOCKED';
 
@@ -11,40 +16,24 @@ export class DispatchOperationalError extends Error {
   }
 }
 
-function envFlag(name: string, defaultValue: boolean): boolean {
-  const raw = process.env[name];
-  if (raw == null || String(raw).trim() === '') return defaultValue;
-  const v = String(raw).trim().toLowerCase();
-  if (['1', 'true', 'yes', 'on'].includes(v)) return true;
-  if (['0', 'false', 'no', 'off'].includes(v)) return false;
-  return defaultValue;
-}
-
-function envInt(name: string, fallback: number): number {
-  const raw = process.env[name];
-  if (raw == null || String(raw).trim() === '') return fallback;
-  const n = Number(raw);
-  return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback;
-}
-
 export function isDispatchWorkerEnabled(): boolean {
-  return envFlag('DISPATCH_WORKER_ENABLED', false);
+  return !!getCachedEffectiveWorkerPolicy().enabled;
 }
 
 export function isDispatchRealSendEnabled(): boolean {
-  return envFlag('DISPATCH_REAL_SEND_ENABLED', false);
+  return !!getCachedEffectiveWorkerPolicy().real_send_enabled;
 }
 
 export function isDispatchDryRunEnabled(): boolean {
-  return envFlag('DISPATCH_DRY_RUN_ENABLED', false);
+  return !!getCachedEffectiveWorkerPolicy().dry_run_enabled;
 }
 
 export function getDispatchWorkerBatchSize(): number {
-  return envInt('DISPATCH_WORKER_BATCH_SIZE', 1);
+  return Math.max(1, getCachedEffectiveWorkerPolicy().worker_batch_size || 1);
 }
 
 export function getDispatchWorkerIntervalMs(): number {
-  return envInt('DISPATCH_WORKER_INTERVAL_MS', 30_000);
+  return Math.max(1000, getCachedEffectiveWorkerPolicy().worker_interval_ms || 30_000);
 }
 
 /**
@@ -53,19 +42,24 @@ export function getDispatchWorkerIntervalMs(): number {
 export function assertDispatchPipelineAllowed(): void {
   if (isDispatchRealSendEnabled() && isDispatchDryRunEnabled()) {
     throw new DispatchOperationalError(
-      'Configuração inválida: envio real e simulação (dry-run) estão ligados juntos. Desligue um dos dois.'
+      'Configuração inválida: envio real e simulação estão ligados juntos. Desligue um dos dois.'
     );
   }
   if (!isDispatchWorkerEnabled()) {
     throw new DispatchOperationalError(
-      'Disparo bloqueado: worker desligado. Ative o worker para enfileirar disparos.'
+      'Disparo bloqueado: worker desligado. Ative o worker nas Configurações do Worker.'
     );
   }
   if (!isDispatchRealSendEnabled() && !isDispatchDryRunEnabled()) {
     throw new DispatchOperationalError(
-      'Disparo bloqueado: envio real e simulação estão desligados. Ative simulação ou envio real.'
+      'Disparo bloqueado: envio real e simulação estão desligados. Ajuste nas Configurações do Worker.'
     );
   }
+}
+
+export async function assertDispatchPipelineAllowedAsync(): Promise<void> {
+  await getEffectiveWorkerPolicy();
+  assertDispatchPipelineAllowed();
 }
 
 export function getDispatchRuntimeSnapshot(): {
@@ -75,11 +69,12 @@ export function getDispatchRuntimeSnapshot(): {
   batchSize: number;
   intervalMs: number;
 } {
+  const p = getCachedEffectiveWorkerPolicy();
   return {
-    workerEnabled: isDispatchWorkerEnabled(),
-    realSendEnabled: isDispatchRealSendEnabled(),
-    dryRunEnabled: isDispatchDryRunEnabled(),
-    batchSize: getDispatchWorkerBatchSize(),
-    intervalMs: getDispatchWorkerIntervalMs(),
+    workerEnabled: !!p.enabled,
+    realSendEnabled: !!p.real_send_enabled,
+    dryRunEnabled: !!p.dry_run_enabled,
+    batchSize: Math.max(1, p.worker_batch_size || 1),
+    intervalMs: Math.max(1000, p.worker_interval_ms || 30_000),
   };
 }

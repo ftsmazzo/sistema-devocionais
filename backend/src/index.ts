@@ -25,6 +25,7 @@ import {
   startDispatchWorker,
   getDispatchRuntimeSnapshot,
 } from './services/dispatchWorker';
+import { refreshWorkerDispatchConfigCache } from './services/workerDispatchConfig';
 
 dotenv.config();
 
@@ -117,6 +118,9 @@ async function start() {
   try {
     await initializeDatabase();
     console.log('✅ Banco de dados inicializado');
+
+    await refreshWorkerDispatchConfigCache();
+    console.log('✅ Configuração efetiva do worker carregada (banco)');
     
     // Criar regras globais de blindagem padrão se não existirem
     await createGlobalDefaultRules();
@@ -168,7 +172,7 @@ async function start() {
         );
       } else {
         console.log(
-          '⚙️ DispatchWorker DISABLED (DISPATCH_WORKER_ENABLED=false) — novos disparos serão bloqueados até ativar o worker'
+          '⚙️ DispatchWorker DISABLED — ative nas Configurações do Worker'
         );
       }
     });

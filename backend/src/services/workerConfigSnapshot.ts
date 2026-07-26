@@ -8,11 +8,14 @@ import { pool } from '../database';
 import { getDispatchRuntimeSnapshot } from './dispatchRuntimeConfig';
 import { getEvolutionCadenceSnapshot, maskPhone } from './evolutionSafeSender';
 import {
-  getWhatsAppValidationBatchSize,
   isWhatsAppAutoValidateOnPrepare,
   isWhatsAppAutoValidateOnWorker,
   resolveListAudience,
 } from './listAudienceResolver';
+import {
+  getEffectiveWorkerPolicy,
+  listWorkerDispatchProfiles,
+} from './workerDispatchConfig';
 
 export type OperationalMode = 'blocked' | 'dry_run' | 'real_send' | 'invalid_config';
 
@@ -265,34 +268,8 @@ async function resolvePendingWhatsAppForDevocional(): Promise<{
   };
 }
 
-const COMPAT_RULE_TYPES = new Set([
-  'message_delay',
-  'message_limit',
-  'instance_rotation',
-  'allowed_hours',
-  'health_check',
-  'content_validation',
-  'number_validation',
-  'instance_selection',
-]);
-const INACTIVE_RULE_TYPES = new Set(['dispatch_pacing']);
-
-function parseConfig(config: unknown): Record<string, unknown> {
-  if (config == null) return {};
-  if (typeof config === 'string') {
-    try {
-      return JSON.parse(config);
-    } catch {
-      return {};
-    }
-  }
-  if (typeof config === 'object' && !Array.isArray(config)) {
-    return config as Record<string, unknown>;
-  }
-  return {};
-}
-
 export async function getWorkerConfigSnapshot() {
+  const effective = await getEffectiveWorkerPolicy();
   const runtime = getDispatchRuntimeSnapshot();
   const cadence = getEvolutionCadenceSnapshot();
   const waPrepare = isWhatsAppAutoValidateOnPrepare();
@@ -347,72 +324,6 @@ export async function getWorkerConfigSnapshot() {
     },
   };
 
-  const technical_details = {
-    note: 'Chaves internas (ENV). Não são a linguagem operacional.',
-    env_keys: [
-      { label: 'Worker', env_key: 'DISPATCH_WORKER_ENABLED', value: runtime.workerEnabled },
-      { label: 'Envio real', env_key: 'DISPATCH_REAL_SEND_ENABLED', value: runtime.realSendEnabled },
-      { label: 'Simulação', env_key: 'DISPATCH_DRY_RUN_ENABLED', value: runtime.dryRunEnabled },
-      { label: 'Lote', env_key: 'DISPATCH_WORKER_BATCH_SIZE', value: runtime.batchSize },
-      { label: 'Intervalo', env_key: 'DISPATCH_WORKER_INTERVAL_MS', value: runtime.intervalMs },
-      { label: 'Delay mín.', env_key: 'EVOLUTION_MIN_DELAY_MS', value: cadence.min_delay_ms },
-      { label: 'Delay máx.', env_key: 'EVOLUTION_MAX_DELAY_MS', value: cadence.max_delay_ms },
-      { label: 'Validação prepare', env_key: 'WHATSAPP_AUTO_VALIDATE_ON_PREPARE', value: waPrepare },
-      { label: 'Validação worker', env_key: 'WHATSAPP_AUTO_VALIDATE_ON_WORKER', value: waWorker },
-      { label: 'Lote validação', env_key: 'WHATSAPP_VALIDATION_BATCH_SIZE', value: getWhatsAppValidationBatchSize() },
-    ],
-  };
-
-  const rulesResult = await pool.query(
-    `SELECT br.id, br.rule_type, br.rule_name, br.enabled, br.instance_id, br.config,
-            i.instance_name
-     FROM blindage_rules br
-     LEFT JOIN instances i ON i.id = br.instance_id
-     ORDER BY br.instance_id NULLS FIRST, br.rule_type, br.id`
-  );
-
-  const inherited_rules = [];
-  const deprecated_or_inactive_rules = [];
-  for (const row of rulesResult.rows) {
-    const cfg = parseConfig(row.config);
-    const config_summary: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(cfg)) {
-      if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') config_summary[k] = v;
-      else if (Array.isArray(v)) config_summary[k] = `array(${v.length})`;
-      else if (v && typeof v === 'object') config_summary[k] = 'object';
-    }
-    if (INACTIVE_RULE_TYPES.has(row.rule_type)) {
-      deprecated_or_inactive_rules.push({
-        id: row.id,
-        rule_type: row.rule_type,
-        rule_name: row.rule_name,
-        enabled: !!row.enabled,
-        note: 'Sem efeito no worker de campanha.',
-      });
-      continue;
-    }
-    if (COMPAT_RULE_TYPES.has(row.rule_type)) {
-      inherited_rules.push({
-        id: row.id,
-        rule_type: row.rule_type,
-        rule_name: row.rule_name,
-        enabled: !!row.enabled,
-        instance_id: row.instance_id,
-        instance_name: row.instance_name,
-        config_summary,
-        note: 'Só vale em mensagem avulsa (applyBlindage).',
-      });
-    } else {
-      deprecated_or_inactive_rules.push({
-        id: row.id,
-        rule_type: row.rule_type,
-        rule_name: row.rule_name,
-        enabled: !!row.enabled,
-        note: 'Tipo não usado no motor novo.',
-      });
-    }
-  }
-
   return {
     operational_mode: policyEval.operational_mode,
     status_label: policyEval.status_label,
@@ -420,6 +331,30 @@ export async function getWorkerConfigSnapshot() {
     can_send_real: policyEval.can_send_real,
     safety_checks,
     effective_policy,
+    config: {
+      id: effective.id,
+      enabled: effective.enabled,
+      real_send_enabled: effective.real_send_enabled,
+      dry_run_enabled: effective.dry_run_enabled,
+      whatsapp_auto_validate_on_prepare: effective.whatsapp_auto_validate_on_prepare,
+      whatsapp_auto_validate_on_worker: effective.whatsapp_auto_validate_on_worker,
+      whatsapp_validation_batch_size: effective.whatsapp_validation_batch_size,
+      min_delay_ms: effective.min_delay_ms,
+      max_delay_ms: effective.max_delay_ms,
+      send_timeout_ms: effective.send_timeout_ms,
+      worker_batch_size: effective.worker_batch_size,
+      worker_interval_ms: effective.worker_interval_ms,
+      cooldown_rate_limit_ms: effective.cooldown_rate_limit_ms,
+      cooldown_forbidden_ms: effective.cooldown_forbidden_ms,
+      cooldown_5xx_ms: effective.cooldown_5xx_ms,
+      cooldown_network_ms: effective.cooldown_network_ms,
+      cooldown_default_ms: effective.cooldown_default_ms,
+      profile: effective.profile,
+      updated_at: effective.updated_at,
+    },
+    locked_fields: effective.locked_fields,
+    source: effective.source,
+    profiles: listWorkerDispatchProfiles(),
     whatsapp_safety: {
       validation_on_prepare: waPrepare,
       validation_on_worker: waWorker,
@@ -445,9 +380,7 @@ export async function getWorkerConfigSnapshot() {
         violation_count: row.violation_count ?? 0,
       })),
     },
-    inherited_rules,
-    deprecated_or_inactive_rules,
-    technical_details,
     path: 'dispatch_items → dispatchWorker → evolutionSafeSender → instance_send_guard → Evolution',
+    note: 'Alterações salvas no banco passam a valer no worker sem editar ENV (salvo override explícito).',
   };
 }
