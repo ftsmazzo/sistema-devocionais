@@ -5,6 +5,11 @@ import fs from 'fs';
 import { pool } from '../database';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { processMarketingDispatch } from '../services/marketingDispatch';
+import {
+  createAndEnqueuePersonalizadaDispatch,
+  isPersonalizadaDispatchType,
+  PersonalizadaDispatchError,
+} from '../services/personalizadaDispatch';
 import { executeDevocionalDispatch } from '../services/devocionalScheduler';
 import { personalizeDevocionalMessage, formatDevocionalMessage } from '../services/devocionalPersonalization';
 import { canReceiveDevocional } from '../services/devocionalScoring';
@@ -84,9 +89,43 @@ router.get('/', async (req: AuthRequest, res) => {
     const countResult = await pool.query(countQuery, countParams);
     const total = parseInt(countResult.rows[0]?.total || '0');
 
-    res.json({ 
-      dispatches: result.rows,
-      total
+    // Contadores de fila (dispatch_items) sem vazar mensagem/telefone completo
+    const ids = result.rows.map((r) => r.id);
+    let itemsByDispatch = new Map<number, { items_total: number; items_open: number; items_sent: number }>();
+    if (ids.length > 0) {
+      const itemStats = await pool.query(
+        `SELECT dispatch_id,
+                COUNT(*)::int AS items_total,
+                COUNT(*) FILTER (WHERE status IN ('pending','pending_retry','processing','scheduled'))::int AS items_open,
+                COUNT(*) FILTER (WHERE status = 'sent')::int AS items_sent
+         FROM dispatch_items
+         WHERE dispatch_id = ANY($1::int[])
+         GROUP BY dispatch_id`,
+        [ids]
+      );
+      itemsByDispatch = new Map(
+        itemStats.rows.map((r) => [
+          r.dispatch_id,
+          { items_total: r.items_total, items_open: r.items_open, items_sent: r.items_sent },
+        ])
+      );
+    }
+
+    res.json({
+      dispatches: result.rows.map((row) => {
+        const { message_template, ...rest } = row;
+        const preview =
+          message_template != null ? String(message_template).slice(0, 80) : null;
+        const iq = itemsByDispatch.get(row.id) || { items_total: 0, items_open: 0, items_sent: 0 };
+        return {
+          ...rest,
+          message_preview: preview,
+          items_total: iq.items_total,
+          items_open: iq.items_open,
+          items_sent: iq.items_sent,
+        };
+      }),
+      total,
     });
   } catch (error: any) {
     console.error('❌ Erro ao listar disparos:', error);
@@ -127,13 +166,76 @@ router.get('/:id/contacts', async (req: AuthRequest, res) => {
       [id]
     );
 
-    res.json({ contacts: result.rows });
+    res.json({
+      contacts: result.rows.map((row) => ({
+        id: row.id,
+        contact_name: row.contact_name,
+        contact_number_masked: maskPhone(row.contact_number),
+        status: row.status,
+        sent_at: row.sent_at,
+        failed_reason: row.failed_reason,
+      })),
+    });
   } catch (error: any) {
     console.error('❌ Erro ao listar contatos do disparo:', error);
     res.status(500).json({
       error: 'Erro ao listar contatos do disparo',
       message: error.message
     });
+  }
+});
+
+/**
+ * Itens da fila (dispatch_items) — sem telefone completo nem mensagem completa.
+ * GET /api/dispatches/:id/items
+ */
+router.get('/:id/items', async (req: AuthRequest, res) => {
+  try {
+    const { id } = req.params;
+    const dispatchCheck = await pool.query(`SELECT id FROM dispatches WHERE id = $1`, [id]);
+    if (dispatchCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Disparo não encontrado' });
+    }
+
+    const items = await pool.query(
+      `SELECT id, contact_name, contact_number, status, attempt_count,
+              error_category, scheduled_at, sent_at, created_at, updated_at
+       FROM dispatch_items
+       WHERE dispatch_id = $1
+       ORDER BY id ASC
+       LIMIT 500`,
+      [id]
+    );
+
+    const stats = await pool.query(
+      `SELECT
+         COUNT(*)::int AS total,
+         COUNT(*) FILTER (WHERE status IN ('pending','pending_retry','processing','scheduled'))::int AS open,
+         COUNT(*) FILTER (WHERE status = 'sent')::int AS sent,
+         COUNT(*) FILTER (WHERE status = 'failed')::int AS failed,
+         COUNT(*) FILTER (WHERE status = 'skipped')::int AS skipped
+       FROM dispatch_items WHERE dispatch_id = $1`,
+      [id]
+    );
+
+    res.json({
+      items: items.rows.map((row) => ({
+        id: row.id,
+        contact_name: row.contact_name,
+        contact_number_masked: maskPhone(row.contact_number),
+        status: row.status,
+        attempt_count: row.attempt_count,
+        error_category: row.error_category,
+        scheduled_at: row.scheduled_at,
+        sent_at: row.sent_at,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+      })),
+      stats: stats.rows[0],
+    });
+  } catch (error: any) {
+    console.error('❌ Erro ao listar itens do disparo:', error);
+    res.status(500).json({ error: 'Erro ao listar itens do disparo', message: error.message });
   }
 });
 
@@ -296,88 +398,79 @@ router.post('/devocional', async (req: AuthRequest, res) => {
 });
 
 /**
- * Criar disparo de Marketing
+ * Criar mensagem personalizada e enfileirar no pipeline oficial.
+ * POST /api/dispatches/personalizada
+ * Body: name, message_template, list_id | contact_ids, instance_ids?, media_url?, media_type?
+ * Não chama Evolution — só cria dispatch + dispatch_items.
+ */
+router.post('/personalizada', async (req: AuthRequest, res) => {
+  try {
+    const result = await createAndEnqueuePersonalizadaDispatch({
+      name: req.body?.name,
+      message_template: req.body?.message_template,
+      list_id: req.body?.list_id != null && req.body.list_id !== '' ? parseInt(String(req.body.list_id), 10) : null,
+      contact_ids: Array.isArray(req.body?.contact_ids) ? req.body.contact_ids.map(Number) : null,
+      instance_ids: Array.isArray(req.body?.instance_ids) ? req.body.instance_ids : [],
+      media_url: req.body?.media_url,
+      media_type: req.body?.media_type,
+      metadata: req.body?.metadata,
+      created_by: req.user?.id ?? null,
+      legacy_marketing: false,
+    });
+
+    res.status(201).json({
+      success: true,
+      ...result,
+    });
+  } catch (error: any) {
+    if (error instanceof PersonalizadaDispatchError) {
+      return res.status(error.status).json({
+        error: error.message,
+        audience: error.audience,
+        success: false,
+      });
+    }
+    console.error('❌ Erro ao criar mensagem personalizada:', error);
+    res.status(500).json({ error: 'Erro ao criar mensagem personalizada', message: error.message });
+  }
+});
+
+/**
+ * Alias legado: mesma operação que /personalizada (cria + enfileira).
  * POST /api/dispatches/marketing
  */
 router.post('/marketing', async (req: AuthRequest, res) => {
   try {
-    const { 
-      name, 
-      message_template, 
-      list_id, 
-      contact_ids,
-      instance_ids,
-      blindage_config,
-      metadata,
-      media_url,
-      media_type
-    } = req.body;
-    const userId = req.user?.id;
+    const result = await createAndEnqueuePersonalizadaDispatch({
+      name: req.body?.name,
+      message_template: req.body?.message_template,
+      list_id: req.body?.list_id != null && req.body.list_id !== '' ? parseInt(String(req.body.list_id), 10) : null,
+      contact_ids: Array.isArray(req.body?.contact_ids) ? req.body.contact_ids.map(Number) : null,
+      instance_ids: Array.isArray(req.body?.instance_ids) ? req.body.instance_ids : [],
+      media_url: req.body?.media_url,
+      media_type: req.body?.media_type,
+      metadata: req.body?.metadata,
+      created_by: req.user?.id ?? null,
+      legacy_marketing: true,
+    });
 
-    if (!name || !message_template) {
-      return res.status(400).json({ 
-        error: 'Campos obrigatórios: name, message_template' 
-      });
-    }
-
-    if (!list_id && (!contact_ids || contact_ids.length === 0)) {
-      return res.status(400).json({ 
-        error: 'É necessário fornecer list_id ou contact_ids' 
-      });
-    }
-
-    let totalContacts = 0;
-
-    // Se tem lista, buscar total
-    if (list_id) {
-      const listResult = await pool.query(
-        `SELECT total_contacts FROM contact_lists WHERE id = $1`,
-        [list_id]
-      );
-      if (listResult.rows.length > 0) {
-        totalContacts = listResult.rows[0].total_contacts || 0;
-      }
-    } else if (contact_ids) {
-      totalContacts = contact_ids.length;
-    }
-
-    // Criar disparo
-    const dispatchResult = await pool.query(
-      `INSERT INTO dispatches (
-        name, message_template, dispatch_type, list_id, contact_ids,
-        instance_ids, total_contacts, status, created_by, 
-        blindage_config, metadata
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-      RETURNING *`,
-      [
-        name,
-        message_template,
-        'marketing',
-        list_id || null,
-        contact_ids || null,
-        instance_ids || [],
-        totalContacts,
-        'pending',
-        userId,
-        JSON.stringify(blindage_config || {}),
-        JSON.stringify({
-          ...metadata,
-          media_url,
-          media_type
-        })
-      ]
-    );
-
-    res.json({ 
+    res.status(201).json({
       success: true,
-      dispatch: dispatchResult.rows[0],
-      message: 'Disparo de marketing criado com sucesso'
+      ...result,
+      message: result.message || 'Mensagem personalizada criada e enfileirada',
     });
   } catch (error: any) {
+    if (error instanceof PersonalizadaDispatchError) {
+      return res.status(error.status).json({
+        error: error.message,
+        audience: error.audience,
+        success: false,
+      });
+    }
     console.error('❌ Erro ao criar disparo de marketing:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       error: 'Erro ao criar disparo',
-      message: error.message 
+      message: error.message,
     });
   }
 });
@@ -406,7 +499,7 @@ router.put('/:id', async (req: AuthRequest, res) => {
 
     const userId = req.user?.id;
 
-    if (d.dispatch_type === 'marketing') {
+    if (isPersonalizadaDispatchType(d.dispatch_type)) {
       const { name, message_template, list_id, instance_ids, media_url, media_type } = req.body;
 
       const nextName = name !== undefined && name !== null ? String(name).trim() : d.name;
@@ -702,12 +795,12 @@ router.post('/:id/start', async (req: AuthRequest, res) => {
     }
 
     // Enfileirar itens em background (worker envia)
-    if (dispatch.dispatch_type === 'marketing') {
+    if (isPersonalizadaDispatchType(dispatch.dispatch_type)) {
       processMarketingDispatch({
         dispatchId: parseInt(id),
         instanceIds: dispatch.instance_ids || undefined,
       }).catch((error) => {
-        console.error(`❌ Erro ao enfileirar disparo de marketing ${id}:`, error);
+        console.error(`❌ Erro ao enfileirar disparo personalizada/marketing ${id}:`, error);
       });
     } else if (dispatch.dispatch_type === 'devocional') {
       processDevocionalDispatchManually(parseInt(id)).catch((error) => {

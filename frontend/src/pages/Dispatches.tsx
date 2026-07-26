@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import api from '@/lib/api';
 import {
   Send,
@@ -24,12 +25,16 @@ interface Dispatch {
   id: number;
   name: string;
   message_template?: string;
-  dispatch_type: 'devocional' | 'marketing' | 'individual';
+  message_preview?: string;
+  dispatch_type: 'devocional' | 'marketing' | 'personalizada' | 'individual';
   status: 'pending' | 'running' | 'completed' | 'stopped' | 'failed';
   total_contacts: number;
   contacts_processed: number;
   contacts_success: number;
   contacts_failed: number;
+  items_total?: number;
+  items_open?: number;
+  items_sent?: number;
   list_id?: number;
   list_name?: string;
   list_type?: string;
@@ -38,6 +43,10 @@ interface Dispatch {
   started_at?: string;
   completed_at?: string;
   created_at: string;
+}
+
+function isPersonalizadaType(t: string | undefined): boolean {
+  return t === 'marketing' || t === 'personalizada';
 }
 
 interface FormData {
@@ -77,10 +86,10 @@ function dispatchKind(dispatch: Dispatch): {
   sub: string;
   icon: 'marketing' | 'dev-auto' | 'dev-manual';
 } {
-  if (dispatch.dispatch_type === 'marketing') {
+  if (isPersonalizadaType(dispatch.dispatch_type)) {
     return {
       label: 'Mensagem personalizada',
-      sub: 'Texto e mídia definidos por você',
+      sub: 'Enfileirada no worker (dispatch_items)',
       icon: 'marketing',
     };
   }
@@ -99,11 +108,19 @@ function dispatchKind(dispatch: Dispatch): {
 }
 
 export default function Dispatches() {
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [dispatches, setDispatches] = useState<Dispatch[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [dispatchType, setDispatchType] = useState<'devocional' | 'marketing'>('marketing');
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [createResult, setCreateResult] = useState<{
+    dispatchId: number;
+    audience?: { total_potential: number; eligible_now: number; needs_whatsapp_validation: number };
+    items_enqueued?: number;
+    warning?: string | null;
+  } | null>(null);
   const [formData, setFormData] = useState<FormData>({
     name: '',
     list_id: '',
@@ -153,6 +170,18 @@ export default function Dispatches() {
     loadDispatches();
   }, [page]);
 
+  useEffect(() => {
+    const focus = searchParams.get('focus');
+    if (!focus || loading || dispatches.length === 0) return;
+    const id = parseInt(focus, 10);
+    const found = dispatches.find((d) => d.id === id);
+    if (found) {
+      openDetail(found);
+      searchParams.delete('focus');
+      setSearchParams(searchParams, { replace: true });
+    }
+  }, [loading, dispatches, searchParams, setSearchParams]);
+
   const loadDispatches = async () => {
     try {
       setLoading(true);
@@ -186,6 +215,10 @@ export default function Dispatches() {
         setToast({ message: 'Nome é obrigatório', type: 'error' });
         return;
       }
+      if (dispatchType === 'marketing' && (!formData.list_id || !formData.message_template.trim())) {
+        setToast({ message: 'Lista e mensagem são obrigatórios', type: 'error' });
+        return;
+      }
       setCreatingDispatch(true);
       const payload: any = {
         name: formData.name,
@@ -198,9 +231,21 @@ export default function Dispatches() {
           payload.media_url = formData.media_url;
           payload.media_type = formData.media_type;
         }
+        const { data } = await api.post('/dispatches/personalizada', payload);
+        setCreateResult({
+          dispatchId: data.dispatch?.id,
+          audience: data.audience,
+          items_enqueued: data.items_enqueued,
+          warning: data.warning,
+        });
+        setToast({
+          message: `Enfileirado: ${data.items_enqueued ?? 0} itens (dispatch #${data.dispatch?.id})`,
+          type: 'success',
+        });
+      } else {
+        await api.post(`/dispatches/${dispatchType}`, payload);
+        setToast({ message: 'Disparo criado (pendente). Clique em Iniciar para enfileirar.', type: 'success' });
       }
-      await api.post(`/dispatches/${dispatchType}`, payload);
-      setToast({ message: 'Disparo criado com sucesso!', type: 'success' });
       setShowCreateModal(false);
       setFormData({ name: '', list_id: '', message_template: '', instance_ids: [], media_url: '', media_type: undefined });
       await loadDispatches();
@@ -297,19 +342,26 @@ export default function Dispatches() {
   };
 
   const openEditPending = async (d: Dispatch) => {
-    const meta = parseDispatchMetadata(d);
-    setEditModal(d);
+    let full = d;
+    try {
+      const r = await api.get(`/dispatches/${d.id}`);
+      if (r.data.dispatch) full = { ...d, ...r.data.dispatch };
+    } catch {
+      /* usa dados da lista */
+    }
+    const meta = parseDispatchMetadata(full);
+    setEditModal(full);
     setEditForm({
-      name: d.name,
-      list_id: d.list_id != null ? String(d.list_id) : '',
-      message_template: d.message_template || '',
+      name: full.name,
+      list_id: full.list_id != null ? String(full.list_id) : '',
+      message_template: full.message_template || '',
       instance_ids: [],
       media_url: (meta.media_url as string) || '',
       media_type: (meta.media_type as FormData['media_type']) || undefined,
     });
-    setEditDevocionalId(d.devocional_id != null ? String(d.devocional_id) : '');
+    setEditDevocionalId(full.devocional_id != null ? String(full.devocional_id) : '');
     setDevOptions([]);
-    if (d.dispatch_type === 'devocional') {
+    if (full.dispatch_type === 'devocional') {
       try {
         const r = await api.get('/devocional', { params: { limit: 30, offset: 0 } });
         const rows = (r.data.devocionais || []).map((x: { id: number; title: string; date: string }) => ({
@@ -328,7 +380,7 @@ export default function Dispatches() {
     if (!editModal) return;
     setEditSaving(true);
     try {
-      if (editModal.dispatch_type === 'marketing') {
+      if (isPersonalizadaType(editModal.dispatch_type)) {
         if (!editForm.name?.trim() || !editForm.message_template?.trim() || !editForm.list_id) {
           setToast({ message: 'Preencha nome, lista e mensagem', type: 'error' });
           setEditSaving(false);
@@ -455,10 +507,47 @@ export default function Dispatches() {
       }}>
         <Info size={20} color="#38bdf8" style={{ marginTop: 2, flexShrink: 0 }} />
         <p style={{ margin: 0, fontSize: '0.85rem', color: '#7dd3fc', lineHeight: 1.5 }}>
-          <strong>Nota:</strong> o devocional <strong>automático do dia</strong> é disparado pelo agendamento em <em>Config. Devocional</em> e aparece aqui como &quot;Devocional automático&quot;.
-          Use esta página para <strong>mensagens personalizadas</strong> ou <strong>testes manuais</strong> de devocional; antes de iniciar você pode <strong>Editar</strong> o pendente; depois de concluído use <strong>Duplicar</strong> para reaproveitar com outro nome.
+          <strong>Nota:</strong> mensagem personalizada é <strong>criada e enfileirada</strong> no worker (veja também em Mensagens Personalizadas).
+          Devocional automático vem do agendamento; teste manual de devocional ainda usa Iniciar.
         </p>
       </div>
+
+      {createResult && (
+        <div
+          style={{
+            padding: '16px 20px',
+            borderRadius: 14,
+            marginBottom: 24,
+            background: 'rgba(16,185,129,0.08)',
+            border: '1px solid rgba(16,185,129,0.3)',
+          }}
+        >
+          <div style={{ fontWeight: 700, color: '#34d399', marginBottom: 8 }}>
+            Dispatch #{createResult.dispatchId} enfileirado
+          </div>
+          <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', display: 'flex', flexWrap: 'wrap', gap: 16 }}>
+            <span>Potencial: <strong>{createResult.audience?.total_potential ?? '—'}</strong></span>
+            <span>Elegíveis: <strong>{createResult.audience?.eligible_now ?? '—'}</strong></span>
+            <span>Pendentes WA: <strong>{createResult.audience?.needs_whatsapp_validation ?? '—'}</strong></span>
+            <span>Itens: <strong>{createResult.items_enqueued ?? '—'}</strong></span>
+          </div>
+          {createResult.warning && (
+            <p style={{ margin: '8px 0 0', fontSize: '0.8rem', color: '#fcd34d' }}>{createResult.warning}</p>
+          )}
+          <button
+            type="button"
+            className="btn-secondary"
+            style={{ marginTop: 12 }}
+            onClick={() => {
+              const d = dispatches.find((x) => x.id === createResult.dispatchId);
+              if (d) openDetail(d);
+              else navigate(`/dispatches?focus=${createResult.dispatchId}`);
+            }}
+          >
+            Ver acompanhamento
+          </button>
+        </div>
+      )}
 
       {/* Dispatches Grid */}
       {dispatches.length === 0 ? (
@@ -523,6 +612,12 @@ export default function Dispatches() {
                     <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 6 }}>
                       <Users size={14} /> <strong>{dispatch.contacts_processed || 0}</strong> / {dispatch.total_contacts || 0}
                     </div>
+                    {(dispatch.items_total ?? 0) > 0 && (
+                      <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                        Fila: <strong>{dispatch.items_sent ?? 0}</strong>/{dispatch.items_total} enviados
+                        {(dispatch.items_open ?? 0) > 0 ? ` · ${dispatch.items_open} abertos` : ''}
+                      </div>
+                    )}
                     {dispatch.contacts_success > 0 && (
                       <div style={{ fontSize: '0.85rem', color: '#34d399', fontWeight: 600 }}>✓ {dispatch.contacts_success}</div>
                     )}
@@ -616,7 +711,7 @@ export default function Dispatches() {
               </button>
             </div>
             <div style={{ padding: 24, maxHeight: 'min(72vh, 640px)', overflowY: 'auto' }}>
-              {editModal.dispatch_type === 'marketing' ? (
+              {isPersonalizadaType(editModal.dispatch_type) ? (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
                   <div>
                     <label className="label-premium">Nome</label>
@@ -907,11 +1002,15 @@ export default function Dispatches() {
                   onClick={handleCreate} disabled={creatingDispatch}
                   className="btn-gold" style={{ flex: 1, padding: '14px 0', borderRadius: 12, border: 'none' }}
                 >
-                  {creatingDispatch ? 'Salvando...' : 'Salvar como pendente'}
+                  {creatingDispatch
+                    ? (dispatchType === 'marketing' ? 'Enfileirando…' : 'Salvando…')
+                    : (dispatchType === 'marketing' ? 'Criar e enfileirar' : 'Salvar como pendente')}
                 </button>
               </div>
               <p style={{ marginTop: 16, fontSize: '0.75rem', color: 'var(--text-muted)', textAlign: 'center' }}>
-                O disparo fica pendente até você clicar em <strong>Iniciar</strong> na lista. Use <strong>Editar</strong> para ajustar texto ou lista antes do envio.
+                {dispatchType === 'marketing'
+                  ? 'Mensagem personalizada entra direto na fila (dispatch_items). O worker envia — não há envio síncrono.'
+                  : 'Devocional manual fica pendente até você clicar em Iniciar na lista.'}
               </p>
             </div>
           </div>
@@ -968,7 +1067,7 @@ export default function Dispatches() {
                           <tr key={c.id} style={{ borderTop: '1px solid var(--border)' }}>
                             <td style={{ padding: '12px 20px' }}>
                               <div style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{c.contact_name || '—'}</div>
-                              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{c.contact_number}</div>
+                              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{c.contact_number_masked || c.contact_number}</div>
                             </td>
                             <td style={{ padding: '12px 20px' }}>
                               {c.status === 'sent' || c.status === 'delivered' ? <span style={{ color: '#34d399' }}>✓ Enviado</span> : <span style={{ color: '#fb7185' }}>✗ Falhou</span>}
