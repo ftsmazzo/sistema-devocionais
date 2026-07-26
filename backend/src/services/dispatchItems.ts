@@ -6,6 +6,11 @@ import { pool } from '../database';
 import { normalizePhoneDigits } from '../utils/phoneNumber';
 import { maskPhone } from './evolutionSafeSender';
 
+/** pool ou client de transação */
+export type DbQueryable = {
+  query: (text: string, params?: any[]) => Promise<{ rows: any[]; rowCount?: number | null }>;
+};
+
 export type DispatchItemStatus =
   | 'pending'
   | 'processing'
@@ -72,6 +77,7 @@ export async function ensureDispatchItem(params: {
   messageSnapshot?: string | null;
   instanceId?: number | null;
   maxAttempts?: number;
+  db?: DbQueryable;
 }): Promise<DispatchItemRow & { created: boolean }> {
   const {
     dispatchId,
@@ -81,6 +87,7 @@ export async function ensureDispatchItem(params: {
     messageSnapshot = null,
     instanceId = null,
     maxAttempts = 1,
+    db = pool,
   } = params;
 
   const contactNumber = normalizePhoneDigits(params.contactNumber || '', '55');
@@ -92,12 +99,16 @@ export async function ensureDispatchItem(params: {
 
   const snap = truncateSnapshot(messageSnapshot);
 
-  const inserted = await pool.query(
+  const inserted = await db.query(
     `INSERT INTO dispatch_items (
        dispatch_id, contact_id, contact_number, contact_name,
        instance_id, message_type, message_snapshot, status,
        attempt_count, max_attempts, scheduled_at
-     ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', 0, $8, CURRENT_TIMESTAMP)
+     ) VALUES (
+       $1::int, $2::int, $3::varchar(30), $4::varchar(255),
+       $5::int, $6::varchar(50), $7::text, 'pending',
+       0, $8::int, CURRENT_TIMESTAMP
+     )
      ON CONFLICT (dispatch_id, contact_number) DO NOTHING
      RETURNING *`,
     [
@@ -116,9 +127,9 @@ export async function ensureDispatchItem(params: {
     return { ...(inserted.rows[0] as DispatchItemRow), created: true };
   }
 
-  const existing = await pool.query(
+  const existing = await db.query(
     `SELECT * FROM dispatch_items
-     WHERE dispatch_id = $1 AND contact_number = $2
+     WHERE dispatch_id = $1::int AND contact_number = $2::varchar(30)
      LIMIT 1`,
     [dispatchId, contactNumber]
   );
@@ -133,16 +144,16 @@ export async function ensureDispatchItem(params: {
 
   // Atualiza snapshot/nome se ainda pendente (não mexe em sent)
   if (row.status === 'pending' || row.status === 'pending_retry' || row.status === 'failed' || row.status === 'scheduled') {
-    const upd = await pool.query(
+    const upd = await db.query(
       `UPDATE dispatch_items
-       SET contact_name = COALESCE($3, contact_name),
-           contact_id = COALESCE($4, contact_id),
-           message_type = COALESCE($5, message_type),
-           message_snapshot = COALESCE($6, message_snapshot),
+       SET contact_name = COALESCE($2::varchar(255), contact_name),
+           contact_id = COALESCE($3::int, contact_id),
+           message_type = COALESCE($4::varchar(50), message_type),
+           message_snapshot = COALESCE($5::text, message_snapshot),
            updated_at = CURRENT_TIMESTAMP
-       WHERE id = $1 AND status <> 'sent'
+       WHERE id = $1::int AND status <> 'sent'
        RETURNING *`,
-      [row.id, dispatchId, contactName, contactId, messageType, snap]
+      [row.id, contactName, contactId, messageType, snap]
     );
     if (upd.rows[0]) return { ...(upd.rows[0] as DispatchItemRow), created: false };
   }
@@ -173,7 +184,9 @@ export async function ensureDispatchItemsBatch(params: {
   messageType?: string | null;
   buildSnapshot: (contact: { id?: number | null; phone_number: string; name?: string | null }) => string;
   maxAttempts?: number;
+  db?: DbQueryable;
 }): Promise<EnsureDispatchItemsBatchResult> {
+  const db = params.db || pool;
   const seen = new Set<string>();
   let created = 0;
   let reused = 0;
@@ -201,6 +214,7 @@ export async function ensureDispatchItemsBatch(params: {
       messageType: params.messageType ?? null,
       messageSnapshot: params.buildSnapshot(contact),
       maxAttempts: params.maxAttempts ?? 1,
+      db,
     });
 
     if (item.created) created++;
@@ -208,7 +222,7 @@ export async function ensureDispatchItemsBatch(params: {
     items.push(item);
   }
 
-  const summary = await getDispatchItemsSummary(params.dispatchId);
+  const summary = await getDispatchItemsSummary(params.dispatchId, db);
   if (summary.total < seen.size) {
     throw new Error(
       `Inconsistência ao enfileirar: esperados ${seen.size} itens únicos, mas dispatch_items.total=${summary.total}`
@@ -262,12 +276,13 @@ export function evaluateDispatchCompletion(params: {
 
 export async function isDispatchItemSent(
   dispatchId: number,
-  contactNumber: string
+  contactNumber: string,
+  db: DbQueryable = pool
 ): Promise<boolean> {
   const phone = normalizePhoneDigits(contactNumber || '', '55');
-  const r = await pool.query(
+  const r = await db.query(
     `SELECT 1 FROM dispatch_items
-     WHERE dispatch_id = $1 AND contact_number = $2 AND status = 'sent'
+     WHERE dispatch_id = $1::int AND contact_number = $2::varchar(30) AND status = 'sent'
      LIMIT 1`,
     [dispatchId, phone]
   );
@@ -404,7 +419,10 @@ export async function releaseDispatchItemToQueue(params: {
   );
 }
 
-export async function getDispatchItemsSummary(dispatchId: number): Promise<{
+export async function getDispatchItemsSummary(
+  dispatchId: number,
+  db: DbQueryable = pool
+): Promise<{
   total: number;
   pending: number;
   processing: number;
@@ -417,7 +435,7 @@ export async function getDispatchItemsSummary(dispatchId: number): Promise<{
   open: number;
   terminal: number;
 }> {
-  const r = await pool.query(
+  const r = await db.query(
     `SELECT
        COUNT(*)::int AS total,
        COUNT(*) FILTER (WHERE status = 'pending')::int AS pending,

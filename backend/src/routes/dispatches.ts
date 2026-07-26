@@ -425,13 +425,18 @@ router.post('/personalizada', async (req: AuthRequest, res) => {
   } catch (error: any) {
     if (error instanceof PersonalizadaDispatchError) {
       return res.status(error.status).json({
-        error: error.message,
-        audience: error.audience,
         success: false,
+        error: error.message,
+        message: error.message,
+        audience: error.audience,
       });
     }
-    console.error('❌ Erro ao criar mensagem personalizada:', error);
-    res.status(500).json({ error: 'Erro ao criar mensagem personalizada', message: error.message });
+    console.error('❌ Erro ao criar mensagem personalizada:', error?.code || '', error?.message || error);
+    res.status(500).json({
+      success: false,
+      error: 'Erro ao criar mensagem personalizada',
+      message: error?.message || String(error),
+    });
   }
 });
 
@@ -462,15 +467,17 @@ router.post('/marketing', async (req: AuthRequest, res) => {
   } catch (error: any) {
     if (error instanceof PersonalizadaDispatchError) {
       return res.status(error.status).json({
-        error: error.message,
-        audience: error.audience,
         success: false,
+        error: error.message,
+        message: error.message,
+        audience: error.audience,
       });
     }
-    console.error('❌ Erro ao criar disparo de marketing:', error);
+    console.error('❌ Erro ao criar disparo de marketing:', error?.code || '', error?.message || error);
     res.status(500).json({
+      success: false,
       error: 'Erro ao criar disparo',
-      message: error.message,
+      message: error?.message || String(error),
     });
   }
 });
@@ -1132,12 +1139,12 @@ async function processDevocionalDispatchManually(dispatchId: number): Promise<vo
 
       await pool.query(
         `INSERT INTO dispatch_contacts (dispatch_id, contact_number, contact_name, status)
-         SELECT $1, $2, $3, 'pending'
+         SELECT $1::int, $2::varchar(50), $3::varchar(255), 'pending'
          WHERE NOT EXISTS (
            SELECT 1 FROM dispatch_contacts
-           WHERE dispatch_id = $1 AND contact_number = $2
+           WHERE dispatch_id = $4::int AND contact_number = $5::varchar(50)
          )`,
-        [dispatchId, phone, contact.name]
+        [dispatchId, phone, contact.name, dispatchId, phone]
       );
 
       enqueued++;

@@ -84,6 +84,11 @@ export default function MensagensPersonalizadas() {
         list_id: parseInt(form.list_id, 10),
         message_template: form.message_template,
       });
+      if (!data?.success || !data?.dispatch?.id) {
+        throw Object.assign(new Error(data?.error || data?.message || 'Resposta inválida do servidor'), {
+          response: { data },
+        });
+      }
       setSuccess({
         dispatch: data.dispatch,
         audience: data.audience,
@@ -92,24 +97,17 @@ export default function MensagensPersonalizadas() {
         warning: data.warning,
         message: data.message,
       });
-      setToast({ type: 'success', message: 'Mensagem criada e enfileirada no worker' });
+      setToast({ type: 'success', message: `Enfileirado: dispatch #${data.dispatch.id}` });
       setForm({ name: '', list_id: '', message_template: '' });
     } catch (error: any) {
-      const aud = error.response?.data?.audience;
       const msg =
         error.response?.data?.error ||
         error.response?.data?.message ||
+        error.message ||
         'Erro ao criar e enfileirar';
       setToast({ type: 'error', message: msg });
-      if (aud) {
-        setSuccess({
-          dispatch: { id: 0, name: form.name, status: 'failed', total_contacts: 0, dispatch_type: 'personalizada' },
-          audience: aud,
-          items_enqueued: 0,
-          items_created: 0,
-          warning: msg,
-        });
-      }
+      setSuccess(null);
+      // Mantém o formulário preenchido para correção
     } finally {
       setSubmitting(false);
     }

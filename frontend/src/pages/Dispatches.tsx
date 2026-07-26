@@ -232,14 +232,19 @@ export default function Dispatches() {
           payload.media_type = formData.media_type;
         }
         const { data } = await api.post('/dispatches/personalizada', payload);
+        if (!data?.success || !data?.dispatch?.id) {
+          throw Object.assign(new Error(data?.error || data?.message || 'Falha ao enfileirar'), {
+            response: { data },
+          });
+        }
         setCreateResult({
-          dispatchId: data.dispatch?.id,
+          dispatchId: data.dispatch.id,
           audience: data.audience,
           items_enqueued: data.items_enqueued,
           warning: data.warning,
         });
         setToast({
-          message: `Enfileirado: ${data.items_enqueued ?? 0} itens (dispatch #${data.dispatch?.id})`,
+          message: `Enfileirado: ${data.items_enqueued ?? 0} itens (dispatch #${data.dispatch.id})`,
           type: 'success',
         });
       } else {
@@ -250,7 +255,11 @@ export default function Dispatches() {
       setFormData({ name: '', list_id: '', message_template: '', instance_ids: [], media_url: '', media_type: undefined });
       await loadDispatches();
     } catch (error: any) {
-      setToast({ message: error.response?.data?.error || 'Erro ao criar disparo', type: 'error' });
+      setCreateResult(null);
+      setToast({
+        message: error.response?.data?.error || error.response?.data?.message || error.message || 'Erro ao criar disparo',
+        type: 'error',
+      });
     } finally {
       setCreatingDispatch(false);
     }

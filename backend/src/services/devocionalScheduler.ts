@@ -363,12 +363,12 @@ export async function executeDevocionalDispatch(): Promise<void> {
 
       await pool.query(
         `INSERT INTO dispatch_contacts (dispatch_id, contact_number, contact_name, status)
-         SELECT $1, $2, $3, 'pending'
+         SELECT $1::int, $2::varchar(50), $3::varchar(255), 'pending'
          WHERE NOT EXISTS (
            SELECT 1 FROM dispatch_contacts
-           WHERE dispatch_id = $1 AND contact_number = $2
+           WHERE dispatch_id = $4::int AND contact_number = $5::varchar(50)
          )`,
-        [dispatchId, phone, contact.name]
+        [dispatchId, phone, contact.name, dispatchId, phone]
       );
 
       enqueued++;
