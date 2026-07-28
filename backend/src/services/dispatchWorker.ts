@@ -721,7 +721,6 @@ export async function processClaimedDispatchItem(item: DispatchItemRow): Promise
     }
 
     await clearItemLock(item.id);
-    await maybeCompleteDispatch(item.dispatch_id);
 
     await recordDispatchEvent({
       dispatchId: item.dispatch_id,
@@ -733,6 +732,9 @@ export async function processClaimedDispatchItem(item: DispatchItemRow): Promise
       message: `Enviado ${maskPhone(item.contact_number)} via instância ${instanceId}`,
       meta: { provider_message_id: sendResult.messageId, pick_reason: pick.reason },
     });
+
+    // COMPLETE só depois do SEND_OK, para o log ficar cronológico
+    await maybeCompleteDispatch(item.dispatch_id);
     return { outcome: 'sent', realSendAttempted: true };
   } catch (error: any) {
     const connectivity =
@@ -762,7 +764,6 @@ export async function processClaimedDispatchItem(item: DispatchItemRow): Promise
       await bumpDispatchCounters(item.dispatch_id, 'failed');
     }
     await clearItemLock(item.id);
-    await maybeCompleteDispatch(item.dispatch_id);
 
     await recordDispatchEvent({
       dispatchId: item.dispatch_id,
@@ -774,6 +775,8 @@ export async function processClaimedDispatchItem(item: DispatchItemRow): Promise
       message: (error?.message || String(error)).slice(0, 500),
       meta: { connectivity, asPendingRetry },
     });
+
+    await maybeCompleteDispatch(item.dispatch_id);
     return {
       outcome: asPendingRetry ? 'pending_retry' : 'failed',
       realSendAttempted: true,
