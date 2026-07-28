@@ -24,6 +24,7 @@ import {
   resolveListAudience,
 } from '../services/listAudienceResolver';
 import { listDispatchEvents } from '../services/dispatchSendEvents';
+import { normalizeContactPhoneForStorage } from '../utils/phoneNumber';
 import { addLog } from './logs';
 
 const router = express.Router();
@@ -506,6 +507,109 @@ router.post('/marketing', async (req: AuthRequest, res) => {
     res.status(500).json({
       success: false,
       error: 'Erro ao criar disparo',
+      message: error?.message || String(error),
+    });
+  }
+});
+
+/**
+ * Disparo de teste só para o telefone de notificação do admin (devocional_config).
+ * POST /api/dispatches/test-self
+ * Body: { instance_ids: number[] } — idealmente 1 instância
+ */
+router.post('/test-self', async (req: AuthRequest, res) => {
+  try {
+    const rawIds = Array.isArray(req.body?.instance_ids) ? req.body.instance_ids.map(Number) : [];
+    const instance_ids = rawIds.filter((n: number) => Number.isFinite(n) && n > 0);
+    if (instance_ids.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Selecione ao menos uma instância para o teste',
+      });
+    }
+
+    const configResult = await pool.query(
+      `SELECT notification_phone FROM devocional_config ORDER BY id DESC LIMIT 1`
+    );
+    const notificationPhone = configResult.rows[0]?.notification_phone;
+    if (!notificationPhone) {
+      return res.status(400).json({
+        success: false,
+        error:
+          'Configure o telefone de notificação em Config. Devocional (notification_phone) para usar o teste solo.',
+      });
+    }
+
+    const stored = normalizeContactPhoneForStorage(String(notificationPhone));
+    if (!stored.ok) {
+      return res.status(400).json({
+        success: false,
+        error: `Telefone de notificação inválido: ${stored.error}`,
+      });
+    }
+
+    const contactResult = await pool.query(
+      `SELECT id FROM contacts WHERE phone_number = $1 LIMIT 1`,
+      [stored.phone]
+    );
+
+    let contactId: number;
+    if (contactResult.rows.length === 0) {
+      const inserted = await pool.query(
+        `INSERT INTO contacts (phone_number, name, opt_in, opt_out, source, whatsapp_validated, whatsapp_validated_at)
+         VALUES ($1, $2, true, false, 'test_self', true, CURRENT_TIMESTAMP)
+         RETURNING id`,
+        [stored.phone, 'Teste Admin']
+      );
+      contactId = inserted.rows[0].id;
+    } else {
+      contactId = contactResult.rows[0].id;
+      await pool.query(
+        `UPDATE contacts
+         SET opt_in = true,
+             opt_out = false,
+             whatsapp_validated = true,
+             whatsapp_validated_at = COALESCE(whatsapp_validated_at, CURRENT_TIMESTAMP),
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $1`,
+        [contactId]
+      );
+    }
+
+    const nowLabel = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+    const result = await createAndEnqueuePersonalizadaDispatch({
+      name: `Teste solo ${nowLabel}`,
+      message_template: `[TESTE] Mensagem de teste do sistema — ${nowLabel}`,
+      list_id: null,
+      contact_ids: [contactId],
+      instance_ids,
+      metadata: { test_self: true, trigger: 'ui_test_self' },
+      created_by: req.user?.id ?? null,
+      legacy_marketing: false,
+    });
+
+    res.status(201).json({
+      success: true,
+      ...result,
+      test: {
+        contact_id: contactId,
+        phone_masked: maskPhone(stored.phone),
+        instance_ids,
+      },
+    });
+  } catch (error: any) {
+    if (error instanceof PersonalizadaDispatchError) {
+      return res.status(error.status).json({
+        success: false,
+        error: error.message,
+        message: error.message,
+        audience: error.audience,
+      });
+    }
+    console.error('❌ Erro no disparo teste solo:', error?.message || error);
+    res.status(500).json({
+      success: false,
+      error: 'Erro ao criar disparo de teste',
       message: error?.message || String(error),
     });
   }

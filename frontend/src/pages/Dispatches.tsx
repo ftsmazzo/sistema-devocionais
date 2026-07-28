@@ -35,6 +35,7 @@ interface Dispatch {
   items_total?: number;
   items_open?: number;
   items_sent?: number;
+  instance_ids?: number[] | null;
   list_id?: number;
   list_name?: string;
   list_type?: string;
@@ -45,8 +46,49 @@ interface Dispatch {
   created_at: string;
 }
 
+interface InstanceOption {
+  id: number;
+  name?: string;
+  instance_name: string;
+  status: string;
+}
+
 function isPersonalizadaType(t: string | undefined): boolean {
   return t === 'marketing' || t === 'personalizada';
+}
+
+function contactDeliveryLabel(status: string): { text: string; color: string } {
+  switch (status) {
+    case 'delivered':
+      return { text: 'Entregue', color: '#34d399' };
+    case 'read':
+      return { text: 'Lido', color: '#60a5fa' };
+    case 'sent':
+      return { text: 'Aceito pela API', color: '#fbbf24' };
+    case 'pending':
+    case 'pending_retry':
+    case 'processing':
+      return { text: 'Na fila', color: 'var(--text-muted)' };
+    case 'skipped':
+      return { text: 'Pulado', color: '#fb7185' };
+    case 'failed':
+      return { text: 'Falhou', color: '#fb7185' };
+    default:
+      return { text: status || '—', color: 'var(--text-muted)' };
+  }
+}
+
+function formatInstancePool(
+  instanceIds: number[] | null | undefined,
+  instances: InstanceOption[]
+): string {
+  if (!instanceIds || instanceIds.length === 0) return 'Todas as conectadas (fallback)';
+  return instanceIds
+    .map((id) => {
+      const inst = instances.find((i) => i.id === id);
+      return inst ? `${inst.instance_name} (#${id})` : `#${id}`;
+    })
+    .join(', ');
 }
 
 interface FormData {
@@ -130,6 +172,8 @@ export default function Dispatches() {
     media_type: undefined,
   });
   const [lists, setLists] = useState<any[]>([]);
+  const [instances, setInstances] = useState<InstanceOption[]>([]);
+  const [testingSelf, setTestingSelf] = useState(false);
   const [startingDispatch, setStartingDispatch] = useState<number | null>(null);
   const [creatingDispatch, setCreatingDispatch] = useState(false);
   const [totalDispatches, setTotalDispatches] = useState(0);
@@ -175,6 +219,7 @@ export default function Dispatches() {
 
   useEffect(() => {
     loadLists();
+    loadInstances();
   }, []);
 
   useEffect(() => {
@@ -217,7 +262,85 @@ export default function Dispatches() {
     }
   };
 
+  const loadInstances = async () => {
+    try {
+      const response = await api.get('/instances');
+      setInstances(response.data.instances || []);
+    } catch (error) {
+      console.error('Erro ao carregar instâncias:', error);
+    }
+  };
 
+  const toggleInstanceId = (id: number, target: 'create' | 'edit') => {
+    if (target === 'create') {
+      setFormData((prev) => {
+        const has = prev.instance_ids.includes(id);
+        return {
+          ...prev,
+          instance_ids: has
+            ? prev.instance_ids.filter((x) => x !== id)
+            : [...prev.instance_ids, id],
+        };
+      });
+    } else {
+      setEditForm((prev) => {
+        const has = prev.instance_ids.includes(id);
+        return {
+          ...prev,
+          instance_ids: has
+            ? prev.instance_ids.filter((x) => x !== id)
+            : [...prev.instance_ids, id],
+        };
+      });
+    }
+  };
+
+  const handleTestSelf = async () => {
+    if (testingSelf) return;
+    if (formData.instance_ids.length === 0) {
+      setToast({
+        message: 'Selecione ao menos 1 instância para o teste solo',
+        type: 'error',
+      });
+      return;
+    }
+    if (formData.instance_ids.length > 1) {
+      const ok = confirm(
+        'Você marcou mais de uma instância. Para diagnóstico, o ideal é testar com 1 só. Continuar mesmo assim?'
+      );
+      if (!ok) return;
+    }
+    try {
+      setTestingSelf(true);
+      const { data } = await api.post('/dispatches/test-self', {
+        instance_ids: formData.instance_ids,
+      });
+      if (!data?.success || !data?.dispatch?.id) {
+        throw Object.assign(new Error(data?.error || data?.message || 'Falha no teste'), {
+          response: { data },
+        });
+      }
+      setShowCreateModal(false);
+      setCreateResult({
+        dispatchId: data.dispatch.id,
+        items_enqueued: data.items_enqueued,
+        warning: data.warning,
+      });
+      setToast({
+        message: `Teste solo enfileirado (#${data.dispatch.id}) → ${data.test?.phone_masked || 'seu número'}`,
+        type: 'success',
+      });
+      setPage(0);
+      await loadDispatches();
+    } catch (error: any) {
+      setToast({
+        message: error.response?.data?.error || error.message || 'Erro no teste solo',
+        type: 'error',
+      });
+    } finally {
+      setTestingSelf(false);
+    }
+  };
 
   const handleCreate = async () => {
     if (creatingDispatch) return;
@@ -394,7 +517,9 @@ export default function Dispatches() {
       name: full.name,
       list_id: full.list_id != null ? String(full.list_id) : '',
       message_template: full.message_template || '',
-      instance_ids: [],
+      instance_ids: Array.isArray(full.instance_ids)
+        ? full.instance_ids.map(Number).filter((n) => Number.isFinite(n))
+        : [],
       media_url: (meta.media_url as string) || '',
       media_type: (meta.media_type as FormData['media_type']) || undefined,
     });
@@ -429,6 +554,7 @@ export default function Dispatches() {
           name: editForm.name.trim(),
           message_template: editForm.message_template,
           list_id: parseInt(editForm.list_id, 10),
+          instance_ids: editForm.instance_ids,
           media_url: editForm.media_url || null,
           media_type: editForm.media_type || null,
         });
@@ -441,6 +567,7 @@ export default function Dispatches() {
         await api.put(`/dispatches/${editModal.id}`, {
           name: editForm.name.trim(),
           list_id: parseInt(editForm.list_id, 10),
+          instance_ids: editForm.instance_ids,
           devocional_id: parseInt(editDevocionalId, 10),
         });
       }
@@ -653,7 +780,7 @@ export default function Dispatches() {
                     </div>
                     {(dispatch.items_total ?? 0) > 0 && (
                       <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                        Fila: <strong>{dispatch.items_sent ?? 0}</strong>/{dispatch.items_total} enviados
+                        Fila: <strong>{dispatch.items_sent ?? 0}</strong>/{dispatch.items_total} aceitos pela API
                         {(dispatch.items_open ?? 0) > 0 ? ` · ${dispatch.items_open} abertos` : ''}
                       </div>
                     )}
@@ -807,6 +934,44 @@ export default function Dispatches() {
                       />
                     </div>
                   </div>
+                  <div>
+                    <label className="label-premium">Instâncias deste disparo</label>
+                    <div
+                      style={{
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 8,
+                        padding: 12,
+                        borderRadius: 12,
+                        border: '1px solid var(--border)',
+                        background: 'var(--bg-elevated)',
+                        maxHeight: 160,
+                        overflowY: 'auto',
+                      }}
+                    >
+                      {instances.filter((i) => i.status === 'connected').map((inst) => (
+                        <label
+                          key={inst.id}
+                          style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: '0.85rem', cursor: 'pointer' }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={editForm.instance_ids.includes(inst.id)}
+                            onChange={() => toggleInstanceId(inst.id, 'edit')}
+                          />
+                          <span>
+                            {inst.name || inst.instance_name}{' '}
+                            <span style={{ color: 'var(--text-muted)' }}>(#{inst.id})</span>
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                    <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 6 }}>
+                      {editForm.instance_ids.length === 0
+                        ? 'Nenhuma marcada → usará todas as conectadas.'
+                        : `${editForm.instance_ids.length} no pool.`}
+                    </p>
+                  </div>
                 </div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
@@ -828,6 +993,39 @@ export default function Dispatches() {
                         </option>
                       ))}
                     </select>
+                  </div>
+                  <div>
+                    <label className="label-premium">Instâncias deste disparo</label>
+                    <div
+                      style={{
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 8,
+                        padding: 12,
+                        borderRadius: 12,
+                        border: '1px solid var(--border)',
+                        background: 'var(--bg-elevated)',
+                        maxHeight: 160,
+                        overflowY: 'auto',
+                      }}
+                    >
+                      {instances.filter((i) => i.status === 'connected').map((inst) => (
+                        <label
+                          key={inst.id}
+                          style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: '0.85rem', cursor: 'pointer' }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={editForm.instance_ids.includes(inst.id)}
+                            onChange={() => toggleInstanceId(inst.id, 'edit')}
+                          />
+                          <span>
+                            {inst.name || inst.instance_name}{' '}
+                            <span style={{ color: 'var(--text-muted)' }}>(#{inst.id})</span>
+                          </span>
+                        </label>
+                      ))}
+                    </div>
                   </div>
                   <div>
                     <label className="label-premium">Conteúdo (devocional)</label>
@@ -960,6 +1158,65 @@ export default function Dispatches() {
                   </select>
                 </div>
 
+                <div>
+                  <label className="label-premium">Instâncias deste disparo</label>
+                  <div
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 8,
+                      padding: 12,
+                      borderRadius: 12,
+                      border: '1px solid var(--border)',
+                      background: 'var(--bg-elevated)',
+                      maxHeight: 180,
+                      overflowY: 'auto',
+                    }}
+                  >
+                    {instances.filter((i) => i.status === 'connected').length === 0 ? (
+                      <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                        Nenhuma instância conectada no momento.
+                      </span>
+                    ) : (
+                      instances
+                        .filter((i) => i.status === 'connected')
+                        .map((inst) => {
+                          const checked = formData.instance_ids.includes(inst.id);
+                          return (
+                            <label
+                              key={inst.id}
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 10,
+                                fontSize: '0.85rem',
+                                color: 'var(--text-primary)',
+                                cursor: 'pointer',
+                              }}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={() => toggleInstanceId(inst.id, 'create')}
+                              />
+                              <span>
+                                {inst.name || inst.instance_name}{' '}
+                                <span style={{ color: 'var(--text-muted)' }}>
+                                  (#{inst.id} · {inst.instance_name})
+                                </span>
+                              </span>
+                            </label>
+                          );
+                        })
+                    )}
+                  </div>
+                  <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 6 }}>
+                    {formData.instance_ids.length === 0
+                      ? 'Nenhuma marcada → o worker usará todas as conectadas.'
+                      : `${formData.instance_ids.length} instância(s) no pool deste disparo.`}
+                  </p>
+                </div>
+
                 {dispatchType === 'marketing' && (
                   <>
                     <div>
@@ -1035,20 +1292,33 @@ export default function Dispatches() {
                 )}
               </div>
 
-              <div style={{ marginTop: 40, display: 'flex', gap: 16 }}>
-                <button onClick={() => setShowCreateModal(false)} className="btn-outline" style={{ flex: 1, padding: '14px 0', borderRadius: 12 }}>Cancelar</button>
-                <button
-                  onClick={handleCreate} disabled={creatingDispatch}
-                  className="btn-gold" style={{ flex: 1, padding: '14px 0', borderRadius: 12, border: 'none' }}
-                >
-                  {creatingDispatch
-                    ? (dispatchType === 'marketing' ? 'Enfileirando…' : 'Salvando…')
-                    : (dispatchType === 'marketing' ? 'Criar e enfileirar' : 'Salvar como pendente')}
-                </button>
+              <div style={{ marginTop: 40, display: 'flex', flexDirection: 'column', gap: 12 }}>
+                {dispatchType === 'marketing' && (
+                  <button
+                    type="button"
+                    onClick={handleTestSelf}
+                    disabled={testingSelf || creatingDispatch}
+                    className="btn-outline"
+                    style={{ width: '100%', padding: '12px 0', borderRadius: 12 }}
+                  >
+                    {testingSelf ? 'Enfileirando teste…' : 'Testar só no meu número'}
+                  </button>
+                )}
+                <div style={{ display: 'flex', gap: 16 }}>
+                  <button onClick={() => setShowCreateModal(false)} className="btn-outline" style={{ flex: 1, padding: '14px 0', borderRadius: 12 }}>Cancelar</button>
+                  <button
+                    onClick={handleCreate} disabled={creatingDispatch || testingSelf}
+                    className="btn-gold" style={{ flex: 1, padding: '14px 0', borderRadius: 12, border: 'none' }}
+                  >
+                    {creatingDispatch
+                      ? (dispatchType === 'marketing' ? 'Enfileirando…' : 'Salvando…')
+                      : (dispatchType === 'marketing' ? 'Criar e enfileirar' : 'Salvar como pendente')}
+                  </button>
+                </div>
               </div>
               <p style={{ marginTop: 16, fontSize: '0.75rem', color: 'var(--text-muted)', textAlign: 'center' }}>
                 {dispatchType === 'marketing'
-                  ? 'Mensagem personalizada entra direto na fila (dispatch_items). O worker envia — não há envio síncrono.'
+                  ? '“Testar só no meu número” usa o telefone de notificação (Config. Devocional) e as instâncias marcadas — sem a lista.'
                   : 'Devocional manual fica pendente até você clicar em Iniciar na lista.'}
               </p>
             </div>
@@ -1063,7 +1333,12 @@ export default function Dispatches() {
             <div style={{ padding: '24px 32px', borderBottom: '1px solid var(--border)', background: 'rgba(255,255,255,0.02)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <div>
                 <h3 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-primary)' }}>{detailDispatch.name}</h3>
-                <p style={{ margin: '4px 0 0', fontSize: '0.8rem', color: 'var(--text-muted)' }}>Detalhes de entrega e logs</p>
+                <p style={{ margin: '4px 0 0', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                  Aceito pela API não garante que chegou no WhatsApp.
+                </p>
+                <p style={{ margin: '6px 0 0', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                  Pool: {formatInstancePool(detailDispatch.instance_ids, instances)}
+                </p>
               </div>
               <button onClick={() => setDetailDispatch(null)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}><X size={24} /></button>
             </div>
@@ -1080,7 +1355,7 @@ export default function Dispatches() {
                     </div>
                     <div style={{ padding: 16, borderRadius: 12, background: 'rgba(52, 211, 153, 0.05)', border: '1px solid rgba(52, 211, 153, 0.1)', textAlign: 'center' }}>
                       <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#34d399' }}>{detailDispatch.contacts_success}</div>
-                      <div style={{ fontSize: '0.65rem', color: '#34d399', textTransform: 'uppercase' }}>Sucesso</div>
+                      <div style={{ fontSize: '0.65rem', color: '#34d399', textTransform: 'uppercase' }}>API OK</div>
                     </div>
                     <div style={{ padding: 16, borderRadius: 12, background: 'rgba(251, 113, 133, 0.05)', border: '1px solid rgba(251, 113, 133, 0.1)', textAlign: 'center' }}>
                       <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#fb7185' }}>{detailDispatch.contacts_failed}</div>
@@ -1088,7 +1363,7 @@ export default function Dispatches() {
                     </div>
                     <div style={{ padding: 16, borderRadius: 12, background: 'var(--bg-elevated)', border: '1px solid var(--border)', textAlign: 'center' }}>
                       <div style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-primary)' }}>{Math.round((detailDispatch.contacts_success / (detailDispatch.total_contacts || 1)) * 100)}%</div>
-                      <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Taxa</div>
+                      <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Taxa API</div>
                     </div>
                   </div>
 
@@ -1109,10 +1384,18 @@ export default function Dispatches() {
                               <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{c.contact_number_masked || c.contact_number}</div>
                             </td>
                             <td style={{ padding: '12px 20px' }}>
-                              {c.status === 'sent' || c.status === 'delivered' ? <span style={{ color: '#34d399' }}>✓ Enviado</span> : <span style={{ color: '#fb7185' }}>✗ Falhou</span>}
-                              {c.failed_reason && <div style={{ fontSize: '0.7rem', color: '#fb7185' }}>{c.failed_reason}</div>}
-                            </td>
-                            <td style={{ padding: '12px 20px', color: 'var(--text-muted)' }}>
+                              {(() => {
+                                const lab = contactDeliveryLabel(c.status);
+                                return (
+                                  <>
+                                    <span style={{ color: lab.color }}>{lab.text}</span>
+                                    {c.failed_reason && (
+                                      <div style={{ fontSize: '0.7rem', color: '#fb7185' }}>{c.failed_reason}</div>
+                                    )}
+                                  </>
+                                );
+                              })()}
+                            </td>                            <td style={{ padding: '12px 20px', color: 'var(--text-muted)' }}>
                               {c.sent_at ? new Date(c.sent_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '—'}
                             </td>
                           </tr>
