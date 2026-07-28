@@ -570,6 +570,8 @@ router.post('/test-self', async (req: AuthRequest, res) => {
              opt_out = false,
              whatsapp_validated = true,
              whatsapp_validated_at = COALESCE(whatsapp_validated_at, CURRENT_TIMESTAMP),
+             consecutive_devocional_failures = 0,
+             devocional_score = GREATEST(COALESCE(devocional_score, 0), 100),
              updated_at = CURRENT_TIMESTAMP
          WHERE id = $1`,
         [contactId]
