@@ -517,6 +517,34 @@ async function processMessageUpdate(instanceId: number, eventData: any) {
          WHERE id = $${paramCount}`,
         params
       );
+
+      // Espelha no disparo (painel deixa de ficar preso em "Aceito pela API")
+      if (message.dispatch_id) {
+        let contactStatus: string | null = null;
+        if (status === 'DELIVERY_ACK' || status === 'delivered') contactStatus = 'delivered';
+        else if (status === 'READ' || status === 'read') contactStatus = 'read';
+        else if (status === 'ERROR' || status === 'FAILED' || status === 'failed') {
+          contactStatus = 'failed';
+        }
+
+        if (contactStatus && message.contact_id) {
+          await pool.query(
+            `UPDATE dispatch_contacts dc
+             SET status = $3,
+                 updated_at = CURRENT_TIMESTAMP
+             FROM contacts c
+             WHERE dc.dispatch_id = $1
+               AND c.id = $2
+               AND (
+                 dc.contact_number = c.phone_number
+                 OR regexp_replace(dc.contact_number, '\\D', '', 'g') =
+                    regexp_replace(c.phone_number, '\\D', '', 'g')
+               )
+               AND dc.status IN ('sent', 'pending', 'delivered')`,
+            [message.dispatch_id, message.contact_id, contactStatus]
+          );
+        }
+      }
     }
 
     // Se for mensagem recebida (resposta), verificar se é interação com devocional

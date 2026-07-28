@@ -458,16 +458,55 @@ export async function sendEvolutionTextSafely(
       });
     }
 
-    await markSendSuccess(instanceId, slot.reservationToken);
+    const data = response.data;
+    const nested = data?.data && typeof data.data === 'object' ? data.data : null;
+    const explicitFail =
+      data?.error != null ||
+      data?.status === 'error' ||
+      data?.status === 'ERROR' ||
+      data?.success === false ||
+      nested?.error != null;
+
+    if (explicitFail) {
+      const errMsg =
+        String(data?.error?.message || data?.message || data?.error || 'Evolution retornou erro no corpo').slice(
+          0,
+          300
+        );
+      await applyCooldown(instanceId, 'unknown');
+      throw new EvolutionSafeSendError(`Evolution rejeitou envio: ${errMsg}`, {
+        kind: 'unknown',
+        instanceId,
+        httpStatus: response.status,
+      });
+    }
 
     const messageId =
-      response.data?.key?.id ||
-      response.data?.messageId ||
-      `evo-${Date.now()}-${slot.sequenceNumber}`;
+      data?.key?.id ||
+      data?.messageId ||
+      nested?.key?.id ||
+      nested?.messageId ||
+      data?.keyId ||
+      null;
+
+    if (!messageId) {
+      // HTTP 200 sem id real = falso positivo clássico (não inventar evo-timestamp)
+      await applyCooldown(instanceId, 'provider_unavailable');
+      throw new EvolutionSafeSendError(
+        'Evolution HTTP OK mas sem messageId/key.id — envio não confirmado',
+        {
+          kind: 'provider_unavailable',
+          instanceId,
+          httpStatus: response.status,
+        }
+      );
+    }
+
+    await markSendSuccess(instanceId, slot.reservationToken);
 
     addLog(
       'success',
-      `[EvolutionSafeSender] Enviado inst=${instanceId} seq=${slot.sequenceNumber} to=${masked} wait=${slot.waitedMs}ms gap=${slot.delayAppliedMs}ms media=${media ? 'yes' : 'no'}`
+      `[EvolutionSafeSender] Enviado inst=${instanceId} seq=${slot.sequenceNumber} to=${masked} wait=${slot.waitedMs}ms gap=${slot.delayAppliedMs}ms media=${media ? 'yes' : 'no'} mid=${String(messageId).slice(0, 24)}`
     );
 
     return {
