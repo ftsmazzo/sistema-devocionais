@@ -1,3 +1,12 @@
+/**
+ * LEGACY / DEAD PATH — não usar no envio de campanha.
+ *
+ * O caminho oficial é: dispatch_items → dispatchWorker → evolutionSafeSender → instance_send_guard.
+ * Blindagem operacional = worker_dispatch_config (UI /worker-config) + instance_send_guard.
+ *
+ * `applyBlindage` não tem callers no hot path. Mantido apenas por compatibilidade de API
+ * de regras/profiles e `recordBlindageSuccessfulSend` (anti-repetição pós-sucesso no worker).
+ */
 import { pool } from '../database';
 import axios from 'axios';
 import { createHash } from 'crypto';
@@ -366,8 +375,9 @@ export async function getActiveRules(forInstanceId?: number | null): Promise<Bli
 
 /**
  * Aplica todas as blindagens antes de enviar mensagem.
- * Ordem: validações com regras globais + preferência → seleção de instância →
- * regras efetivas (global + instância escolhida) para limites, horário e delay.
+ *
+ * @deprecated LEGACY / DEAD PATH — zero callers no pipeline oficial.
+ * Não usar. Cadência real: worker_dispatch_config + instance_send_guard.
  */
 export async function applyBlindage(messageData: {
   to: string;

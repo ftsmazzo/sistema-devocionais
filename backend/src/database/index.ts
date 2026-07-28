@@ -633,11 +633,16 @@ export async function initializeDatabase() {
                        WHERE table_name = 'contacts' AND column_name = 'consecutive_devocional_failures') THEN
           ALTER TABLE contacts ADD COLUMN consecutive_devocional_failures INTEGER DEFAULT 0;
         END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                       WHERE table_name = 'contacts' AND column_name = 'preferred_instance_id') THEN
+          ALTER TABLE contacts ADD COLUMN preferred_instance_id INTEGER REFERENCES instances(id) ON DELETE SET NULL;
+        END IF;
       END $$;
     `);
 
     await client.query(`
       CREATE INDEX IF NOT EXISTS idx_contacts_devocional_score ON contacts(devocional_score);
+      CREATE INDEX IF NOT EXISTS idx_contacts_preferred_instance ON contacts(preferred_instance_id);
     `);
 
     // Migração: Resetar falhas consecutivas e pontuação para contatos que nunca receberam devocional
@@ -1241,6 +1246,33 @@ export async function initializeDatabase() {
       CREATE INDEX IF NOT EXISTS idx_dispatch_items_next_retry ON dispatch_items(next_retry_at);
       CREATE INDEX IF NOT EXISTS idx_dispatch_items_contact_number ON dispatch_items(contact_number);
       CREATE INDEX IF NOT EXISTS idx_dispatch_items_instance ON dispatch_items(instance_id);
+    `);
+
+    // ============================================
+    // Auditoria persistente de envio por disparo/item
+    // ============================================
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS dispatch_send_events (
+        id SERIAL PRIMARY KEY,
+        dispatch_id INTEGER NOT NULL REFERENCES dispatches(id) ON DELETE CASCADE,
+        item_id INTEGER REFERENCES dispatch_items(id) ON DELETE SET NULL,
+        contact_id INTEGER,
+        instance_id INTEGER REFERENCES instances(id) ON DELETE SET NULL,
+        level VARCHAR(20) NOT NULL DEFAULT 'info',
+        code VARCHAR(60) NOT NULL,
+        message TEXT NOT NULL,
+        meta JSONB DEFAULT '{}',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_dispatch_send_events_dispatch
+        ON dispatch_send_events(dispatch_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_dispatch_send_events_item
+        ON dispatch_send_events(item_id);
+      CREATE INDEX IF NOT EXISTS idx_dispatch_send_events_code
+        ON dispatch_send_events(code);
     `);
 
     // ============================================

@@ -174,6 +174,34 @@ export interface EnsureDispatchItemsBatchResult {
  * Cria/reutiliza um item por contato elegível. Percorre todos; não para no primeiro.
  * Telefones normalizados; duplicata normalizada conta como skip (não mascara sucesso).
  */
+function poolAllowsInstance(poolIds: number[] | null | undefined, instanceId: number): boolean {
+  if (!poolIds || poolIds.length === 0) return true;
+  return poolIds.includes(instanceId);
+}
+
+/**
+ * Resolve instance_id inicial do item: sticky do contato se estiver no pool do disparo.
+ */
+async function resolveEnqueueInstanceId(
+  db: DbQueryable,
+  contactId: number | null | undefined,
+  instancePoolIds?: number[] | null
+): Promise<number | null> {
+  if (!contactId) return null;
+  const r = await db.query(
+    `SELECT preferred_instance_id FROM contacts WHERE id = $1::int LIMIT 1`,
+    [contactId]
+  );
+  const preferred = r.rows[0]?.preferred_instance_id as number | null | undefined;
+  if (!preferred) return null;
+  if (!poolAllowsInstance(instancePoolIds, preferred)) return null;
+  const ok = await db.query(
+    `SELECT id FROM instances WHERE id = $1::int AND status = 'connected' LIMIT 1`,
+    [preferred]
+  );
+  return ok.rows[0]?.id ?? null;
+}
+
 export async function ensureDispatchItemsBatch(params: {
   dispatchId: number;
   contacts: Array<{
@@ -184,6 +212,8 @@ export async function ensureDispatchItemsBatch(params: {
   messageType?: string | null;
   buildSnapshot: (contact: { id?: number | null; phone_number: string; name?: string | null }) => string;
   maxAttempts?: number;
+  /** Se informado, sticky preferred_instance_id só vale se estiver neste pool */
+  instancePoolIds?: number[] | null;
   db?: DbQueryable;
 }): Promise<EnsureDispatchItemsBatchResult> {
   const db = params.db || pool;
@@ -206,6 +236,12 @@ export async function ensureDispatchItemsBatch(params: {
     }
     seen.add(phone);
 
+    const stickyInstanceId = await resolveEnqueueInstanceId(
+      db,
+      contact.id ?? null,
+      params.instancePoolIds
+    );
+
     const item = await ensureDispatchItem({
       dispatchId: params.dispatchId,
       contactId: contact.id ?? null,
@@ -213,6 +249,7 @@ export async function ensureDispatchItemsBatch(params: {
       contactName: contact.name ?? null,
       messageType: params.messageType ?? null,
       messageSnapshot: params.buildSnapshot(contact),
+      instanceId: stickyInstanceId,
       maxAttempts: params.maxAttempts ?? 1,
       db,
     });

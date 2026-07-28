@@ -11,10 +11,9 @@ import {
   PersonalizadaDispatchError,
 } from '../services/personalizadaDispatch';
 import { executeDevocionalDispatch } from '../services/devocionalScheduler';
-import { personalizeDevocionalMessage, formatDevocionalMessage } from '../services/devocionalPersonalization';
 import { canReceiveDevocional } from '../services/devocionalScoring';
 import { maskPhone } from '../services/evolutionSafeSender';
-import { ensureDispatchItemsBatch, isDispatchItemSent } from '../services/dispatchItems';
+import { enqueueDevocionalAudience } from '../services/enqueueDevocionalAudience';
 import {
   assertDispatchPipelineAllowed,
   DispatchOperationalError,
@@ -24,7 +23,7 @@ import {
   PENDING_WHATSAPP_VALIDATION_MESSAGE,
   resolveListAudience,
 } from '../services/listAudienceResolver';
-import { normalizePhoneDigits } from '../utils/phoneNumber';
+import { listDispatchEvents } from '../services/dispatchSendEvents';
 import { addLog } from './logs';
 
 const router = express.Router();
@@ -236,6 +235,36 @@ router.get('/:id/items', async (req: AuthRequest, res) => {
   } catch (error: any) {
     console.error('❌ Erro ao listar itens do disparo:', error);
     res.status(500).json({ error: 'Erro ao listar itens do disparo', message: error.message });
+  }
+});
+
+/**
+ * Log persistente de envio do disparo (dispatch_send_events).
+ * GET /api/dispatches/:id/events?limit=&since=&item_id=
+ */
+router.get('/:id/events', async (req: AuthRequest, res) => {
+  try {
+    const { id } = req.params;
+    const dispatchCheck = await pool.query(`SELECT id FROM dispatches WHERE id = $1`, [id]);
+    if (dispatchCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Disparo não encontrado' });
+    }
+
+    const limit = req.query.limit ? parseInt(String(req.query.limit), 10) : 200;
+    const since = req.query.since ? String(req.query.since) : null;
+    const itemId = req.query.item_id != null ? parseInt(String(req.query.item_id), 10) : null;
+
+    const events = await listDispatchEvents({
+      dispatchId: Number(id),
+      itemId: Number.isFinite(itemId as number) ? itemId : null,
+      since,
+      limit,
+    });
+
+    res.json({ events, total: events.length });
+  } catch (error: any) {
+    console.error('❌ Erro ao listar eventos do disparo:', error);
+    res.status(500).json({ error: 'Erro ao listar eventos do disparo', message: error.message });
   }
 });
 
@@ -1106,64 +1135,18 @@ async function processDevocionalDispatchManually(dispatchId: number): Promise<vo
     );
     const timezone = configResult.rows[0]?.timezone || 'America/Sao_Paulo';
 
-    let enqueued = 0;
-    let alreadySent = 0;
-
-    const batch = await ensureDispatchItemsBatch({
+    const batch = await enqueueDevocionalAudience({
       dispatchId,
       contacts: eligibleContacts,
-      messageType: 'devocional',
-      maxAttempts: 1,
-      buildSnapshot: (contact) =>
-        personalizeDevocionalMessage(
-          formatDevocionalMessage(devocional),
-          contact.name ?? null,
-          timezone
-        ),
+      devocional,
+      timezone,
+      instancePoolIds: instances.map((i: { id: number }) => i.id),
+      logPrefix: `[Devocional Manual ${dispatchId}]`,
     });
-
-    if (batch.expected !== eligibleContacts.length || batch.total < eligibleContacts.length) {
-      const msg =
-        `Enfileiramento manual incompleto: elegíveis=${eligibleContacts.length}, ` +
-        `únicos=${batch.expected}, items=${batch.total}`;
-      addLog('error', `[Devocional Manual ${dispatchId}] ${msg}`);
-      throw new Error(msg);
-    }
-
-    for (const contact of eligibleContacts) {
-      const phone = normalizePhoneDigits(contact.phone_number || '', '55');
-      if (await isDispatchItemSent(dispatchId, phone)) {
-        alreadySent++;
-        continue;
-      }
-
-      await pool.query(
-        `INSERT INTO dispatch_contacts (dispatch_id, contact_number, contact_name, status)
-         SELECT $1::int, $2::varchar(50), $3::varchar(255), 'pending'
-         WHERE NOT EXISTS (
-           SELECT 1 FROM dispatch_contacts
-           WHERE dispatch_id = $4::int AND contact_number = $5::varchar(50)
-         )`,
-        [dispatchId, phone, contact.name, dispatchId, phone]
-      );
-
-      enqueued++;
-    }
-
-    await pool.query(
-      `UPDATE dispatches
-       SET total_contacts = $1,
-           contacts_processed = $2,
-           status = 'running',
-           completed_at = NULL,
-           updated_at = CURRENT_TIMESTAMP
-       WHERE id = $3`,
-      [eligibleContacts.length, alreadySent, dispatchId]
-    );
 
     console.log(
       `   ✅ Enfileiramento manual: created=${batch.created} reused=${batch.reused} total=${batch.total} ` +
-        `(enqueued=${enqueued}, already_sent=${alreadySent}) — worker (${countsLog})`
+        `(enqueued=${batch.enqueuedContacts}, already_sent=${batch.alreadySent}) — worker (${countsLog})`
     );
     addLog(
       'success',

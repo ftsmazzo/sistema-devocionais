@@ -137,6 +137,17 @@ export default function Dispatches() {
   const limit = 10;
   const [detailDispatch, setDetailDispatch] = useState<Dispatch | null>(null);
   const [detailContacts, setDetailContacts] = useState<any[]>([]);
+  const [detailEvents, setDetailEvents] = useState<
+    Array<{
+      id: number;
+      level: string;
+      code: string;
+      message: string;
+      instance_id: number | null;
+      item_id: number | null;
+      created_at: string;
+    }>
+  >([]);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [loadingUpload, setLoadingUpload] = useState(false);
   const [editModal, setEditModal] = useState<Dispatch | null>(null);
@@ -340,15 +351,34 @@ export default function Dispatches() {
   const openDetail = async (dispatch: Dispatch) => {
     setDetailDispatch(dispatch);
     setLoadingDetail(true);
+    setDetailEvents([]);
     try {
-      const response = await api.get(`/dispatches/${dispatch.id}/contacts`);
-      setDetailContacts(response.data.contacts || []);
+      const [contactsRes, eventsRes] = await Promise.all([
+        api.get(`/dispatches/${dispatch.id}/contacts`),
+        api.get(`/dispatches/${dispatch.id}/events`, { params: { limit: 300 } }),
+      ]);
+      setDetailContacts(contactsRes.data.contacts || []);
+      setDetailEvents(eventsRes.data.events || []);
     } catch (error) {
       setToast({ message: 'Erro ao carregar detalhes', type: 'error' });
     } finally {
       setLoadingDetail(false);
     }
   };
+
+  useEffect(() => {
+    if (!detailDispatch) return;
+    const id = detailDispatch.id;
+    const t = setInterval(async () => {
+      try {
+        const eventsRes = await api.get(`/dispatches/${id}/events`, { params: { limit: 300 } });
+        setDetailEvents(eventsRes.data.events || []);
+      } catch {
+        /* ignore poll errors */
+      }
+    }, 8000);
+    return () => clearInterval(t);
+  }, [detailDispatch?.id]);
 
   const openEditPending = async (d: Dispatch) => {
     let full = d;
@@ -1089,6 +1119,76 @@ export default function Dispatches() {
                         ))}
                       </tbody>
                     </table>
+                  </div>
+
+                  <div style={{ marginTop: 28 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                      <h4 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                        Log do disparo
+                      </h4>
+                      <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                        Persistente · atualiza a cada 8s
+                      </span>
+                    </div>
+                    <div
+                      style={{
+                        border: '1px solid var(--border)',
+                        borderRadius: 16,
+                        maxHeight: 280,
+                        overflowY: 'auto',
+                        background: 'rgba(0,0,0,0.15)',
+                        padding: '8px 0',
+                        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+                        fontSize: '0.75rem',
+                      }}
+                    >
+                      {detailEvents.length === 0 ? (
+                        <div style={{ padding: '20px 16px', color: 'var(--text-muted)', textAlign: 'center' }}>
+                          Nenhum evento ainda. O worker grava CLAIM / INSTANCE_PICK / SEND_OK / SEND_FAIL aqui.
+                        </div>
+                      ) : (
+                        detailEvents.map((ev) => {
+                          const color =
+                            ev.level === 'error'
+                              ? '#fb7185'
+                              : ev.level === 'success'
+                                ? '#34d399'
+                                : ev.level === 'warning'
+                                  ? '#fbbf24'
+                                  : 'var(--text-secondary)';
+                          return (
+                            <div
+                              key={ev.id}
+                              style={{
+                                padding: '6px 16px',
+                                borderBottom: '1px solid rgba(255,255,255,0.04)',
+                                color,
+                              }}
+                            >
+                              <span style={{ color: 'var(--text-muted)', marginRight: 8 }}>
+                                {new Date(ev.created_at).toLocaleTimeString('pt-BR', {
+                                  hour: '2-digit',
+                                  minute: '2-digit',
+                                  second: '2-digit',
+                                })}
+                              </span>
+                              <span style={{ fontWeight: 700, marginRight: 8 }}>[{ev.code}]</span>
+                              {ev.instance_id != null && (
+                                <span style={{ color: 'var(--text-muted)', marginRight: 8 }}>
+                                  inst#{ev.instance_id}
+                                </span>
+                              )}
+                              {ev.item_id != null && (
+                                <span style={{ color: 'var(--text-muted)', marginRight: 8 }}>
+                                  item#{ev.item_id}
+                                </span>
+                              )}
+                              <span>{ev.message}</span>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
                   </div>
                 </div>
               )}

@@ -1,6 +1,9 @@
 /**
  * Worker interno de dispatch_items via PostgreSQL (FOR UPDATE SKIP LOCKED).
  * Único caminho operacional de envio de campanha — chama sendEvolutionTextSafely.
+ *
+ * Path oficial: dispatch_items → dispatchWorker → evolutionSafeSender → instance_send_guard → Evolution
+ * Blindagem operacional: worker_dispatch_config + instance_send_guard (NÃO applyBlindage).
  */
 import { randomBytes } from 'crypto';
 import { pool } from '../database';
@@ -36,6 +39,7 @@ import {
   checkWhatsAppNumberDetailed,
 } from './whatsappValidation';
 import { isWhatsAppAutoValidateOnWorker } from './listAudienceResolver';
+import { recordDispatchEvent } from './dispatchSendEvents';
 
 export {
   isDispatchWorkerEnabled,
@@ -122,13 +126,32 @@ async function clearItemLock(itemId: number): Promise<void> {
   );
 }
 
-async function resolveSendInstanceId(preferred?: number | null): Promise<number | null> {
-  if (preferred) {
-    const pref = await pool.query(
-      `SELECT id FROM instances WHERE id = $1 AND status = 'connected' LIMIT 1`,
-      [preferred]
+function parseInstancePool(raw: unknown): number[] {
+  if (!raw) return [];
+  let arr: unknown = raw;
+  if (typeof raw === 'string') {
+    try {
+      arr = JSON.parse(raw);
+    } catch {
+      return [];
+    }
+  }
+  if (!Array.isArray(arr)) return [];
+  return arr
+    .map((x) => Number(x))
+    .filter((n) => Number.isFinite(n) && n > 0);
+}
+
+async function pickLruConnected(poolIds?: number[]): Promise<number | null> {
+  if (poolIds && poolIds.length > 0) {
+    const r = await pool.query(
+      `SELECT id FROM instances
+       WHERE status = 'connected' AND id = ANY($1::int[])
+       ORDER BY last_message_sent_at ASC NULLS FIRST
+       LIMIT 1`,
+      [poolIds]
     );
-    if (pref.rows[0]) return pref.rows[0].id;
+    return r.rows[0]?.id ?? null;
   }
   const any = await pool.query(
     `SELECT id FROM instances
@@ -137,6 +160,71 @@ async function resolveSendInstanceId(preferred?: number | null): Promise<number 
      LIMIT 1`
   );
   return any.rows[0]?.id ?? null;
+}
+
+async function isConnectedInPool(
+  instanceId: number,
+  poolIds: number[]
+): Promise<boolean> {
+  if (poolIds.length > 0 && !poolIds.includes(instanceId)) return false;
+  const r = await pool.query(
+    `SELECT id FROM instances WHERE id = $1 AND status = 'connected' LIMIT 1`,
+    [instanceId]
+  );
+  return Boolean(r.rows[0]);
+}
+
+/**
+ * Ordem: item.instance_id (retry) → contact.preferred_instance_id (sticky no pool)
+ * → LRU no pool dispatches.instance_ids → LRU global se pool vazio.
+ */
+export async function resolveSendInstanceId(params: {
+  itemInstanceId?: number | null;
+  contactId?: number | null;
+  dispatchInstanceIds?: unknown;
+}): Promise<{ instanceId: number | null; reason: string }> {
+  const poolIds = parseInstancePool(params.dispatchInstanceIds);
+
+  if (params.itemInstanceId) {
+    if (await isConnectedInPool(params.itemInstanceId, poolIds)) {
+      return { instanceId: params.itemInstanceId, reason: 'item_sticky' };
+    }
+  }
+
+  if (params.contactId) {
+    const pref = await pool.query(
+      `SELECT preferred_instance_id FROM contacts WHERE id = $1 LIMIT 1`,
+      [params.contactId]
+    );
+    const preferred = pref.rows[0]?.preferred_instance_id as number | null | undefined;
+    if (preferred && (await isConnectedInPool(preferred, poolIds))) {
+      return { instanceId: preferred, reason: 'contact_preferred' };
+    }
+  }
+
+  const fromPool = await pickLruConnected(poolIds.length > 0 ? poolIds : undefined);
+  if (fromPool) {
+    return {
+      instanceId: fromPool,
+      reason: poolIds.length > 0 ? 'pool_lru' : 'global_lru',
+    };
+  }
+
+  return { instanceId: null, reason: 'none_connected' };
+}
+
+async function persistContactPreferredInstance(
+  contactId: number | null | undefined,
+  instanceId: number
+): Promise<void> {
+  if (!contactId) return;
+  await pool.query(
+    `UPDATE contacts
+     SET preferred_instance_id = $2,
+         updated_at = CURRENT_TIMESTAMP
+     WHERE id = $1`,
+    [contactId, instanceId]
+  );
 }
 
 async function bumpDispatchCounters(
@@ -170,9 +258,11 @@ async function getDispatchRow(dispatchId: number): Promise<{
   dispatch_type: string | null;
   devocional_id: number | null;
   total_contacts: number | null;
+  instance_ids: unknown;
 } | null> {
   const r = await pool.query(
-    `SELECT status, metadata, dispatch_type, devocional_id, total_contacts FROM dispatches WHERE id = $1`,
+    `SELECT status, metadata, dispatch_type, devocional_id, total_contacts, instance_ids
+     FROM dispatches WHERE id = $1`,
     [dispatchId]
   );
   return r.rows[0] ?? null;
@@ -200,7 +290,6 @@ async function maybeCompleteDispatch(dispatchId: number): Promise<void> {
         `[DispatchWorker] Dispatch ${dispatchId} NÃO concluído: ${decision.reason}. ` +
           `Mantendo status=${dispatch.status} (itens=${summary.total}, terminais=${summary.terminal}, abertos=${summary.open}, esperado=${expected})`
       );
-      // Reabre se estava inconsistente como completed (defesa — normalmente já está running)
       await pool.query(
         `UPDATE dispatches
          SET status = CASE WHEN status IN ('completed', 'failed') THEN 'running' ELSE status END,
@@ -221,6 +310,14 @@ async function maybeCompleteDispatch(dispatchId: number): Promise<void> {
      WHERE id = $1 AND status IN ('running', 'pending', 'queued')`,
     [dispatchId]
   );
+
+  await recordDispatchEvent({
+    dispatchId,
+    level: 'success',
+    code: 'COMPLETE',
+    message: `Dispatch concluído (itens=${summary.total}, terminais=${summary.terminal})`,
+    meta: { items: summary.total, terminal: summary.terminal },
+  });
 }
 
 async function validateDestination(item: DispatchItemRow): Promise<
@@ -250,12 +347,10 @@ async function validateDestination(item: DispatchItemRow): Promise<
     }
 
     if (row.whatsapp_validated === true) {
-      // ok — pode seguir
+      // ok
     } else if (row.whatsapp_validated === false && row.whatsapp_validated_at != null) {
-      // Inválido confirmado (validação já ocorreu)
       return { ok: false, reason: 'WHATSAPP_INVALID', category: 'WHATSAPP_INVALID' };
     } else if (isWhatsAppAutoValidateOnWorker()) {
-      // Pendente: validar antes do envio (sem sendText)
       const detailed = await checkWhatsAppNumberDetailed(row.phone_number || number);
       if (!detailed.ok) {
         return {
@@ -270,7 +365,6 @@ async function validateDestination(item: DispatchItemRow): Promise<
         return { ok: false, reason: 'WHATSAPP_INVALID', category: 'WHATSAPP_INVALID' };
       }
     } else {
-      // Pendente sem auto-validate — nunca enviar
       return {
         ok: false,
         reason: 'WHATSAPP_VALIDATION_REQUIRED',
@@ -278,7 +372,6 @@ async function validateDestination(item: DispatchItemRow): Promise<
       };
     }
   } else {
-    // Sem contact_id não dá para garantir validação — bloquear envio real
     return {
       ok: false,
       reason: 'WHATSAPP_VALIDATION_REQUIRED',
@@ -296,11 +389,31 @@ export async function processClaimedDispatchItem(item: DispatchItemRow): Promise
   outcome: 'sent' | 'skipped' | 'failed' | 'pending_retry' | 'noop' | 'dry_run' | 'deferred';
   realSendAttempted: boolean;
 }> {
+  await recordDispatchEvent({
+    dispatchId: item.dispatch_id,
+    itemId: item.id,
+    contactId: item.contact_id,
+    instanceId: item.instance_id,
+    level: 'info',
+    code: 'CLAIM',
+    message: `Item claimado ${maskPhone(item.contact_number)} tentativa=${item.attempt_count}`,
+    meta: { attempt_count: item.attempt_count, status_was: item.status },
+    mirrorAddLog: false,
+  });
+
   const dispatch = await getDispatchRow(item.dispatch_id);
   if (!dispatch || !['running', 'pending'].includes(dispatch.status)) {
     await markDispatchItemSkipped({
       itemId: item.id,
       reason: `Dispatch inativo (status=${dispatch?.status || 'missing'})`,
+    });
+    await recordDispatchEvent({
+      dispatchId: item.dispatch_id,
+      itemId: item.id,
+      contactId: item.contact_id,
+      level: 'warning',
+      code: 'SKIP',
+      message: `Dispatch inativo (status=${dispatch?.status || 'missing'})`,
     });
     await clearItemLock(item.id);
     return { outcome: 'skipped', realSendAttempted: false };
@@ -329,10 +442,15 @@ export async function processClaimedDispatchItem(item: DispatchItemRow): Promise
         errorCategory: dest.category || 'whatsapp_provider_unavailable',
         backoffMinutes: 15,
       });
-      addLog(
-        'warning',
-        `[DispatchWorker] Item ${item.id} retry (validação WA): ${maskPhone(item.contact_number)}`
-      );
+      await recordDispatchEvent({
+        dispatchId: item.dispatch_id,
+        itemId: item.id,
+        contactId: item.contact_id,
+        level: 'warning',
+        code: 'RETRY',
+        message: `Validação WA: ${dest.reason}`,
+        meta: { category: dest.category },
+      });
       return { outcome: 'pending_retry', realSendAttempted: false };
     }
 
@@ -353,6 +471,15 @@ export async function processClaimedDispatchItem(item: DispatchItemRow): Promise
       failedReason: dest.reason,
     });
     await bumpDispatchCounters(item.dispatch_id, 'failed');
+    await recordDispatchEvent({
+      dispatchId: item.dispatch_id,
+      itemId: item.id,
+      contactId: item.contact_id,
+      level: 'warning',
+      code: 'SKIP',
+      message: dest.reason,
+      meta: { category: dest.category },
+    });
     await clearItemLock(item.id);
     await maybeCompleteDispatch(item.dispatch_id);
     return { outcome: 'skipped', realSendAttempted: false };
@@ -365,14 +492,20 @@ export async function processClaimedDispatchItem(item: DispatchItemRow): Promise
       errorMessage: 'message_snapshot vazio',
       errorCategory: 'invalid_payload',
     });
+    await recordDispatchEvent({
+      dispatchId: item.dispatch_id,
+      itemId: item.id,
+      contactId: item.contact_id,
+      level: 'error',
+      code: 'SEND_FAIL',
+      message: 'message_snapshot vazio',
+    });
     await clearItemLock(item.id);
     await bumpDispatchCounters(item.dispatch_id, 'failed');
     await maybeCompleteDispatch(item.dispatch_id);
     return { outcome: 'failed', realSendAttempted: false };
   }
 
-  // --- Dry-run / real-send gates (sem Evolution) ---
-  // Config inválida: real + dry-run juntos → nunca envia
   if (isDispatchRealSendEnabled() && isDispatchDryRunEnabled()) {
     await releaseDispatchItemToQueue({
       itemId: item.id,
@@ -381,10 +514,14 @@ export async function processClaimedDispatchItem(item: DispatchItemRow): Promise
       errorCategory: 'invalid_config',
       backoffMinutes: 60,
     });
-    addLog(
-      'error',
-      `[DispatchWorker] Item ${item.id} bloqueado: envio real e simulação ligados juntos`
-    );
+    await recordDispatchEvent({
+      dispatchId: item.dispatch_id,
+      itemId: item.id,
+      contactId: item.contact_id,
+      level: 'error',
+      code: 'DEFERRED',
+      message: 'Envio real e simulação ligados juntos',
+    });
     return { outcome: 'deferred', realSendAttempted: false };
   }
 
@@ -397,10 +534,14 @@ export async function processClaimedDispatchItem(item: DispatchItemRow): Promise
         errorCategory: 'dry_run',
         backoffMinutes: 24 * 60,
       });
-      addLog(
-        'info',
-        `[DispatchWorker] DRY_RUN item ${item.id} ${maskPhone(item.contact_number)} — sem Evolution, status reversível`
-      );
+      await recordDispatchEvent({
+        dispatchId: item.dispatch_id,
+        itemId: item.id,
+        contactId: item.contact_id,
+        level: 'info',
+        code: 'DRY_RUN',
+        message: `DRY_RUN ${maskPhone(item.contact_number)} — sem Evolution`,
+      });
       await maybeCompleteDispatch(item.dispatch_id);
       return { outcome: 'dry_run', realSendAttempted: false };
     }
@@ -412,14 +553,24 @@ export async function processClaimedDispatchItem(item: DispatchItemRow): Promise
       errorCategory: 'real_send_disabled',
       backoffMinutes: 60,
     });
-    addLog(
-      'warning',
-      `[DispatchWorker] Item ${item.id} devolvido à fila (REAL_SEND_DISABLED) ${maskPhone(item.contact_number)}`
-    );
+    await recordDispatchEvent({
+      dispatchId: item.dispatch_id,
+      itemId: item.id,
+      contactId: item.contact_id,
+      level: 'warning',
+      code: 'DEFERRED',
+      message: `REAL_SEND_DISABLED ${maskPhone(item.contact_number)}`,
+    });
     return { outcome: 'deferred', realSendAttempted: false };
   }
 
-  const instanceId = await resolveSendInstanceId(item.instance_id);
+  const pick = await resolveSendInstanceId({
+    itemInstanceId: item.instance_id,
+    contactId: item.contact_id,
+    dispatchInstanceIds: dispatch.instance_ids,
+  });
+  const instanceId = pick.instanceId;
+
   if (!instanceId) {
     await markDispatchItemFailed({
       itemId: item.id,
@@ -434,16 +585,45 @@ export async function processClaimedDispatchItem(item: DispatchItemRow): Promise
       status: 'pending_retry',
       failedReason: 'Nenhuma instância conectada',
     });
+    await recordDispatchEvent({
+      dispatchId: item.dispatch_id,
+      itemId: item.id,
+      contactId: item.contact_id,
+      level: 'error',
+      code: 'INSTANCE_UNAVAILABLE',
+      message: 'Nenhuma instância conectada no pool/global',
+      meta: { reason: pick.reason },
+    });
     await clearItemLock(item.id);
     return { outcome: 'pending_retry', realSendAttempted: false };
   }
 
-  // Last-mile: revalidar dispatch imediatamente antes da chamada externa
+  await recordDispatchEvent({
+    dispatchId: item.dispatch_id,
+    itemId: item.id,
+    contactId: item.contact_id,
+    instanceId,
+    level: 'info',
+    code: 'INSTANCE_PICK',
+    message: `Instância ${instanceId} (${pick.reason}) → ${maskPhone(item.contact_number)}`,
+    meta: { reason: pick.reason },
+    mirrorAddLog: false,
+  });
+
   const lastMile = await getDispatchRow(item.dispatch_id);
   if (!lastMile || !['running', 'pending'].includes(lastMile.status)) {
     await markDispatchItemSkipped({
       itemId: item.id,
       reason: `Dispatch pausado/cancelado antes do envio (status=${lastMile?.status || 'missing'})`,
+    });
+    await recordDispatchEvent({
+      dispatchId: item.dispatch_id,
+      itemId: item.id,
+      contactId: item.contact_id,
+      instanceId,
+      level: 'warning',
+      code: 'SKIP',
+      message: `Pausado/cancelado antes do envio (status=${lastMile?.status || 'missing'})`,
     });
     await clearItemLock(item.id);
     return { outcome: 'skipped', realSendAttempted: false };
@@ -513,6 +693,12 @@ export async function processClaimedDispatchItem(item: DispatchItemRow): Promise
     });
     await bumpDispatchCounters(item.dispatch_id, 'success');
 
+    try {
+      await persistContactPreferredInstance(item.contact_id, instanceId);
+    } catch {
+      /* sticky não bloqueia */
+    }
+
     if (
       (item.message_type === 'devocional' || lastMile.dispatch_type === 'devocional') &&
       item.contact_id
@@ -537,10 +723,16 @@ export async function processClaimedDispatchItem(item: DispatchItemRow): Promise
     await clearItemLock(item.id);
     await maybeCompleteDispatch(item.dispatch_id);
 
-    addLog(
-      'success',
-      `[DispatchWorker] Enviado item ${item.id} ${maskPhone(item.contact_number)} via instância ${instanceId}`
-    );
+    await recordDispatchEvent({
+      dispatchId: item.dispatch_id,
+      itemId: item.id,
+      contactId: item.contact_id,
+      instanceId,
+      level: 'success',
+      code: 'SEND_OK',
+      message: `Enviado ${maskPhone(item.contact_number)} via instância ${instanceId}`,
+      meta: { provider_message_id: sendResult.messageId, pick_reason: pick.reason },
+    });
     return { outcome: 'sent', realSendAttempted: true };
   } catch (error: any) {
     const connectivity =
@@ -572,10 +764,16 @@ export async function processClaimedDispatchItem(item: DispatchItemRow): Promise
     await clearItemLock(item.id);
     await maybeCompleteDispatch(item.dispatch_id);
 
-    addLog(
-      'error',
-      `[DispatchWorker] Falha item ${item.id} ${maskPhone(item.contact_number)}: ${(error?.message || '').slice(0, 200)}`
-    );
+    await recordDispatchEvent({
+      dispatchId: item.dispatch_id,
+      itemId: item.id,
+      contactId: item.contact_id,
+      instanceId,
+      level: 'error',
+      code: asPendingRetry ? 'RETRY' : 'SEND_FAIL',
+      message: (error?.message || String(error)).slice(0, 500),
+      meta: { connectivity, asPendingRetry },
+    });
     return {
       outcome: asPendingRetry ? 'pending_retry' : 'failed',
       realSendAttempted: true,
@@ -611,6 +809,14 @@ export async function processDispatchWorkerTick(
           errorCategory: 'worker_error',
         });
         await clearItemLock(item.id);
+        await recordDispatchEvent({
+          dispatchId: item.dispatch_id,
+          itemId: item.id,
+          contactId: item.contact_id,
+          level: 'error',
+          code: 'SEND_FAIL',
+          message: `Erro no worker: ${(error?.message || String(error)).slice(0, 400)}`,
+        });
       } catch {
         /* ignore */
       }

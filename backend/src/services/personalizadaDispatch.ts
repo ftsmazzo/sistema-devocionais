@@ -326,6 +326,7 @@ export async function enqueuePersonalizadaDispatch(params: {
     contacts,
     messageType,
     maxAttempts: 1,
+    instancePoolIds: verified.map((i) => i.id),
     buildSnapshot: (contact) => applyMessageTemplate(dispatch.message_template, contact.name),
     db,
   });
@@ -481,6 +482,7 @@ export async function createAndEnqueuePersonalizadaDispatch(
       contacts,
       messageType: PERSONALIZADA_DISPATCH_TYPE,
       maxAttempts: 1,
+      instancePoolIds: verified.map((i) => i.id),
       buildSnapshot: (contact) => applyMessageTemplate(message_template, contact.name),
       db: client,
     });

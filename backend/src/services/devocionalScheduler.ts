@@ -1,12 +1,11 @@
 import { pool } from '../database';
-import { personalizeDevocionalMessage, formatDevocionalMessage } from './devocionalPersonalization';
+import { formatDevocionalMessage } from './devocionalPersonalization';
 import { canReceiveDevocional } from './devocionalScoring';
 import { addLog } from '../routes/logs';
 import { pingInstanceHealth } from './retryQueue';
 import { reconcileActiveJourneyForDate } from './journeyReconcile';
 import { markInstanceOfflineInDb, notifyAdminInstanceOffline } from './dispatchRetry';
-import { maskPhone } from './evolutionSafeSender';
-import { ensureDispatchItemsBatch, isDispatchItemSent } from './dispatchItems';
+import { enqueueDevocionalAudience } from './enqueueDevocionalAudience';
 import {
   assertDispatchPipelineAllowed,
   DispatchOperationalError,
@@ -17,7 +16,6 @@ import {
   isWhatsAppAutoValidateOnPrepare,
   resolveListAudience,
 } from './listAudienceResolver';
-import { normalizePhoneDigits } from '../utils/phoneNumber';
 
 /**
  * Serviço de agendamento para disparo automático de devocionais
@@ -303,8 +301,8 @@ export async function executeDevocionalDispatch(): Promise<void> {
     const dispatchResult = await pool.query(
       `INSERT INTO dispatches (
         name, message_template, dispatch_type, list_id,
-        devocional_id, total_contacts, status, started_at, metadata
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP, $8::jsonb)
+        devocional_id, instance_ids, total_contacts, status, started_at, metadata
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP, $9::jsonb)
       RETURNING id`,
       [
         `Devocional ${new Date().toLocaleDateString('pt-BR', { timeZone: timezone })}`,
@@ -312,6 +310,7 @@ export async function executeDevocionalDispatch(): Promise<void> {
         'devocional',
         config.list_id,
         devocionalId,
+        instances.map((i: { id: number }) => i.id),
         eligibleContacts.length,
         'running',
         JSON.stringify({
@@ -330,68 +329,18 @@ export async function executeDevocionalDispatch(): Promise<void> {
       `🚀 Disparo de devocional enfileirado: ${eligibleContacts.length} contatos (worker).`
     );
 
-    let enqueued = 0;
-    let alreadySent = 0;
-
-    const batch = await ensureDispatchItemsBatch({
+    const batch = await enqueueDevocionalAudience({
       dispatchId,
       contacts: eligibleContacts,
-      messageType: 'devocional',
-      maxAttempts: 1,
-      buildSnapshot: (contact) =>
-        personalizeDevocionalMessage(
-          formatDevocionalMessage(devocional),
-          contact.name ?? null,
-          config.timezone
-        ),
+      devocional,
+      timezone: config.timezone || timezone,
+      instancePoolIds: instances.map((i: { id: number }) => i.id),
+      logPrefix: `[Devocional ${dispatchId}]`,
     });
-
-    if (batch.expected !== eligibleContacts.length || batch.total < eligibleContacts.length) {
-      const msg =
-        `Enfileiramento incompleto: elegíveis=${eligibleContacts.length}, ` +
-        `únicos=${batch.expected}, dispatch_items=${batch.total}`;
-      addLog('error', `[Devocional] Dispatch ${dispatchId}: ${msg}`);
-      throw new Error(msg);
-    }
-
-    for (const contact of eligibleContacts) {
-      const phone = normalizePhoneDigits(contact.phone_number || '', '55');
-      if (await isDispatchItemSent(dispatchId, phone)) {
-        alreadySent++;
-        continue;
-      }
-
-      await pool.query(
-        `INSERT INTO dispatch_contacts (dispatch_id, contact_number, contact_name, status)
-         SELECT $1::int, $2::varchar(50), $3::varchar(255), 'pending'
-         WHERE NOT EXISTS (
-           SELECT 1 FROM dispatch_contacts
-           WHERE dispatch_id = $4::int AND contact_number = $5::varchar(50)
-         )`,
-        [dispatchId, phone, contact.name, dispatchId, phone]
-      );
-
-      enqueued++;
-      addLog(
-        'info',
-        `[Devocional] Enfileirado ${maskPhone(phone)} (created=${batch.created}, reused=${batch.reused})`
-      );
-    }
-
-    await pool.query(
-      `UPDATE dispatches
-       SET total_contacts = $1,
-           contacts_processed = $2,
-           status = 'running',
-           completed_at = NULL,
-           updated_at = CURRENT_TIMESTAMP
-       WHERE id = $3`,
-      [eligibleContacts.length, alreadySent, dispatchId]
-    );
 
     console.log(
       `   ✅ Enfileiramento concluído: created=${batch.created} reused=${batch.reused} total_items=${batch.total} ` +
-        `(contacts_enqueued=${enqueued}, already_sent=${alreadySent}) — worker processará`
+        `(contacts_enqueued=${batch.enqueuedContacts}, already_sent=${batch.alreadySent}) — worker processará`
     );
     addLog(
       'success',

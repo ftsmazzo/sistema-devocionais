@@ -3,12 +3,9 @@
  * Apenas prepara/consulta — nunca chama Evolution.
  */
 import { pool } from '../database';
-import { formatDevocionalMessage, personalizeDevocionalMessage } from './devocionalPersonalization';
-import {
-  ensureDispatchItemsBatch,
-  getDispatchItemsSummary,
-  isDispatchItemSent,
-} from './dispatchItems';
+import { formatDevocionalMessage } from './devocionalPersonalization';
+import { getDispatchItemsSummary } from './dispatchItems';
+import { enqueueDevocionalAudience } from './enqueueDevocionalAudience';
 import { getDispatchRuntimeSnapshot } from './dispatchRuntimeConfig';
 import { maskPhone } from './evolutionSafeSender';
 import { reconcileActiveJourneyForDate } from './journeyReconcile';
@@ -19,7 +16,6 @@ import {
   resolveListAudience,
 } from './listAudienceResolver';
 import { addLog } from '../routes/logs';
-import { normalizePhoneDigits } from '../utils/phoneNumber';
 import { evaluateOperationalPolicy } from './workerConfigSnapshot';
 
 function todayInTimezone(timezone: string): string {
@@ -414,17 +410,13 @@ export async function prepareTodayDevocionalOperation() {
     [dispatchId]
   );
 
-  const batch = await ensureDispatchItemsBatch({
+  const batch = await enqueueDevocionalAudience({
     dispatchId,
     contacts: eligible,
-    messageType: 'devocional',
-    maxAttempts: 1,
-    buildSnapshot: (contact) =>
-      personalizeDevocionalMessage(
-        formatDevocionalMessage(devocional),
-        contact.name ?? null,
-        timezone
-      ),
+    devocional,
+    timezone,
+    instancePoolIds: null,
+    logPrefix: `[Operação ${dispatchId}]`,
   });
 
   if (batch.expected !== eligible.length) {
@@ -443,32 +435,7 @@ export async function prepareTodayDevocionalOperation() {
     throw Object.assign(new Error(msg), { status: 409 });
   }
 
-  let alreadySent = 0;
-  for (const contact of eligible) {
-    const phone = normalizePhoneDigits(contact.phone_number || '', '55');
-    if (await isDispatchItemSent(dispatchId, phone)) {
-      alreadySent++;
-    }
-
-    await pool.query(
-      `INSERT INTO dispatch_contacts (dispatch_id, contact_number, contact_name, status)
-       SELECT $1::int, $2::varchar(50), $3::varchar(255), 'pending'
-       WHERE NOT EXISTS (
-         SELECT 1 FROM dispatch_contacts WHERE dispatch_id = $4::int AND contact_number = $5::varchar(50)
-       )`,
-      [dispatchId, phone, contact.name, dispatchId, phone]
-    );
-  }
-
-  await pool.query(
-    `UPDATE dispatches
-     SET total_contacts = $1,
-         status = 'running',
-         completed_at = NULL,
-         updated_at = CURRENT_TIMESTAMP
-     WHERE id = $2`,
-    [eligible.length, dispatchId]
-  );
+  const alreadySent = batch.alreadySent;
 
   const summary = await getDispatchItemsSummary(dispatchId);
   if (summary.total < eligible.length) {

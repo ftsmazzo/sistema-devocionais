@@ -1,7 +1,7 @@
 import express from 'express';
 import { pool } from '../database';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
-import { createDefaultRules, reconcileBlindageRuleConfigs, applyBlindageGlobalProfile, BLINDAGE_PROFILES_META, getBlindageProfilePackage } from '../services/blindage';
+import { BLINDAGE_PROFILES_META, getBlindageProfilePackage } from '../services/blindage';
 import { getWorkerConfigSnapshot } from '../services/workerConfigSnapshot';
 import {
   applyWorkerDispatchProfile,
@@ -80,8 +80,18 @@ router.post('/worker-config/profile', async (req: AuthRequest, res) => {
 /**
  * DEPRECATED (legado): rotas de regras blindage_rules / profiles.
  * A UI oficial usa apenas /worker-config (GET/PUT/POST profile).
- * Estes endpoints permanecem por compatibilidade de API, mas não devem ser usados pela tela.
+ * Mutations retornam 410 Gone — leitura ainda responde com aviso de depreciação.
  */
+function legacyBlindageGone(res: any, hint?: string) {
+  res.setHeader('Deprecation', 'true');
+  res.setHeader('Sunset', 'worker-config');
+  return res.status(410).json({
+    deprecated: true,
+    error: 'Endpoint legado desativado. Use Worker Config.',
+    message: hint || 'Use GET/PUT /api/blindage/worker-config e POST /api/blindage/worker-config/profile',
+  });
+}
+
 router.get('/profiles', (_req: AuthRequest, res) => {
   res.setHeader('Deprecation', 'true');
   res.setHeader('Sunset', 'worker-config');
@@ -90,7 +100,7 @@ router.get('/profiles', (_req: AuthRequest, res) => {
     message: 'Use GET/PUT /api/blindage/worker-config e POST /api/blindage/worker-config/profile',
     profiles: BLINDAGE_PROFILES_META,
     profileIds: ['conservative', 'moderate', 'aggressive'],
-    apply: { method: 'POST', path: '/api/blindage/profiles/apply', body: { profileId: 'moderate', dryRun: false } },
+    apply: { method: 'POST', path: '/api/blindage/worker-config/profile', body: { profile: 'conservador' } },
   });
 });
 
@@ -111,29 +121,11 @@ router.get('/profiles/:profileId', (req: AuthRequest, res) => {
  * POST /api/blindage/profiles/apply
  * Body: { "profileId": "moderate", "dryRun": false }
  */
-router.post('/profiles/apply', async (req: AuthRequest, res) => {
-  try {
-    const profileId = req.body?.profileId;
-    if (!profileId || typeof profileId !== 'string') {
-      return res.status(400).json({
-        error: 'Campo profileId obrigatório',
-        hint: 'conservative | moderate | aggressive',
-      });
-    }
-    const dryRun = req.body?.dryRun === true;
-    const result = await applyBlindageGlobalProfile(profileId, { dryRun });
-    res.json({
-      message: dryRun ? 'Simulação: nenhuma alteração gravada' : 'Perfil aplicado às regras globais',
-      ...result,
-    });
-  } catch (error: any) {
-    const msg = error?.message || String(error);
-    if (msg.includes('inválido') || msg.includes('Perfil')) {
-      return res.status(400).json({ error: msg });
-    }
-    console.error('Erro ao aplicar perfil de blindagem:', error);
-    res.status(500).json({ error: 'Erro ao aplicar perfil de blindagem' });
-  }
+router.post('/profiles/apply', async (_req: AuthRequest, res) => {
+  return legacyBlindageGone(
+    res,
+    'Use POST /api/blindage/worker-config/profile com { profile: "conservador"|"simulacao"|"moderado" }'
+  );
 });
 
 /**
@@ -228,199 +220,29 @@ router.get('/rules/:id', async (req: AuthRequest, res) => {
 
 /**
  * Criar regra de blindagem
- * POST /api/blindage/rules
+ * POST /api/blindage/rules — LEGACY 410
  */
-router.post('/rules', async (req: AuthRequest, res) => {
-  try {
-    const { instance_id, rule_name, rule_type, enabled = true, config } = req.body;
-
-    if (!rule_name || !rule_type || !config) {
-      return res.status(400).json({
-        error: 'Campos obrigatórios: rule_name, rule_type, config',
-      });
-    }
-
-    // instance_id pode ser null para regras globais (ex: instance_selection)
-    // Se fornecido, validar que a instância existe
-    if (instance_id !== null && instance_id !== undefined) {
-      const instanceCheck = await pool.query(
-        'SELECT id FROM instances WHERE id = $1',
-        [instance_id]
-      );
-
-      if (instanceCheck.rows.length === 0) {
-        return res.status(404).json({ error: 'Instância não encontrada' });
-      }
-    }
-
-    const result = await pool.query(
-      `INSERT INTO blindage_rules (instance_id, rule_name, rule_type, enabled, config)
-       VALUES ($1, $2, $3, $4, $5)
-       RETURNING *`,
-      [instance_id, rule_name, rule_type, enabled, JSON.stringify(config)]
-    );
-
-    res.status(201).json({ rule: result.rows[0] });
-  } catch (error: any) {
-    console.error('Erro ao criar regra:', error);
-    if (error.code === '23505') {
-      return res.status(409).json({ error: 'Regra já existe' });
-    }
-    res.status(500).json({ error: 'Erro ao criar regra' });
-  }
+router.post('/rules', async (_req: AuthRequest, res) => {
+  return legacyBlindageGone(res);
 });
 
 /**
- * Atualizar regra de blindagem
- * PUT /api/blindage/rules/:id
+ * Atualizar / deletar / reconciliar regras — LEGACY 410
  */
-router.put('/rules/:id', async (req: AuthRequest, res) => {
-  try {
-    const { id } = req.params;
-    const { rule_name, rule_type, enabled, config } = req.body;
-
-    console.log(`📝 Atualizando regra ${id}:`, { rule_name, rule_type, enabled, config });
-
-    const updates: string[] = [];
-    const params: any[] = [];
-    let paramCount = 1;
-
-    if (rule_name !== undefined) {
-      updates.push(`rule_name = $${paramCount}`);
-      params.push(rule_name);
-      paramCount++;
-    }
-
-    if (rule_type !== undefined) {
-      updates.push(`rule_type = $${paramCount}`);
-      params.push(rule_type);
-      paramCount++;
-    }
-
-    // IMPORTANTE: enabled pode ser false, então verificar explicitamente !== undefined
-    if (enabled !== undefined && enabled !== null) {
-      // Garantir que seja boolean
-      const enabledValue = enabled === true || enabled === 'true' || enabled === 1;
-      updates.push(`enabled = $${paramCount}`);
-      params.push(enabledValue);
-      paramCount++;
-      console.log(`   ✅ Campo 'enabled' será atualizado para: ${enabledValue}`);
-    }
-
-    if (config !== undefined) {
-      updates.push(`config = $${paramCount}`);
-      params.push(JSON.stringify(config));
-      paramCount++;
-    }
-
-    if (updates.length === 0) {
-      return res.status(400).json({ error: 'Nenhum campo para atualizar' });
-    }
-
-    updates.push(`updated_at = CURRENT_TIMESTAMP`);
-    params.push(id);
-
-    const result = await pool.query(
-      `UPDATE blindage_rules 
-       SET ${updates.join(', ')}
-       WHERE id = $${paramCount}
-       RETURNING *`,
-      params
-    );
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Regra não encontrada' });
-    }
-
-    console.log(`✅ Regra ${id} atualizada com sucesso. enabled: ${result.rows[0].enabled}`);
-
-    res.json({ rule: result.rows[0] });
-  } catch (error) {
-    console.error('❌ Erro ao atualizar regra:', error);
-    res.status(500).json({ error: 'Erro ao atualizar regra' });
-  }
+router.put('/rules/:id', async (_req: AuthRequest, res) => {
+  return legacyBlindageGone(res);
 });
 
-/**
- * Deletar regra de blindagem
- * DELETE /api/blindage/rules/:id
- */
-router.delete('/rules/:id', async (req: AuthRequest, res) => {
-  try {
-    const { id } = req.params;
-
-    const result = await pool.query(
-      'DELETE FROM blindage_rules WHERE id = $1 RETURNING *',
-      [id]
-    );
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Regra não encontrada' });
-    }
-
-    res.json({ message: 'Regra deletada com sucesso', rule: result.rows[0] });
-  } catch (error) {
-    console.error('Erro ao deletar regra:', error);
-    res.status(500).json({ error: 'Erro ao deletar regra' });
-  }
+router.delete('/rules/:id', async (_req: AuthRequest, res) => {
+  return legacyBlindageGone(res);
 });
 
-/**
- * Reconciliar configs de blindagem com o template canônico (merge de chaves ausentes).
- * POST /api/blindage/reconcile
- * Body opcional: { "dryRun": true, "strict": true }
- */
-router.post('/reconcile', async (req: AuthRequest, res) => {
-  try {
-    const dryRun = req.body?.dryRun === true;
-    const strict = req.body?.strict === true;
-    const result = await reconcileBlindageRuleConfigs({ dryRun, strict });
-    res.json({
-      message: dryRun
-        ? 'Simulação de reconciliação concluída (nenhuma alteração gravada)'
-        : 'Reconciliação concluída',
-      ...result,
-    });
-  } catch (error) {
-    console.error('Erro na reconciliação de blindagem:', error);
-    res.status(500).json({ error: 'Erro ao reconciliar regras de blindagem' });
-  }
+router.post('/reconcile', async (_req: AuthRequest, res) => {
+  return legacyBlindageGone(res);
 });
 
-/**
- * Criar regras padrão para uma instância
- * POST /api/blindage/rules/default/:instanceId
- */
-router.post('/rules/default/:instanceId', async (req: AuthRequest, res) => {
-  try {
-    const { instanceId } = req.params;
-
-    // Validar que a instância existe
-    const instanceCheck = await pool.query(
-      'SELECT id FROM instances WHERE id = $1',
-      [instanceId]
-    );
-
-    if (instanceCheck.rows.length === 0) {
-      return res.status(404).json({ error: 'Instância não encontrada' });
-    }
-
-    await createDefaultRules(parseInt(instanceId));
-
-    // Buscar regras criadas
-    const rules = await pool.query(
-      'SELECT * FROM blindage_rules WHERE instance_id = $1',
-      [instanceId]
-    );
-
-    res.status(201).json({
-      message: 'Regras padrão criadas com sucesso',
-      rules: rules.rows,
-    });
-  } catch (error) {
-    console.error('Erro ao criar regras padrão:', error);
-    res.status(500).json({ error: 'Erro ao criar regras padrão' });
-  }
+router.post('/rules/default/:instanceId', async (_req: AuthRequest, res) => {
+  return legacyBlindageGone(res);
 });
 
 function csvEscapeCell(raw: string): string {
