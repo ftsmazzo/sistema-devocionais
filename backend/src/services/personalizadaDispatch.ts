@@ -285,13 +285,19 @@ export async function enqueuePersonalizadaDispatch(params: {
   let instances: Array<{ id: number; instance_name: string }> = [];
   if (instanceIds && instanceIds.length > 0) {
     const r = await db.query(
-      `SELECT id, instance_name FROM instances WHERE id = ANY($1::int[]) AND status = 'connected'`,
-      [instanceIds.map(Number)]
+      `SELECT id, instance_name FROM instances
+       WHERE id = ANY($1::int[])
+         AND status = 'connected'
+         AND COALESCE(allow_dispatch, true) = true`,
+      [instanceIds]
     );
     instances = r.rows;
   } else {
     const r = await db.query(
-      `SELECT id, instance_name FROM instances WHERE status = 'connected' ORDER BY last_message_sent_at ASC NULLS FIRST`
+      `SELECT id, instance_name FROM instances
+       WHERE status = 'connected'
+         AND COALESCE(allow_dispatch, true) = true
+       ORDER BY last_message_sent_at ASC NULLS FIRST`
     );
     instances = r.rows;
   }
@@ -299,7 +305,6 @@ export async function enqueuePersonalizadaDispatch(params: {
   if (instances.length === 0) {
     throw new PersonalizadaDispatchError('Nenhuma instância conectada disponível', 400, toAudienceSummary(audience));
   }
-
   const verified: typeof instances = [];
   for (const inst of instances) {
     const online = await pingInstanceHealth(inst.id);
@@ -419,13 +424,19 @@ export async function createAndEnqueuePersonalizadaDispatch(
   let instances: Array<{ id: number; instance_name: string }> = [];
   if (instanceIds.length > 0) {
     const r = await pool.query(
-      `SELECT id, instance_name FROM instances WHERE id = ANY($1::int[]) AND status = 'connected'`,
+      `SELECT id, instance_name FROM instances
+       WHERE id = ANY($1::int[])
+         AND status = 'connected'
+         AND COALESCE(allow_dispatch, true) = true`,
       [instanceIds]
     );
     instances = r.rows;
   } else {
     const r = await pool.query(
-      `SELECT id, instance_name FROM instances WHERE status = 'connected' ORDER BY last_message_sent_at ASC NULLS FIRST`
+      `SELECT id, instance_name FROM instances
+       WHERE status = 'connected'
+         AND COALESCE(allow_dispatch, true) = true
+       ORDER BY last_message_sent_at ASC NULLS FIRST`
     );
     instances = r.rows;
   }

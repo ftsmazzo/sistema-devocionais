@@ -31,6 +31,8 @@ interface Instance {
   created_at: string;
   profile_picture_url?: string | null;
   profile_picture_updated_at?: string | null;
+  allow_dispatch?: boolean;
+  health_status?: string | null;
 }
 
 function accountBlock(instance: Instance): { label: string; value: string; hint?: string } {
@@ -377,6 +379,54 @@ export default function Instances() {
                     )}
                   </div>
                 </div>
+
+                <label
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: 12,
+                    padding: '12px 14px',
+                    borderRadius: 12,
+                    border: '1px solid var(--border)',
+                    background: instance.allow_dispatch === false ? 'rgba(251,113,133,0.06)' : 'rgba(16,185,129,0.06)',
+                    marginBottom: 16,
+                    cursor: 'pointer',
+                    fontSize: '0.82rem',
+                    color: 'var(--text-primary)',
+                  }}
+                >
+                  <span>
+                    <strong>Usar em disparos</strong>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>
+                      {instance.allow_dispatch === false
+                        ? 'Fora do pool (worker não escolhe esta instância)'
+                        : 'Liberada para campanhas / teste solo'}
+                    </div>
+                  </span>
+                  <input
+                    type="checkbox"
+                    checked={instance.allow_dispatch !== false}
+                    onChange={async (e) => {
+                      const allow = e.target.checked;
+                      try {
+                        await api.put(`/instances/${instance.id}`, { allow_dispatch: allow });
+                        setToast({
+                          message: allow
+                            ? `${instance.name} liberada para disparos`
+                            : `${instance.name} removida do pool de disparos`,
+                          type: 'success',
+                        });
+                        loadInstances();
+                      } catch (err: any) {
+                        setToast({
+                          message: err.response?.data?.error || 'Erro ao atualizar allow_dispatch',
+                          type: 'error',
+                        });
+                      }
+                    }}
+                  />
+                </label>
 
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
                   <button

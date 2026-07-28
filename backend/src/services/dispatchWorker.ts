@@ -146,7 +146,9 @@ async function pickLruConnected(poolIds?: number[]): Promise<number | null> {
   if (poolIds && poolIds.length > 0) {
     const r = await pool.query(
       `SELECT id FROM instances
-       WHERE status = 'connected' AND id = ANY($1::int[])
+       WHERE status = 'connected'
+         AND COALESCE(allow_dispatch, true) = true
+         AND id = ANY($1::int[])
        ORDER BY last_message_sent_at ASC NULLS FIRST
        LIMIT 1`,
       [poolIds]
@@ -156,6 +158,7 @@ async function pickLruConnected(poolIds?: number[]): Promise<number | null> {
   const any = await pool.query(
     `SELECT id FROM instances
      WHERE status = 'connected'
+       AND COALESCE(allow_dispatch, true) = true
      ORDER BY last_message_sent_at ASC NULLS FIRST
      LIMIT 1`
   );
@@ -168,7 +171,11 @@ async function isConnectedInPool(
 ): Promise<boolean> {
   if (poolIds.length > 0 && !poolIds.includes(instanceId)) return false;
   const r = await pool.query(
-    `SELECT id FROM instances WHERE id = $1 AND status = 'connected' LIMIT 1`,
+    `SELECT id FROM instances
+     WHERE id = $1
+       AND status = 'connected'
+       AND COALESCE(allow_dispatch, true) = true
+     LIMIT 1`,
     [instanceId]
   );
   return Boolean(r.rows[0]);

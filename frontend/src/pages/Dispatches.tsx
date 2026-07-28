@@ -51,6 +51,7 @@ interface InstanceOption {
   name?: string;
   instance_name: string;
   status: string;
+  allow_dispatch?: boolean;
 }
 
 function isPersonalizadaType(t: string | undefined): boolean {
@@ -949,22 +950,37 @@ export default function Dispatches() {
                         overflowY: 'auto',
                       }}
                     >
-                      {instances.filter((i) => i.status === 'connected').map((inst) => (
+                      {instances.filter((i) => i.status === 'connected').map((inst) => {
+                        const blocked = inst.allow_dispatch === false;
+                        return (
                         <label
                           key={inst.id}
-                          style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: '0.85rem', cursor: 'pointer' }}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 10,
+                            fontSize: '0.85rem',
+                            cursor: blocked ? 'not-allowed' : 'pointer',
+                            opacity: blocked ? 0.55 : 1,
+                          }}
                         >
                           <input
                             type="checkbox"
-                            checked={editForm.instance_ids.includes(inst.id)}
-                            onChange={() => toggleInstanceId(inst.id, 'edit')}
+                            checked={editForm.instance_ids.includes(inst.id) && !blocked}
+                            disabled={blocked}
+                            onChange={() => {
+                              if (!blocked) toggleInstanceId(inst.id, 'edit');
+                            }}
                           />
                           <span>
                             {inst.name || inst.instance_name}{' '}
-                            <span style={{ color: 'var(--text-muted)' }}>(#{inst.id})</span>
+                            <span style={{ color: 'var(--text-muted)' }}>
+                              (#{inst.id}){blocked ? ' — fora do pool' : ''}
+                            </span>
                           </span>
                         </label>
-                      ))}
+                        );
+                      })}
                     </div>
                     <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 6 }}>
                       {editForm.instance_ids.length === 0
@@ -1009,22 +1025,37 @@ export default function Dispatches() {
                         overflowY: 'auto',
                       }}
                     >
-                      {instances.filter((i) => i.status === 'connected').map((inst) => (
+                      {instances.filter((i) => i.status === 'connected').map((inst) => {
+                        const blocked = inst.allow_dispatch === false;
+                        return (
                         <label
                           key={inst.id}
-                          style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: '0.85rem', cursor: 'pointer' }}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 10,
+                            fontSize: '0.85rem',
+                            cursor: blocked ? 'not-allowed' : 'pointer',
+                            opacity: blocked ? 0.55 : 1,
+                          }}
                         >
                           <input
                             type="checkbox"
-                            checked={editForm.instance_ids.includes(inst.id)}
-                            onChange={() => toggleInstanceId(inst.id, 'edit')}
+                            checked={editForm.instance_ids.includes(inst.id) && !blocked}
+                            disabled={blocked}
+                            onChange={() => {
+                              if (!blocked) toggleInstanceId(inst.id, 'edit');
+                            }}
                           />
                           <span>
                             {inst.name || inst.instance_name}{' '}
-                            <span style={{ color: 'var(--text-muted)' }}>(#{inst.id})</span>
+                            <span style={{ color: 'var(--text-muted)' }}>
+                              (#{inst.id}){blocked ? ' — fora do pool' : ''}
+                            </span>
                           </span>
                         </label>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                   <div>
@@ -1181,6 +1212,7 @@ export default function Dispatches() {
                       instances
                         .filter((i) => i.status === 'connected')
                         .map((inst) => {
+                          const blocked = inst.allow_dispatch === false;
                           const checked = formData.instance_ids.includes(inst.id);
                           return (
                             <label
@@ -1190,19 +1222,24 @@ export default function Dispatches() {
                                 alignItems: 'center',
                                 gap: 10,
                                 fontSize: '0.85rem',
-                                color: 'var(--text-primary)',
-                                cursor: 'pointer',
+                                color: blocked ? 'var(--text-muted)' : 'var(--text-primary)',
+                                cursor: blocked ? 'not-allowed' : 'pointer',
+                                opacity: blocked ? 0.55 : 1,
                               }}
                             >
                               <input
                                 type="checkbox"
-                                checked={checked}
-                                onChange={() => toggleInstanceId(inst.id, 'create')}
+                                checked={checked && !blocked}
+                                disabled={blocked}
+                                onChange={() => {
+                                  if (!blocked) toggleInstanceId(inst.id, 'create');
+                                }}
                               />
                               <span>
                                 {inst.name || inst.instance_name}{' '}
                                 <span style={{ color: 'var(--text-muted)' }}>
                                   (#{inst.id} · {inst.instance_name})
+                                  {blocked ? ' — fora do pool' : ''}
                                 </span>
                               </span>
                             </label>

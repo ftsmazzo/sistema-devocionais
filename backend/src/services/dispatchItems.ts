@@ -196,7 +196,11 @@ async function resolveEnqueueInstanceId(
   if (!preferred) return null;
   if (!poolAllowsInstance(instancePoolIds, preferred)) return null;
   const ok = await db.query(
-    `SELECT id FROM instances WHERE id = $1::int AND status = 'connected' LIMIT 1`,
+    `SELECT id FROM instances
+     WHERE id = $1::int
+       AND status = 'connected'
+       AND COALESCE(allow_dispatch, true) = true
+     LIMIT 1`,
     [preferred]
   );
   return ok.rows[0]?.id ?? null;

@@ -26,11 +26,142 @@ import {
 import { listDispatchEvents } from '../services/dispatchSendEvents';
 import { normalizeContactPhoneForStorage } from '../utils/phoneNumber';
 import { addLog } from './logs';
+import axios from 'axios';
 
 const router = express.Router();
 
 // Todas as rotas requerem autenticação
 router.use(authenticateToken);
+
+function classifyMessageId(id: string | null | undefined): 'MISSING' | 'FAKE_EVO_TIMESTAMP' | 'FAKE_TEMP' | 'REAL_OR_PROVIDER' {
+  if (!id) return 'MISSING';
+  if (String(id).startsWith('evo-')) return 'FAKE_EVO_TIMESTAMP';
+  if (String(id).startsWith('temp-')) return 'FAKE_TEMP';
+  return 'REAL_OR_PROVIDER';
+}
+
+/**
+ * Diagnóstico lado a lado de disparos (provider_message_id + connectionState).
+ * GET /api/dispatches/diagnostic?ids=21,22
+ * Somente leitura — não envia mensagem.
+ */
+router.get('/diagnostic', async (req: AuthRequest, res) => {
+  try {
+    const raw = String(req.query.ids || '21,22');
+    const ids = raw
+      .split(',')
+      .map((x) => parseInt(x.trim(), 10))
+      .filter((n) => Number.isFinite(n) && n > 0)
+      .slice(0, 10);
+
+    if (ids.length === 0) {
+      return res.status(400).json({ error: 'Informe ids=21,22' });
+    }
+
+    const dispatches: any[] = [];
+    for (const dispatchId of ids) {
+      const d = await pool.query(
+        `SELECT id, name, status, instance_ids, started_at, completed_at
+         FROM dispatches WHERE id = $1`,
+        [dispatchId]
+      );
+      if (!d.rows[0]) {
+        dispatches.push({ id: dispatchId, missing: true });
+        continue;
+      }
+      const items = await pool.query(
+        `SELECT id, contact_name, contact_number, instance_id, status,
+                provider_message_id, attempt_count, sent_at, error_message
+         FROM dispatch_items WHERE dispatch_id = $1 ORDER BY id`,
+        [dispatchId]
+      );
+      const msgs = await pool.query(
+        `SELECT id, instance_id, message_id, status, contact_id, remote_jid, timestamp
+         FROM messages WHERE dispatch_id = $1 ORDER BY id`,
+        [dispatchId]
+      );
+      dispatches.push({
+        ...d.rows[0],
+        items: items.rows.map((row) => ({
+          ...row,
+          contact_number_masked: maskPhone(row.contact_number),
+          contact_number: undefined,
+          id_class: classifyMessageId(row.provider_message_id),
+        })),
+        messages: msgs.rows.map((row) => ({
+          ...row,
+          id_class: classifyMessageId(row.message_id),
+        })),
+      });
+    }
+
+    const instRows = await pool.query(
+      `SELECT id, instance_name, api_url, api_key, status, phone_number,
+              COALESCE(allow_dispatch, true) AS allow_dispatch, health_status,
+              last_message_sent_at
+       FROM instances
+       WHERE id IN (1, 2)
+       ORDER BY id`
+    );
+
+    const instances = [];
+    for (const inst of instRows.rows) {
+      const base = process.env.EVOLUTION_API_URL || inst.api_url;
+      const key = process.env.EVOLUTION_API_KEY || inst.api_key;
+      let state: string | null = null;
+      let http: number | null = null;
+      let error: string | null = null;
+      try {
+        const r = await axios.get(`${base}/instance/connectionState/${inst.instance_name}`, {
+          headers: { apikey: key },
+          timeout: 12_000,
+          validateStatus: () => true,
+        });
+        http = r.status;
+        state = r.data?.instance?.state || r.data?.state || r.data?.status || null;
+      } catch (e: any) {
+        error = e?.message || String(e);
+      }
+      instances.push({
+        id: inst.id,
+        instance_name: inst.instance_name,
+        db_status: inst.status,
+        allow_dispatch: inst.allow_dispatch,
+        health_status: inst.health_status,
+        phone_number: inst.phone_number ? maskPhone(inst.phone_number) : null,
+        last_message_sent_at: inst.last_message_sent_at,
+        connection_http: http,
+        connection_state: state,
+        connection_error: error,
+      });
+    }
+
+    const fakeIds = dispatches.flatMap((d) =>
+      (d.items || [])
+        .filter((i: any) => i.id_class === 'FAKE_EVO_TIMESTAMP' || i.id_class === 'FAKE_TEMP')
+        .map((i: any) => ({ dispatch_id: d.id, item_id: i.id, provider_message_id: i.provider_message_id }))
+    );
+
+    const inst1 = instances.find((i) => i.id === 1);
+    const recommendation = {
+      summary:
+        fakeIds.length > 0
+          ? 'Há provider_message_id falso (evo-/temp-) — falso positivo pré-f532eec.'
+          : 'Ids reais: se #21 não entregou e #22 entregou, o problema é a sessão da instância 1 (não o protocolo sendText).',
+      operational:
+        'Até confirmar a sessão da instância 1: desligue allow_dispatch nela (Instâncias) e use 2+ no teste solo / pool real.',
+      set_allow_dispatch_false_for_instance_1:
+        inst1 && inst1.allow_dispatch !== false
+          ? 'PUT /api/instances/1 { "allow_dispatch": false }'
+          : 'Instância 1 já está fora do pool (allow_dispatch=false) ou inexistente.',
+    };
+
+    res.json({ dispatches, instances, fake_provider_ids: fakeIds, recommendation });
+  } catch (error: any) {
+    console.error('❌ Erro no diagnóstico de disparos:', error);
+    res.status(500).json({ error: 'Erro no diagnóstico', message: error?.message || String(error) });
+  }
+});
 
 /**
  * Listar disparos

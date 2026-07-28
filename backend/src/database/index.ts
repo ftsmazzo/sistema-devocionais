@@ -108,7 +108,12 @@ export async function initializeDatabase() {
       ADD COLUMN IF NOT EXISTS health_status VARCHAR(50) DEFAULT 'healthy',
       ADD COLUMN IF NOT EXISTS health_checked_at TIMESTAMP,
       ADD COLUMN IF NOT EXISTS profile_picture_url TEXT,
-      ADD COLUMN IF NOT EXISTS profile_picture_updated_at TIMESTAMP
+      ADD COLUMN IF NOT EXISTS profile_picture_updated_at TIMESTAMP,
+      ADD COLUMN IF NOT EXISTS allow_dispatch BOOLEAN DEFAULT true
+    `);
+
+    await client.query(`
+      UPDATE instances SET allow_dispatch = true WHERE allow_dispatch IS NULL
     `);
 
     // Criar tabela de mensagens

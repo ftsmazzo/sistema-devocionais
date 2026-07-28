@@ -55,7 +55,9 @@ router.get('/', async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT id, name, instance_name, status, phone_number, qr_code, last_connection, created_at, updated_at,
-              profile_picture_url, profile_picture_updated_at
+              profile_picture_url, profile_picture_updated_at,
+              COALESCE(allow_dispatch, true) AS allow_dispatch,
+              health_status
        FROM instances 
        ORDER BY created_at DESC`
     );
@@ -72,7 +74,9 @@ router.get('/:id', async (req, res) => {
     const { id } = req.params;
     const result = await pool.query(
       `SELECT id, name, instance_name, status, phone_number, qr_code, last_connection, created_at, updated_at,
-              profile_picture_url, profile_picture_updated_at
+              profile_picture_url, profile_picture_updated_at,
+              COALESCE(allow_dispatch, true) AS allow_dispatch,
+              health_status
        FROM instances WHERE id = $1`,
       [id]
     );
@@ -143,17 +147,26 @@ router.post('/', async (req, res) => {
 router.put('/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, instance_name } = req.body;
+    const { name, instance_name, allow_dispatch } = req.body;
 
     const result = await pool.query(
       `UPDATE instances 
        SET name = COALESCE($1, name),
            instance_name = COALESCE($2, instance_name),
+           allow_dispatch = CASE
+             WHEN $4::boolean IS NULL THEN allow_dispatch
+             ELSE $4::boolean
+           END,
            updated_at = CURRENT_TIMESTAMP
        WHERE id = $3
        RETURNING id, name, instance_name, status, phone_number, qr_code, last_connection, created_at, updated_at,
-                 profile_picture_url, profile_picture_updated_at`,
-      [name, instance_name, id]
+                 profile_picture_url, profile_picture_updated_at, allow_dispatch, health_status`,
+      [
+        name,
+        instance_name,
+        id,
+        typeof allow_dispatch === 'boolean' ? allow_dispatch : null,
+      ]
     );
 
     if (result.rows.length === 0) {
