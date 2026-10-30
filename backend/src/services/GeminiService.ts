@@ -1,78 +1,111 @@
 import axios from 'axios';
 import { addLog } from '../routes/logs';
 
-export interface GeminiResponse {
-  candidates: {
-    content: {
-      parts: {
-        text: string;
-      }[];
+export interface OpenRouterChatResponse {
+  choices?: {
+    message?: {
+      content?: string | Array<{ type?: string; text?: string }>;
     };
   }[];
+  error?: {
+    message?: string;
+  };
 }
 
+/** Mapeia o nome interno (UI/banco) para o slug do OpenRouter. */
+export function toOpenRouterModel(model: string): string {
+  const m = (model || '').trim();
+  if (!m) return 'google/gemini-2.5-flash';
+  if (m.includes('/')) return m;
+  const bare = m.startsWith('models/') ? m.slice('models/'.length) : m;
+  if (bare.startsWith('gemini-')) return `google/${bare}`;
+  return bare;
+}
+
+function extractMessageText(content: OpenRouterChatResponse['choices']): string {
+  const raw = content?.[0]?.message?.content;
+  if (typeof raw === 'string') return raw;
+  if (Array.isArray(raw)) {
+    return raw
+      .map((part) => (typeof part?.text === 'string' ? part.text : ''))
+      .join('')
+      .trim();
+  }
+  return '';
+}
+
+/**
+ * Cliente de geração via OpenRouter (API compatível com OpenAI).
+ * Mantém o nome GeminiService por compatibilidade com o gerador de devocionais;
+ * os modelos continuam sendo Gemini (ex.: google/gemini-2.5-flash).
+ */
 export class GeminiService {
   private apiKey: string;
   private model: string;
 
   constructor(apiKey: string, model: string = 'gemini-2.5-flash') {
     this.apiKey = apiKey;
-    this.model = model;
+    this.model = toOpenRouterModel(model);
+  }
+
+  private headers() {
+    return {
+      Authorization: `Bearer ${this.apiKey.trim()}`,
+      'Content-Type': 'application/json',
+      'HTTP-Referer': process.env.WEBHOOK_BASE_URL || 'https://devocional.ia.ia.nom.br',
+      'X-Title': 'Devocionais ImobMIQ',
+    };
   }
 
   /**
-   * Gera conteúdo estruturado (JSON) usando o Gemini
+   * Gera conteúdo estruturado (JSON) via OpenRouter
    */
   async generateStructuredContent<T>(prompt: string, schema?: any): Promise<T> {
     try {
-      const modelName = this.model.startsWith('models/') ? this.model : `models/${this.model}`;
-      const keyQ = encodeURIComponent(this.apiKey.trim());
-      const url = `https://generativelanguage.googleapis.com/v1beta/${modelName}:generateContent?key=${keyQ}`;
-      
-      const response = await axios.post<GeminiResponse>(
-        url,
+      const fullPrompt =
+        prompt +
+        (schema
+          ? '\n\nSua resposta deve ser estritamente um JSON válido seguindo este formato:\n' +
+            JSON.stringify(schema, null, 2)
+          : '\n\nResponda apenas com o JSON bruto, sem blocos de código markdown.');
+
+      const response = await axios.post<OpenRouterChatResponse>(
+        'https://openrouter.ai/api/v1/chat/completions',
         {
-          contents: [
-            {
-              parts: [
-                {
-                  text: prompt + (schema ? '\n\nSua resposta deve ser estritamente um JSON válido seguindo este formato:\n' + JSON.stringify(schema, null, 2) : '\n\nResponda apenas com o JSON bruto, sem blocos de código markdown.')
-                }
-              ]
-            }
-          ],
-          generationConfig: {
-            temperature: 0.7,
-            topK: 40,
-            topP: 0.95,
-            maxOutputTokens: 8192
-          }
+          model: this.model,
+          temperature: 0.7,
+          top_p: 0.95,
+          max_tokens: 8192,
+          messages: [{ role: 'user', content: fullPrompt }],
+          response_format: { type: 'json_object' },
         },
-        {
-          headers: {
-            'Content-Type': 'application/json'
-          }
-        }
+        { headers: this.headers() }
       );
 
-      const text = response.data.candidates[0]?.content.parts[0]?.text;
-      if (!text) {
-        throw new Error('Nenhum conteúdo gerado pelo Gemini');
+      if (response.data.error?.message) {
+        throw new Error(response.data.error.message);
       }
 
-      // Limpar possíveis blocos de código markdown se o Gemini os incluir
+      const text = extractMessageText(response.data.choices);
+      if (!text) {
+        throw new Error('Nenhum conteúdo gerado pelo OpenRouter');
+      }
+
       const cleanJson = text.replace(/```json/g, '').replace(/```/g, '').trim();
-      
       return JSON.parse(cleanJson) as T;
     } catch (error: any) {
-      const errorMessage = error.response?.data?.error?.message || error.message;
-      addLog('error', `[Gemini] Erro na geração: ${errorMessage}`);
-      if (typeof errorMessage === 'string' && /API key/i.test(errorMessage)) {
+      const errorMessage =
+        error.response?.data?.error?.message ||
+        error.response?.data?.error ||
+        error.message;
+      const msg = typeof errorMessage === 'string' ? errorMessage : JSON.stringify(errorMessage);
+      addLog('error', `[OpenRouter] Erro na geração: ${msg}`);
+      if (/API key|auth|unauthorized|401/i.test(msg)) {
         throw new Error(
-          `${errorMessage} Confira a chave em https://aistudio.google.com/apikey — salve de novo em Jornada Bíblica (motor global) ou defina GEMINI_API_KEY no ambiente do servidor.`
+          `${msg} Confira a chave em https://openrouter.ai/settings/keys — salve de novo em Jornada Bíblica (motor global) ou defina OPENROUTER_API_KEY no ambiente do servidor.`
         );
       }
-      throw new Error(`Erro no Gemini: ${errorMessage}`);
+      throw new Error(`Erro no OpenRouter: ${msg}`);
     }
   }
 
@@ -81,31 +114,35 @@ export class GeminiService {
    */
   async generateText(prompt: string): Promise<string> {
     try {
-      const modelName = this.model.startsWith('models/') ? this.model : `models/${this.model}`;
-      const keyQ = encodeURIComponent(this.apiKey.trim());
-      const url = `https://generativelanguage.googleapis.com/v1beta/${modelName}:generateContent?key=${keyQ}`;
-      
-      const response = await axios.post<GeminiResponse>(
-        url,
+      const response = await axios.post<OpenRouterChatResponse>(
+        'https://openrouter.ai/api/v1/chat/completions',
         {
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: {
-            temperature: 0.7,
-            maxOutputTokens: 4096
-          }
-        }
+          model: this.model,
+          temperature: 0.7,
+          max_tokens: 4096,
+          messages: [{ role: 'user', content: prompt }],
+        },
+        { headers: this.headers() }
       );
 
-      return response.data.candidates[0]?.content.parts[0]?.text || '';
+      if (response.data.error?.message) {
+        throw new Error(response.data.error.message);
+      }
+
+      return extractMessageText(response.data.choices);
     } catch (error: any) {
-      const errorMessage = error.response?.data?.error?.message || error.message;
-      addLog('error', `[Gemini] Erro na geração de texto: ${errorMessage}`);
-      if (typeof errorMessage === 'string' && /API key/i.test(errorMessage)) {
+      const errorMessage =
+        error.response?.data?.error?.message ||
+        error.response?.data?.error ||
+        error.message;
+      const msg = typeof errorMessage === 'string' ? errorMessage : JSON.stringify(errorMessage);
+      addLog('error', `[OpenRouter] Erro na geração de texto: ${msg}`);
+      if (/API key|auth|unauthorized|401/i.test(msg)) {
         throw new Error(
-          `${errorMessage} Confira a chave em https://aistudio.google.com/apikey — salve de novo em Jornada Bíblica ou defina GEMINI_API_KEY no servidor.`
+          `${msg} Confira a chave em https://openrouter.ai/settings/keys — salve de novo em Jornada Bíblica ou defina OPENROUTER_API_KEY no servidor.`
         );
       }
-      throw new Error(`Erro no Gemini: ${errorMessage}`);
+      throw new Error(`Erro no OpenRouter: ${msg}`);
     }
   }
 }

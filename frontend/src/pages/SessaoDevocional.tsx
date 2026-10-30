@@ -22,7 +22,7 @@ import {
   CalendarRange,
 } from 'lucide-react';
 
-/** Só o que é realmente global para o motor de IA (Gemini). */
+/** Só o que é realmente global para o motor de IA (OpenRouter / Gemini). */
 interface GlobalAIConfig {
   gemini_api_key: string;
   model_name: string;
@@ -368,7 +368,7 @@ export default function SessaoDevocional() {
           <div>
             <h1 style={{ fontSize: '2rem', fontWeight: 800, color: 'var(--text-primary)', margin: 0, fontFamily: 'Outfit' }}>Jornada Bíblica</h1>
             <p style={{ margin: '6px 0 0', fontSize: '0.88rem', color: 'var(--text-secondary)', maxWidth: 640, lineHeight: 1.45 }}>
-              Motor global (Gemini) e jornadas por período. A jornada <strong>ativa</strong> segue o calendário: ao abrir esta página, ao gerar texto ou no horário do disparo, o sistema escolhe a jornada cujo intervalo contém aquela data.
+              Motor global (OpenRouter + Gemini) e jornadas por período. A jornada <strong>ativa</strong> segue o calendário: ao abrir esta página, ao gerar texto ou no horário do disparo, o sistema escolhe a jornada cujo intervalo contém aquela data.
             </p>
           </div>
         </div>
@@ -384,7 +384,7 @@ export default function SessaoDevocional() {
               <h2 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 800, color: 'var(--text-primary)' }}>Motor de IA (global)</h2>
             </div>
             <p className="input-hint" style={{ marginBottom: 20 }}>
-              Aqui fica só o que vale para <strong>todo</strong> o sistema: credencial Gemini, modelo e limite de caracteres. Tom, tema e texto ficam em cada jornada.
+              Aqui fica só o que vale para <strong>todo</strong> o sistema: credencial OpenRouter, modelo Gemini e limite de caracteres. Tom, tema e texto ficam em cada jornada.
             </p>
             <form onSubmit={handleSaveGlobal}>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18, marginBottom: 18 }}>
@@ -395,8 +395,8 @@ export default function SessaoDevocional() {
                     onChange={(e) => setGlobalCfg({ ...globalCfg, model_name: e.target.value })}
                     className="input-dark"
                   >
-                    <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
-                    <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
+                    <option value="gemini-2.5-flash">Gemini 2.5 Flash (via OpenRouter)</option>
+                    <option value="gemini-2.5-pro">Gemini 2.5 Pro (via OpenRouter)</option>
                   </select>
                 </div>
                 <div>
@@ -418,7 +418,7 @@ export default function SessaoDevocional() {
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--gold-primary)' }}>
                     <Key size={18} />
-                    <span style={{ fontWeight: 700, fontSize: '0.88rem' }}>API Key do Gemini</span>
+                    <span style={{ fontWeight: 700, fontSize: '0.88rem' }}>API Key do OpenRouter</span>
                   </div>
                   {globalCfg.gemini_api_key === '********' && (
                     <span style={{ fontSize: '0.62rem', background: 'rgba(16,185,129,0.12)', color: '#10b981', padding: '2px 8px', borderRadius: 10, fontWeight: 700 }}>
@@ -431,10 +431,10 @@ export default function SessaoDevocional() {
                   value={globalCfg.gemini_api_key}
                   onChange={(e) => setGlobalCfg({ ...globalCfg, gemini_api_key: e.target.value })}
                   className="input-dark"
-                  placeholder="Cole uma chave nova para substituir a salva"
+                  placeholder="Cole a chave sk-or-v1-... (ou use OPENROUTER_API_KEY no servidor)"
                 />
                 <p style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: 8 }}>
-                  Deixe em branco ou mantenha <strong>********</strong> para não alterar a chave já gravada. Ou defina <code style={{ fontSize: '0.65rem' }}>GEMINI_API_KEY</code> no servidor.
+                  Deixe em branco ou mantenha <strong>********</strong> para não alterar a chave já gravada. Em produção, prefira <code style={{ fontSize: '0.65rem' }}>OPENROUTER_API_KEY</code> no EasyPanel.
                 </p>
               </div>
               <button

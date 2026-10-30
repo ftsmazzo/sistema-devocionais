@@ -504,12 +504,12 @@ router.get('/ai-config', authenticateToken, async (req: AuthRequest, res) => {
     // Não retornar a API Key por segurança
     const config = result.rows[0];
     const hasDbKey = !!config.gemini_api_key;
-    const hasEnvKey = !!process.env.GEMINI_API_KEY;
+    const hasEnvKey = !!(process.env.OPENROUTER_API_KEY || process.env.GEMINI_API_KEY);
 
     res.json({
       config: {
         ...config,
-        gemini_api_key: hasDbKey ? '********' : null,
+        gemini_api_key: hasDbKey || hasEnvKey ? '********' : null,
         has_server_key: hasEnvKey
       }
     });

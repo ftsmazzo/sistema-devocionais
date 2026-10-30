@@ -1,6 +1,6 @@
 # Sistema Devocional Diário + Evolution API
 
-Sistema web para **Evolution API** (WhatsApp), disparos, blindagens, contatos e **devocionais diários** com geração interna (Gemini) e disparo agendado no backend.
+Sistema web para **Evolution API** (WhatsApp), disparos, blindagens, contatos e **devocionais diários** com geração interna (OpenRouter → Gemini) e disparo agendado no backend.
 
 ## Documentação de devocional / IA
 
@@ -10,9 +10,9 @@ Sistema web para **Evolution API** (WhatsApp), disparos, blindagens, contatos e 
 
 - Interface React (Vite + TypeScript) e API Express + PostgreSQL
 - Instâncias Evolution, listas, tags, disparos (marketing e devocional)
-- **Jornada Bíblica**: motor Gemini global, múltiplas jornadas, geração por data e devocional gravado em `devocionais`
+- **Jornada Bíblica**: motor OpenRouter (modelos Gemini) global, múltiplas jornadas, geração por data e devocional gravado em `devocionais`
 - Configuração de horário de envio do devocional e lista alvo (**Config. Devocional**)
-- Autenticação JWT; chave Gemini no banco ou `GEMINI_API_KEY`
+- Autenticação JWT; chave OpenRouter no banco ou `OPENROUTER_API_KEY`
 
 ### Segurança (devocional)
 
@@ -119,7 +119,7 @@ PORT=3001
 DATABASE_URL=postgresql://user:pass@localhost:5432/dbname
 JWT_SECRET=sua-chave-secreta
 JWT_EXPIRES_IN=7d
-GEMINI_API_KEY=
+OPENROUTER_API_KEY=
 DEVOCIONAL_WEBHOOK_SECRET=altere-em-producao
 ADMIN_NOME=
 EXTERNAL_WEBHOOK_PROFILE_PICTURE_URL=

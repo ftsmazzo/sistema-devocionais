@@ -1,15 +1,15 @@
 # Devocional e IA — Guia atual (sem N8N)
 
-Este documento descreve o fluxo **oficial** de devocionais no sistema: geração interna com **Google Gemini**, **jornadas** no banco e disparo pelo **cron** do backend. O fluxo legado em N8N foi descontinuado no repositório; não há dependência de workflow externo para o texto do dia.
+Este documento descreve o fluxo **oficial** de devocionais no sistema: geração interna via **OpenRouter** (modelos **Google Gemini**), **jornadas** no banco e disparo pelo **cron** do backend. O fluxo legado em N8N foi descontinuado no repositório; não há dependência de workflow externo para o texto do dia.
 
 ## Visão geral
 
 | Etapa | Onde | O quê |
 |--------|------|--------|
 | Conteúdo | Tabela `devocionais` | Texto, título, data, versículos (JSON), metadata |
-| Geração principal | UI **Jornada Bíblica** (`/devocional/criativo`) | `POST /api/devocional/generate` → `DevocionalGenerator` (Gemini) |
+| Geração principal | UI **Jornada Bíblica** (`/devocional/criativo`) | `POST /api/devocional/generate` → `DevocionalGenerator` (OpenRouter → Gemini) |
 | Jornadas | Tabela `devocional_journeys` | Tema, descrição, tom, período, `is_active`; uma jornada ativa por vez |
-| Motor global | Tabela `devocional_ai_config` | API Key (ou `GEMINI_API_KEY` no servidor), modelo, `character_limit` |
+| Motor global | Tabela `devocional_ai_config` | API Key (ou `OPENROUTER_API_KEY` no servidor), modelo Gemini, `character_limit` |
 | Ingestão opcional | `POST /api/devocional/webhook` | Grava/atualiza devocional por data (ver segurança abaixo) |
 | Disparo WhatsApp | Cron + `devocional_config` | Horário e lista em **Config. Devocional** |
 
@@ -17,7 +17,7 @@ Este documento descreve o fluxo **oficial** de devocionais no sistema: geração
 
 | Variável | Uso |
 |----------|-----|
-| `GEMINI_API_KEY` | Chave Gemini se não houver chave salva no banco |
+| `OPENROUTER_API_KEY` | Chave OpenRouter (modelos Gemini via OpenRouter) |
 | `DEVOCIONAL_WEBHOOK_SECRET` | Valor esperado no header `x-webhook-secret` na rota de ingestão HTTP (**obrigatório alterar em produção**; o repositório contém default apenas para desenvolvimento legado) |
 | `ADMIN_NOME` ou `ADMIN_NAME` | Nome exibido no rodapé do painel (`GET /api/auth/branding`) |
 | `EXTERNAL_WEBHOOK_PROFILE_PICTURE_URL` | Webhook opcional após atualizar foto de perfil da instância (prioridade sobre o nome legado abaixo) |

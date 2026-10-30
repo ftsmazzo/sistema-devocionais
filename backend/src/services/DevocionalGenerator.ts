@@ -51,12 +51,15 @@ function rowDateToYmd(v: unknown): string | null {
   return null;
 }
 
-/** Chave real do Gemini: ignora placeholder do front e espaços; senão usa env. */
-function resolveGeminiApiKey(dbRaw: unknown, envRaw: string | undefined): string | null {
+/**
+ * Chave OpenRouter: prioriza env do servidor (produção), depois chave salva no banco.
+ * Ignora placeholder do front e espaços.
+ */
+function resolveOpenRouterApiKey(dbRaw: unknown, envRaw: string | undefined): string | null {
   const env = typeof envRaw === 'string' ? envRaw.trim() : '';
   const db = typeof dbRaw === 'string' ? dbRaw.trim() : '';
-  if (db && db !== '********') return db;
   if (env) return env;
+  if (db && db !== '********') return db;
   return null;
 }
 
@@ -135,11 +138,14 @@ export class DevocionalGenerator {
         effective.is_first_devocional_of_journey = prior.rows[0].c === 0;
       }
 
-      const apiKey = resolveGeminiApiKey(row.gemini_api_key, process.env.GEMINI_API_KEY);
+      const apiKey = resolveOpenRouterApiKey(
+        row.gemini_api_key,
+        process.env.OPENROUTER_API_KEY || process.env.GEMINI_API_KEY
+      );
 
       if (!apiKey) {
         throw new Error(
-          'Chave do Gemini não configurada. Informe a API key em Jornada Bíblica (motor global) ou defina GEMINI_API_KEY no servidor.'
+          'Chave do OpenRouter não configurada. Informe a API key em Jornada Bíblica (motor global) ou defina OPENROUTER_API_KEY no servidor.'
         );
       }
 
