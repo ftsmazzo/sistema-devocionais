@@ -445,6 +445,24 @@ export async function updateWorkerDispatchConfig(
 
   const { policy } = applyEnvOverrides(mapRow(upd.rows[0]));
   cache = policy;
+
+  // Ao sair da simulação, libera itens que ficaram com backoff de 24h do DRY_RUN.
+  const leftDryRun =
+    (!!current.dry_run_enabled || !current.real_send_enabled) &&
+    !!policy.real_send_enabled &&
+    !policy.dry_run_enabled;
+  if (leftDryRun) {
+    await pool.query(
+      `UPDATE dispatch_items
+       SET next_retry_at = NULL,
+           error_message = NULL,
+           error_category = NULL,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE error_category = 'dry_run'
+         AND status IN ('pending', 'pending_retry')`
+    );
+  }
+
   return policy;
 }
 
